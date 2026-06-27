@@ -1,0 +1,3088 @@
+/* 桌面端（Obsidian 桌面）记账面板统一宽度：全屏页 / 详情抽屉 / 居中子弹窗都引用此变量，
+   调整桌面端面板宽度只改这一处。移动端不受影响（铺满视口）。 */
+:root {
+  --accounting-panel-width: 50vh;
+}
+
+/* ============================================================================
+   控件样式统一基座（移动端 Obsidian 插件）
+   所有原生控件（button/input/select/textarea）一律走自定义样式，彻底压过 Obsidian 默认
+   塑形（胶囊 border-radius + corner-shape:squircle），并用令牌统一尺寸/圆角/焦点；
+   各页布局差异化由各自 modifier 类承担（原语层统一，组合层个性化）。
+   每个插件 modal 的 .modal 必带 .accounting-fullscreen / .accounting-sub-modal /
+   .accounting-detail-sheet 三者之一，故 :is(...) 作用域 100% 覆盖所有插件 UI。
+   ========================================================================= */
+
+/* A1. 根级接管——对所有控件打掉 Obsidian 默认塑形的第一道闸：字体归一。
+   不在此设 box-sizing / margin：部分按钮按 content-box 配 vertical padding（强改 border-box 会缩高度回归触控）、
+   部分控件靠 margin:auto 居中/靠右（强设 margin:0 会压过其单类规则 (0,1,0) 致错位）。
+   各输入类已各自声明 box-sizing:border-box；需归一 margin 的控件自行声明。 */
+:is(.accounting-fullscreen, .accounting-sub-modal, .accounting-detail-sheet) :is(button, input, select, textarea) {
+  font-family: inherit;
+}
+
+/* A2. 第二道闸：去原生 chrome（appearance:none）+ 反胶囊（corner-shape:round）。
+   仅作用于「文本类」控件——checkbox/radio 保留原生外观（去 appearance 否则勾选标记消失），
+   由下方 .accounting-checkbox 单独用 accent-color 着色。特异性 (0,1,1) 与 Obsidian 的
+   input[type] (0,1,1) 持平，插件样式表后加载故胜出；带 modal 前缀的类规则 (0,2,0) 再稳赢。
+   :is() 需 iOS 14+ WKWebView（Obsidian 最低要求）。 */
+:is(.accounting-fullscreen, .accounting-sub-modal, .accounting-detail-sheet) :is(button, input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+  -webkit-appearance: none;
+  appearance: none;
+  corner-shape: round;
+}
+
+/* B. 轻量设计令牌：尺寸/圆角/焦点走自定义属性，颜色仍用 Obsidian 主题变量（深浅自适应）。
+   高度以移动端触控为准、不照搬桌面像素——标准档 36px（≈.accounting-input min-height + 移动全屏
+   筛选控件），紧凑档 30px（密集列表/工具条小按钮）。 */
+:is(.accounting-fullscreen, .accounting-sub-modal, .accounting-detail-sheet) {
+  --ac-control-h: 36px;
+  --ac-control-h-compact: 30px;
+  --ac-radius-input: 6px;
+  --ac-radius-btn: 8px;
+  --ac-focus-ring: 0 0 0 3px rgba(16, 185, 129, 0.24);
+  --ac-focus-ring: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 35%, transparent);
+}
+
+/* 全局焦点环：插件内任意控件获键盘焦点时统一 accent 光晕（移动端触屏不触发 :focus-visible，
+   故不会干扰触控）。特异性 (0,2,1) 稳定生效。 */
+:is(.accounting-fullscreen, .accounting-sub-modal, .accounting-detail-sheet) :is(button, input, select, textarea):focus-visible {
+  outline: none;
+  box-shadow: var(--ac-focus-ring);
+}
+
+/* 记一笔表单：flex 列布局，字段区内部滚动，按钮固定底部 */
+.accounting-entry-modal {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  width: 100%;
+  max-height: min(88vh, 640px);
+  margin: 0 auto;
+  padding: 40px 16px;
+  overflow-y: auto;
+}
+
+/* 顶部当前账本别名胶囊：accent 圆点 + 别名，居中、随明暗主题 */
+.accounting-entry-ledger {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 80%;
+  margin-bottom: 20px;
+  padding: 5px 14px 5px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-weight: 500;
+}
+
+.accounting-entry-ledger::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+}
+
+.accounting-entry-ledger-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accounting-entry-ledger-clickable {
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+@media (hover: hover) {
+  .accounting-entry-ledger-clickable:hover {
+    background: var(--background-modifier-hover);
+    border-color: var(--interactive-accent);
+  }
+}
+
+.accounting-entry-ledger-caret {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+/* 记一笔顶部账本切换浮层（复用设置页 .accounting-ledger-* 列表样式） */
+.modal.accounting-ledger-switch-modal {
+  width: min(360px, 92vw);
+  max-width: min(360px, 92vw);
+}
+
+.accounting-ledger-switch-modal h2 {
+  margin: 0 0 12px;
+  font-size: var(--font-ui-medium);
+}
+
+.accounting-ledger-pickable {
+  cursor: pointer;
+}
+
+.accounting-ledger-chevron {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-size: var(--font-ui-medium);
+  line-height: 1;
+}
+
+.accounting-entry-type {
+  flex: 0 0 auto;
+  /* 绿色淡底卡片：呼应流水筛选区（.accounting-filter-box）的视觉语言。
+     先写实色 fallback（iOS WKWebView 可能不认 color-mix，退化为次级底色），
+     再叠一层 ~10% 绿色调，亮/暗主题自适应。 */
+  background: var(--background-secondary);
+  background: color-mix(in srgb, var(--color-green) 10%, var(--background-secondary));
+  padding: 8px 10px;
+  border-radius: 10px;
+  margin-bottom: 32px;
+}
+
+.accounting-entry-type-row {
+  display: flex;
+  gap: 6px;
+}
+
+.accounting-entry-type-btn {
+  flex: 1 1 0;
+  padding: 8px 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-input);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  min-height: var(--ac-control-h);
+}
+
+@media (hover: hover) {
+  .accounting-entry-type-btn:hover {
+    background: var(--background-modifier-hover);
+  }
+}
+
+.accounting-entry-type-active {
+  background: var(--interactive-accent) !important;
+  color: var(--text-on-accent) !important;
+  border-color: var(--interactive-accent) !important;
+  font-weight: 600;
+}
+
+.accounting-entry-mini-btn.accounting-entry-toggle-active {
+  background: var(--interactive-accent) !important;
+  color: var(--text-on-accent) !important;
+  border-color: var(--interactive-accent) !important;
+}
+
+.accounting-entry-fields {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0 auto;
+  padding: 2px 0;
+  width: 100%;
+}
+
+.accounting-entry-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.accounting-entry-row:last-child {
+  margin-bottom: 0;
+}
+
+.accounting-entry-label {
+  flex: 0 0 64px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  line-height: 1;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 中和 Obsidian 对原生 <input> 的全局覆盖：app.css 用 input[type='date']/[type='text']/… 属性选择器
+   （特异性 0,1,1）统一给表单字段套 border-radius:var(--input-radius) + corner-shape:squircle（超椭圆胶囊感），
+   高于本处单 class（0,1,0），会把金额/时间/规则名等 <input> 画成胶囊，而 select/textarea 不受影响。
+   故加 .accounting-entry-modal 前缀抬到 (0,2,0) 干净胜出，并显式 corner-shape:round 去胶囊。 */
+.accounting-entry-modal .accounting-entry-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--ac-control-h);
+  padding: 0 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-input);
+  corner-shape: round;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.accounting-entry-modal select.accounting-entry-input {
+  height: var(--ac-control-h);
+  padding: 0 4px;
+}
+
+.accounting-checkbox,
+.accounting-entry-checkbox {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--interactive-accent);
+  vertical-align: middle;
+}
+
+.accounting-entry-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.accounting-entry-from-note {
+  margin-top: 4px;
+  text-align: right;
+  font-size: var(--font-ui-smaller);
+  color: #10b981;
+  line-height: 1.4;
+}
+
+.accounting-entry-control-group {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.accounting-entry-control-group .accounting-entry-input {
+  flex: 1 1 auto;
+}
+
+.accounting-entry-mini-btn {
+  flex: 0 0 auto;
+  height: var(--ac-control-h-compact);
+  padding: 0 12px;
+  white-space: nowrap;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-input);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .accounting-entry-mini-btn:hover {
+    background: var(--background-modifier-hover);
+  }
+}
+
+.accounting-entry-error-slot {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.accounting-entry-footer {
+  flex: 0 0 auto;
+  padding-top: 10px;
+}
+
+.accounting-entry-textarea {
+  width: 100%;
+  min-height: 48px;
+  resize: none;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
+.accounting-entry-submit {
+  width: 120px;
+  height: 40px;
+  border: none;
+  border-radius: 8px;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: var(--font-ui-normal);
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 12px;
+  margin-left: auto;
+  margin-right: auto;
+  display: block;
+}
+
+@media (hover: hover) {
+  .accounting-entry-submit:hover {
+    filter: brightness(1.06);
+  }
+}
+
+.accounting-error {
+  color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+  margin-top: 6px;
+}
+
+/* 金额计算器键盘（移动端，替代 iOS 系统数字键盘）。
+   金额框 readonly 抑制系统键盘，由本网格驱动表达式；提交边界求值。布局与桌面端一致。
+   .accounting-amount-stack 是输入位（含输入框 + 定位锚点）；计算器绝对定位浮于下方各行之上，
+   不挤压布局（与桌面端 calc-keypad 浮层体验一致），宽=输入框宽、左缘与下方各行对齐。 */
+.accounting-amount-stack {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.accounting-amount-display {
+  font-size: var(--font-ui-medium);
+  font-weight: 600;
+  text-align: right;
+}
+
+/* 「完成」校验失败：金额框红闪（entryModal 用定时器切换此类；不用 CSS 动画——WKWebView 上 input 动画不可靠）。
+   !important 压过 Obsidian 输入框默认样式；rgba 不依赖 color-mix（WKWebView 多不支持）。 */
+.accounting-amount-error {
+  border-color: var(--text-error) !important;
+  background: rgba(255, 59, 48, 0.12) !important;
+  box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.4) !important;
+}
+
+.accounting-calc-preview-error {
+  color: var(--text-error);
+  font-weight: 600;
+}
+
+.accounting-calc-host {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  z-index: 20;
+  margin-top: 8px;
+  padding: 6px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.accounting-calc-preview {
+  min-height: 24px;
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  text-align: right;
+}
+
+.accounting-calc-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.accounting-calc-key {
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-medium);
+  cursor: pointer;
+}
+
+.accounting-calc-key--util {
+  color: var(--text-muted);
+}
+
+.accounting-calc-key--op {
+  font-weight: 600;
+}
+
+.accounting-calc-key--eq {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+/* hover 仅桌面指针设备；触屏（iOS WebView）:hover 会粘住，包进 @media (hover:hover)。 */
+@media (hover: hover) {
+  .accounting-calc-key:hover {
+    background: var(--background-modifier-hover);
+  }
+
+  .accounting-calc-key--eq:hover {
+    filter: brightness(1.06);
+  }
+}
+
+.accounting-balance-modal {
+  max-width: 800px;
+}
+
+.accounting-nw-hero {
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  border: 1px solid var(--background-modifier-border);
+  /* 兜底：color-mix / 自定义主题缺 --color-cyan 等变量时降级为次级背景 */
+  background: var(--background-secondary);
+  /* 翡翠→青绿渐变，把主题强调色混进次级背景：随明/暗主题自适应，比下方 group-head 更浓以突出英雄地位。
+     color-mix 不可用时由上一行兜底（与 .accounting-group-head 同源的渐进增强写法）。 */
+  background: linear-gradient(135deg,
+      color-mix(in srgb, var(--color-green) 32%, var(--background-secondary)),
+      color-mix(in srgb, var(--color-cyan) 24%, var(--background-secondary)));
+}
+
+/* 净资产为负：切玫红→粉渐变，起预警；同样随主题自适应。 */
+.accounting-nw-hero--neg {
+  background: var(--background-secondary);
+  background: linear-gradient(135deg,
+      color-mix(in srgb, var(--color-red) 32%, var(--background-secondary)),
+      color-mix(in srgb, var(--color-pink) 24%, var(--background-secondary)));
+}
+
+.accounting-nw-hero-label {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.accounting-nw-hero-value {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.15;
+  margin-top: 2px;
+  color: var(--text-normal);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accounting-nw-hero-sub {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.accounting-nw-hero-cell {
+  min-width: 0;
+}
+
+.accounting-nw-hero-cell--last {
+  border-left: 1px solid var(--background-modifier-border);
+  padding-left: 12px;
+}
+
+.accounting-nw-hero-cell-label {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.accounting-nw-hero-cell-value {
+  font-size: var(--font-ui-medium);
+  font-weight: 600;
+  margin-top: 2px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accounting-nw-hero-asset {
+  color: var(--color-green);
+}
+
+.accounting-nw-hero-liab {
+  color: var(--color-red);
+}
+
+.accounting-summary {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.accounting-group {
+  margin-bottom: 10px;
+}
+
+.accounting-group-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  color: var(--text-normal);
+  /* 浅绿底色：color-mix 把主题 --color-green 混进次级背景，与下方账户行拉开区分；随明/暗主题自适应。
+     前一行 --background-secondary 为兜底（color-mix 不可用时降级为原中性底）。 */
+  background: var(--background-secondary);
+  background: color-mix(in srgb, var(--color-green) 15%, var(--background-secondary));
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  margin-bottom: 2px;
+}
+
+.accounting-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 4px;
+  font-size: var(--font-ui-small);
+}
+
+.accounting-row-name {
+  cursor: pointer;
+}
+
+.accounting-row-amount {
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .accounting-row-name:hover {
+    color: var(--interactive-accent);
+  }
+
+  .accounting-row-amount:hover {
+    color: var(--interactive-accent);
+  }
+}
+
+.accounting-muted {
+  color: var(--text-faint);
+  margin-left: 4px;
+}
+
+.accounting-hidden {
+  margin-top: 12px;
+}
+
+.accounting-empty {
+  color: var(--text-muted);
+  padding: 24px;
+  text-align: center;
+}
+
+/* 流水列表弹窗样式 */
+.accounting-transaction-modal {
+  max-width: 800px;
+}
+
+/* 流水筛选区：grid 对齐骨架 + token 化 + 激活态文字恒定（refined minimalism，融入 Obsidian 原生）。
+   ① grid 两列让 label/控件三行严格成线，根除 flex 行内 label 不成列的参差；
+   ② 控件统一引用 --acc-* token；③ 激活态纯视觉、文字恒定，消除按钮宽度跳动；
+   ④ container query 在窄面板自动改为栈式，避免换行参差。 */
+.accounting-filter-box {
+  /* token 内聚在筛选盒自身（不依赖 .accounting-app 外层作用域），后代控件统一引用。 */
+  --acc-ctrl-h: 30px;
+  --acc-gap: 6px;
+  --acc-row-gap: 10px;
+  /* 绿色淡底卡片：先写实色 fallback（iOS WKWebView 可能不认 color-mix，退化为次级底色而非透明），
+     再叠一层 ~10% 绿色调，亮/暗主题自适应；绿色呼应应用「绿=正向」语义。
+     去掉原 border-bottom 分隔线——圆角卡片自身已与下方流水列表分离。 */
+  background: var(--background-secondary);
+  background: color-mix(in srgb, var(--color-green) 10%, var(--background-secondary));
+  padding: 2px 12px 6px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  container-type: inline-size;
+}
+
+.accounting-filter-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: var(--acc-gap);
+  margin-bottom: var(--acc-row-gap);
+}
+
+.accounting-filter-row:last-child {
+  margin-bottom: 6px;
+}
+
+.accounting-filter-label {
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  color: var(--text-muted);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.accounting-filter-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--acc-gap);
+  min-width: 0;
+}
+
+/* 控件基线：用直接子选择器（> button）排除清除按钮，统一高度/边框/圆角/字号。 */
+.accounting-filter-controls>button,
+.accounting-filter-quick-btn,
+.accounting-filter-row select.accounting-filter-account-select,
+.accounting-search-input {
+  height: var(--acc-ctrl-h);
+  box-sizing: border-box;
+  padding: 0 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-input);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+/* 流水搜索框是 <input>，Obsidian 的 input[type] 覆盖 (0,1,1) 压过上方控件基线 (0,1,0)，
+   偷走 border/背景/圆角；用 .accounting-transaction-modal 前缀抬到 (0,2,0) 还原矩形（高度仍沿用基线）。 */
+.accounting-transaction-modal .accounting-search-input {
+  box-sizing: border-box;
+  padding: 0 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-input);
+  corner-shape: round;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.2;
+}
+
+@media (hover: hover) {
+  .accounting-filter-controls>button:hover,
+  .accounting-filter-quick-btn:hover {
+    background: var(--background-modifier-hover);
+  }
+}
+
+/* 日期范围组合框：两个日期框紧贴，边框自然分隔。 */
+.accounting-date-range-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.accounting-date-range-wrap input[type="date"] {
+  width: 120px;
+  max-width: 120px;
+  min-width: 0;
+  padding: 0 2px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  corner-shape: round;
+  background: var(--background-primary);
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* 类型按钮等宽：配合「激活不改文字」，消除跳动。 */
+.accounting-filter-type-btn {
+  min-width: 52px;
+}
+
+.accounting-filter-btn-active {
+  background: var(--interactive-accent) !important;
+  color: var(--text-on-accent) !important;
+  border-color: var(--interactive-accent) !important;
+}
+
+.accounting-filter-row select.accounting-filter-account-select {
+  flex: 1;
+  min-width: 110px;
+  max-width: 160px;
+  padding: 0 6px;
+}
+
+.accounting-search-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.accounting-search-input {
+  flex: 1;
+  min-width: 0;
+  height: var(--acc-ctrl-h) !important;
+  box-sizing: border-box;
+  padding-right: 28px;
+  /* 给内置 × 腾位 */
+}
+
+.accounting-search-clear {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+/* iOS Obsidian 触屏 hover 会粘住，统一包进 @media (hover: hover) 守卫（见 CLAUDE.md 环境陷阱）。 */
+@media (hover: hover) {
+  .accounting-search-clear:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
+}
+
+.accounting-search-clear-hidden {
+  display: none;
+}
+
+/* 统一「清除」按钮（搜备注框右侧，清除所有筛选项）。
+   高度/边框/底色继承 .accounting-filter-controls>button 基线，此处仅补不收缩 + 弱化文字色。 */
+.accounting-filter-controls .accounting-filter-clear-all {
+  flex: 0 0 auto;
+  padding: 0 12px;
+  color: var(--text-muted);
+}
+
+@media (hover: hover) {
+  .accounting-filter-controls .accounting-filter-clear-all:hover {
+    color: var(--text-normal);
+  }
+}
+
+/* 周期账统计信息行（preset 跳转时显示，占「账户/备注」下一行；长名截断）。 */
+.accounting-recurring-stats {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 流水页排序栏紧贴筛选卡片下方：收紧筛选卡片下边距（仅流水页，不影响统计页同款卡片）。 */
+.accounting-transaction-modal .accounting-filter-box {
+  margin-bottom: 6px;
+}
+
+/* 排序栏：独立于筛选卡片（排序是 ordering 而非筛选维度），置于卡片下方、「排序」+下拉同一行。
+   弱化处理：去边框/底色，文字 mute + 自绘 ▾ 箭头，与筛选区的边框控件拉开层级。
+   appearance:none 去掉原生 select chrome 以彻底控样式（iOS 点开仍是原生选择器）。 */
+.accounting-sort-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px 4px;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.2;
+  color: var(--text-muted);
+}
+
+.accounting-sort-bar .accounting-sort-label {
+  font-weight: 600;
+}
+
+.accounting-sort-bar .accounting-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.2;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.accounting-sort-bar .accounting-sort-caret {
+  color: var(--text-faint);
+  font-size: 0.8em;
+  line-height: 1;
+}
+
+.accounting-batch-toggle {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--ac-control-h-compact);
+  margin-left: auto;
+  padding: 0 12px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  border-radius: var(--ac-radius-btn);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .accounting-batch-toggle:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
+}
+
+.accounting-batch-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  row-gap: 6px;
+  margin: 0 12px 8px;
+  padding: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-primary);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+  font-size: var(--font-ui-smaller);
+}
+
+.accounting-batch-count {
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+/* 次要动作（全选当前 / 取消选择）：紧凑 secondary，与 .accounting-batch-toggle 体系一致。 */
+.accounting-batch-sec {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--ac-control-h-compact);
+  padding: 0 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-btn);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .accounting-batch-sec:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
+}
+
+/* 主要动作（批量修改）：紧凑 primary；靠右；禁用=灰底 not-allowed。 */
+.accounting-batch-go {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--ac-control-h-compact);
+  margin-left: auto;
+  padding: 0 12px;
+  border: 1px solid var(--interactive-accent);
+  border-radius: var(--ac-radius-btn);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .accounting-batch-go:hover {
+    filter: brightness(1.06);
+  }
+}
+
+.accounting-batch-go:disabled,
+.accounting-batch-go.accounting-batch-go-disabled {
+  background: var(--background-modifier-border);
+  border-color: var(--background-modifier-border);
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+.accounting-batch-hint {
+  margin-bottom: 12px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.accounting-batch-warn {
+  margin-top: 4px;
+  color: var(--text-warning);
+}
+
+.accounting-batch-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.accounting-batch-field-label {
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.accounting-batch-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.accounting-type-pills {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--background-secondary);
+}
+
+.accounting-type-pill {
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 6px 0;
+  font-size: var(--font-ui-smaller);
+}
+
+.accounting-type-pill-active {
+  background: var(--background-primary);
+  color: var(--text-normal);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.accounting-input {
+  width: 100%;
+  min-height: var(--ac-control-h);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-input);
+  corner-shape: round;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  padding: 6px 8px;
+  font-size: var(--font-ui-small);
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* 排序下拉菜单：浮于 document.body（fixed），遮罩透明仅捕获外部点击关闭。
+   纯 DOM/rgba（不依赖 color-mix / 动画，避开 WKWebView 渲染坑）。 */
+.accounting-sort-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+
+.accounting-sort-menu {
+  position: fixed;
+  z-index: 1001;
+  min-width: 120px;
+  padding: 4px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.accounting-sort-item {
+  padding: 8px 10px;
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.accounting-sort-item.accounting-sort-item-active {
+  color: var(--color-green);
+  font-weight: 600;
+}
+
+@media (hover: hover) {
+  .accounting-sort-item:hover {
+    background: var(--background-modifier-hover);
+  }
+}
+
+/* 窄容器响应式（手机全屏 / 极窄桌面面板）：label 独占一行、控件栈式左对齐。 */
+@container (max-width: 380px) {
+  .accounting-filter-row {
+    grid-template-columns: 1fr;
+    column-gap: 0;
+    row-gap: 4px;
+  }
+
+  .accounting-filter-controls {
+    justify-content: flex-start;
+  }
+
+  .accounting-filter-row input[type="date"] {
+    width: auto;
+    flex: 1 1 0;
+  }
+
+  .accounting-filter-type-btn {
+    flex: 1;
+  }
+}
+
+/* 移动端全屏（非 .accounting-desktop 窄面板）：栈式布局 + 放大触摸目标(~36px) + 日期范围换行。
+   用 :not(.accounting-desktop) 守卫把布局/尺寸变更精确锁到移动端——桌面 Obsidian 窄面板只继承绿色卡片、
+   行布局与控件高度不变。选择器特异性 (0,4,0) 高于基线与 @container 规则，移动端确定覆盖。 */
+.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-filter-box {
+  --acc-ctrl-h: 32px;
+  --acc-row-gap: 13px;
+}
+
+.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-filter-row {
+  grid-template-columns: 1fr;
+  column-gap: 0;
+  row-gap: 5px;
+}
+
+.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-filter-controls {
+  justify-content: flex-start;
+}
+
+.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-filter-type-btn {
+  flex: 1;
+}
+
+/* 日期范围组独占一行，避免与三个快捷按钮挤在同一行被裁断。 */
+.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-date-range-wrap {
+  flex-basis: 100%;
+}
+
+.accounting-transaction-list {
+  max-height: 400px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.accounting-load-more {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  padding: 8px 0;
+}
+
+.accounting-transaction-row {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  cursor: pointer;
+  transition: background 0.2s;
+  min-width: 0;
+}
+
+@media (hover: hover) {
+  .accounting-transaction-row:hover {
+    background: var(--background-modifier-hover);
+  }
+}
+
+.accounting-transaction-row.accounting-tx-selected {
+  background: var(--background-modifier-hover);
+}
+
+.accounting-tx-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  margin-right: 10px;
+  border: 2px solid var(--background-modifier-border);
+  border-radius: 50%;
+  color: var(--text-on-accent);
+  font-size: var(--font-ui-smaller);
+}
+
+.accounting-tx-check-on {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+
+.accounting-tx-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 100px;
+  flex: 0 0 auto;
+}
+
+.accounting-tx-type {
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.accounting-tx-expense {
+  background: var(--color-red);
+  color: var(--text-on-accent);
+}
+
+.accounting-tx-income {
+  background: var(--color-green);
+  color: var(--text-on-accent);
+}
+
+.accounting-tx-transfer {
+  background: var(--color-blue);
+  color: var(--text-on-accent);
+}
+
+.accounting-tx-loan {
+  background: var(--color-orange);
+  color: var(--text-on-accent);
+}
+
+.accounting-tx-time {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.accounting-tx-middle {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0 12px;
+  overflow: hidden;
+}
+
+.accounting-tx-detail {
+  font-size: var(--font-ui-small);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accounting-tx-note {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accounting-tx-right {
+  text-align: right;
+  flex: 0 0 auto;
+}
+
+.accounting-tx-amount {
+  font-size: var(--font-ui-medium);
+  font-weight: 600;
+}
+
+.accounting-amount-positive {
+  color: var(--color-green);
+}
+
+.accounting-amount-negative {
+  color: var(--color-red);
+}
+
+/* 流水详情弹窗样式 */
+.accounting-detail-content {
+  padding: 8px 0;
+}
+
+.accounting-detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.accounting-detail-row:last-child {
+  border-bottom: none;
+}
+
+.accounting-detail-label {
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.accounting-detail-value {
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+}
+
+.accounting-detail-desc {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+
+.accounting-detail-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.accounting-detail-buttons .accounting-detail-sheet-close {
+  margin-left: auto;
+}
+
+/* === 流水详情：底部抽屉（非全屏）===
+   抽屉叠在列表 Modal 之上：.modal 钉到视口底部、圆角顶部、滑上开启/滑下关闭。
+   列表实例保持挂载，关闭抽屉即回到原列表（筛选/滚动保留）。.modal 用 position:fixed
+   脱离 .modal-container 的居中布局；.modal-bg 仍铺满视口提供遮罩。 */
+.modal.accounting-detail-sheet {
+  position: fixed !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  top: auto !important;
+  margin: 0 auto !important;
+  width: 100% !important;
+  max-width: 640px !important;
+  max-height: 86vh !important;
+  border-radius: 16px 16px 0 0 !important;
+  border: 1px solid var(--background-modifier-border) !important;
+  border-bottom: none !important;
+  box-shadow: 0 -6px 28px rgba(0, 0, 0, 0.22);
+  display: flex !important;
+  flex-direction: column;
+  animation: accounting-sheet-up 0.24s ease-out;
+  padding-bottom: max(env(safe-area-inset-bottom), 10px);
+}
+
+/* 桌面端：详情抽屉收窄到与全屏主页一致的 50vh 并视口居中，纳入「窄面板」体系——
+   覆盖基线 max-width:640px，避免抽屉比 50vh 主页更宽。accounting-desktop 由 onOpen 在 !Platform.isMobile 时打下。 */
+.modal.accounting-detail-sheet.accounting-desktop {
+  width: var(--accounting-panel-width) !important;
+  max-width: var(--accounting-panel-width) !important;
+}
+
+.modal.accounting-detail-sheet .modal-content {
+  overflow-y: auto;
+  padding: 4px 16px 8px;
+}
+
+/* 关闭中：滑下 + 禁用交互（防滑下途中误点） */
+.modal.accounting-detail-sheet.accounting-detail-closing {
+  animation: accounting-sheet-down 0.2s ease-in forwards;
+  pointer-events: none;
+}
+
+/* 隐藏 Obsidian 默认 .modal-close-button，用抽屉自带的 ✕ */
+.modal.accounting-detail-sheet .modal-close-button {
+  display: none;
+}
+
+/* 居中子弹窗（账本切换 / 备份 / 调整余额 / 新建·改名账本 / 分类新建·改名·合并）：隐藏 Obsidian 默认右上角 .modal-close-button，
+   关闭统一走底部「关闭/取消」按钮——与全屏页右上角 ✕（=退出整个记账视图）区分语义。
+   Escape 与点遮罩仍可关闭，仅去掉视觉冗余入口。 */
+/* 桌面端：居中子弹窗收窄到 50vh，与全屏主页窄面板对齐（纳入「桌面=手机模拟」体系），
+   避免走 Obsidian 默认 Modal 宽度而比 50vh 主屏更宽。accounting-desktop 由各子弹窗 onOpen 在 !Platform.isMobile 时打下。 */
+.modal.accounting-sub-modal.accounting-desktop {
+  width: var(--accounting-panel-width) !important;
+  max-width: var(--accounting-panel-width) !important;
+}
+
+.accounting-sub-modal .modal-close-button {
+  display: none;
+}
+
+@keyframes accounting-sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes accounting-sheet-down {
+  from {
+    transform: translateY(0);
+  }
+
+  to {
+    transform: translateY(100%);
+  }
+}
+
+/* 顶部拖拽指示条 */
+.accounting-detail-grabber {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--background-modifier-border);
+  margin: 8px auto 6px;
+}
+
+.accounting-detail-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.accounting-detail-title-row h2 {
+  margin: 0;
+  font-size: var(--font-ui-large);
+}
+
+.accounting-detail-sheet-close {
+  /* chrome 走统一 `.accounting-btn-secondary`；本类仅作右对齐定位钩子
+     （见 .accounting-detail-buttons .accounting-detail-sheet-close { margin-left:auto }）。 */
+  margin-left: auto;
+}
+
+/* === 统一按钮基座 ===
+   四个语义变体（primary/secondary/danger/ghost）共享基类结构（高度/圆角/内边距/字体/光标/禁用），
+   各自仅着色。子弹窗「取消/关闭」(secondary)、「确认/提交」(primary)、「删除」(danger)、「文字动作」(ghost)
+   跨页一致。导航/类型切换/筛选/计算器键等页面专有按钮保留各自类（差异化），仅共享全局焦点环与去原生 chrome。
+   焦点环由根部 :focus-visible 统一给出，此处不重复。 */
+.accounting-btn,
+.accounting-btn-primary,
+.accounting-btn-secondary,
+.accounting-btn-danger,
+.accounting-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  gap: 4px;
+  height: var(--ac-control-h);
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: var(--ac-radius-btn);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
+}
+
+.accounting-btn:disabled,
+.accounting-btn-primary:disabled,
+.accounting-btn-secondary:disabled,
+.accounting-btn-danger:disabled,
+.accounting-btn-ghost:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.accounting-btn-primary {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+  font-weight: 600;
+}
+
+.accounting-btn-secondary {
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  border-color: var(--background-modifier-border);
+}
+
+.accounting-btn-danger {
+  background: var(--color-red);
+  color: var(--text-on-accent);
+  border-color: var(--color-red);
+  font-weight: 600;
+}
+
+.accounting-btn-ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: transparent;
+}
+
+/* hover 仅悬停设备生效：iOS 触屏（WKWebView）:hover 会粘住——被点过的按钮挂浅灰底像「卡住」，
+   统一包进 @media (hover:hover) 守卫（见 CLAUDE.md 环境陷阱）。 */
+@media (hover: hover) {
+  .accounting-btn-primary:hover {
+    filter: brightness(1.06);
+  }
+
+  .accounting-btn-secondary:hover {
+    background: var(--background-modifier-hover);
+  }
+
+  .accounting-btn-danger:hover {
+    filter: brightness(1.06);
+  }
+
+  .accounting-btn-ghost:hover {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+  }
+}
+
+
+/* 调整余额弹窗 */
+.accounting-adjust-modal {
+  display: flex;
+  flex-direction: column;
+  max-width: 420px;
+}
+
+.accounting-adjust-title {
+  font-size: var(--font-ui-medium);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.accounting-adjust-current {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.accounting-adjust-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.accounting-adjust-label {
+  flex: 0 0 64px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.accounting-adjust-modal .accounting-adjust-input {
+  flex: 1 1 auto;
+  height: var(--ac-control-h);
+  padding: 0 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-input);
+  corner-shape: round;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.accounting-adjust-delta {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin: 4px 0 8px 72px;
+  min-height: 16px;
+}
+
+.accounting-adjust-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.accounting-adjust-submit {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+  padding: 6px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+/* select 触发器统一自定义外观；弹出的 option 列表仍由系统渲染（不可定制）。 */
+.accounting-adjust-modal select.accounting-adjust-input,
+.accounting-entry-modal select.accounting-entry-input,
+.accounting-settings-modal select.accounting-ledger-input,
+.accounting-filter-row select.accounting-filter-account-select {
+  padding-right: 26px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+/* 信用卡专属字段块（账户属性弹窗，仅 type==='credit' 时显示；动态显隐由 JS toggle display 控制） */
+.accounting-credit-block {
+  background: var(--background-secondary);
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+
+/* 账户操作菜单（余额页点账户名弹出的两选项居中子弹窗） */
+.accounting-action-title {
+  font-size: var(--font-ui-medium);
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.accounting-action-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--background-modifier-border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.accounting-action-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 14px 16px;
+  border: none;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  cursor: pointer;
+}
+
+/* hover 仅悬停设备生效：iOS 触屏 :hover 会粘住，统一 @media(hover:hover) 守卫 */
+@media (hover: hover) {
+  .accounting-action-item:hover {
+    background: var(--background-modifier-hover);
+  }
+}
+
+.accounting-action-item-text {
+  font-weight: 500;
+}
+
+/* 全屏布局（Obsidian 以移动端为主线，不区分平台）：记一笔 / 流水 / 流水详情 / 余额 Modal 铺满视口。
+   accounting-fullscreen 加在 modalEl(.modal)。
+   顶/底用 env(safe-area-inset-*) 留缓冲：顶避状态栏/刘海，底为底部固定导航条 + home 指示条预留空间。 */
+.modal.accounting-fullscreen {
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  box-sizing: border-box;
+  /* 顶缓冲：优先系统安全区(状态栏/刘海)，兜底 30px。 */
+  padding-top: max(env(safe-area-inset-top), 10px);
+  /* 底缓冲：底部固定导航条高度(~52px) + home 指示条/兜底，保证内容与底部按钮不被导航条遮挡。 */
+  padding-bottom: calc(max(env(safe-area-inset-bottom), 10px) + 52px);
+  /* 关闭 Obsidian 默认的打开动画（上浮/淡入），改由 contentEl 的左右滑入承担；overflow 裁掉滑入时的横向溢出。 */
+  overflow: hidden;
+  animation: none !important;
+  transition: none !important;
+}
+
+.modal.accounting-fullscreen .modal-content {
+  height: 100% !important;
+  max-height: 100% !important;
+  padding: 5px;
+}
+
+/* Obsidian 给每个 Modal 自动塞的默认 .modal-close-button（默认 top:0）。
+   全屏 Modal 从视口顶端 y=0 起，固定 top:0 会被状态栏/刘海遮挡；绝对定位不受
+   上方 padding-top 安全区影响，需单独把它推到安全区下。限定移动端（:not(.accounting-desktop)），
+   桌面窄面板的关闭按钮保持默认位置不变。 */
+.modal.accounting-fullscreen:not(.accounting-desktop) .modal-close-button {
+  top: max(env(safe-area-inset-top), 24px);
+}
+
+/* drill-down 流水页（账户下钻/周期账查看，聚焦模式）：隐藏右上角默认 ✕——
+   关闭走右下角「‹ 返回」回父页，避免与全屏页右上角 ✕（=退出记账视图）混淆。 */
+.modal.accounting-fullscreen.accounting-drilldown .modal-close-button {
+  display: none;
+}
+
+/* 桌面端（非移动平台）：记账全屏页不再铺满视口，改为「高度铺满 + 宽度=0.5×视口高」的窄面板，水平居中于 Obsidian 应用内。
+   accounting-desktop 由 presetModalChrome 在 !Platform.isMobile 时打在 .modal 上。
+   选择器特异性 (0,3,0) 高于基线 .modal.accounting-fullscreen (0,2,0)，覆盖其 width/max-width/margin 的 !important；
+   容器 .modal-container 仍为全视口（暗色遮罩铺满），故 margin:auto 在 100vw 容器内把 50vh 面板水平居中。
+   contain:layout 让窄面板成为其 fixed/absolute 后代的包含块——面板内部即「手机屏」坐标系：底部导航条、
+   右下角返回按钮等 fixed 元素自动相对面板定位（与移动端铺满视口时 fixed 相对视口=相对面板的行为一致），
+   桌面端无需再为每个 fixed 元素补「拉回面板」规则。 */
+.modal.accounting-fullscreen.accounting-desktop {
+  width: var(--accounting-panel-width) !important;
+  max-width: var(--accounting-panel-width) !important;
+  margin: 0 auto !important;
+  contain: layout;
+}
+
+.accounting-entry-modal {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.accounting-transaction-modal {
+  max-width: 100%;
+  max-height: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.accounting-transaction-list {
+  max-height: none;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.accounting-balance-modal {
+  max-width: 100%;
+  max-height: 100%;
+  height: 100%;
+  overflow-y: auto;
+  /* 禁横向滚动：窄面板（桌面端 50vh / 移动端窄屏）下不出现左右滚动条；超长内容由下方省略号规则兜底，避免被无信息地裁断。 */
+  overflow-x: hidden;
+}
+
+/* 设置页 contentEl：可纵向滚动 + 阻止卡片被 flex 压缩。
+   根因：Obsidian 的 .modal-content 默认 display:flex; flex-direction:column，fullscreen 下高度固定（height:100%）。
+   .accounting-ledger-card 带 overflow:hidden（圆角裁剪），作为直接 flex item 其「自动最小高度」按规范降为 0 →
+   内容自然高度超过 Modal 时，flex 纵向布局只压得动这些卡片（账本/备份卡塌成一条线）；
+   而 h2/p 与周期账卡（外层包了裸 <div>，非直接 flex item）overflow:visible、最小高度=内容，不压缩，故正常。
+   flex-shrink:0 让卡片保持内容高度；overflow-y:auto 让恢复全高后的总内容可滚动到底（导航条在 modalEl 上、不重叠）。 */
+.accounting-settings-modal {
+  overflow-y: auto;
+}
+
+.accounting-settings-modal .accounting-ledger-card {
+  flex-shrink: 0;
+}
+
+.accounting-settings-modal .accounting-ledger-input {
+  height: var(--ac-control-h-compact);
+  padding: 0 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-input);
+  corner-shape: round;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.accounting-settings-modal select.accounting-ledger-input {
+  padding: 0 26px 0 4px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+/* === 设置页 Tab 栏（sticky 吸顶下划线式）===
+   4 个 panel 一次性渲染，靠 active 类切显隐；tab 栏 sticky 固定在滚动容器（.accounting-settings-modal）
+   顶部。tab 栏 + panels 容器都是 contentEl（flex column）的直接子项，给 flex-shrink:0 保证不被压。
+   触屏 hover 守卫避开 iOS WKWebView 粘性 hover（见 CLAUDE.md 环境陷阱）。 */
+.accounting-settings-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  background: var(--background-primary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.accounting-settings-tab {
+  flex: 1 1 0;
+  padding: 10px 4px;
+  background: transparent;
+  border: none;
+  /* 2px 透明底边占位：激活时换成 accent 色，避免激活瞬间元素高度/布局跳动 */
+  border-bottom: 2px solid transparent;
+  /* 显式压掉 Obsidian 全局 `button` 规则的胶囊+squircle（var(--button-radius) /
+     var(--button-corner-shape)），否则 tab 会被画成椭圆；height:auto 让 padding 自己撑高，
+     不被 Obsidian 的 var(--input-height) 固定。与 CLAUDE.md「input 被改成胶囊」是同类陷阱、
+     同一处方。class 特异性 (0,1,0) 高于元素 (0,0,1)，无需 !important。 */
+  border-radius: 0;
+  corner-shape: round;
+  height: auto;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  cursor: pointer;
+}
+
+.accounting-settings-tab-active {
+  color: var(--interactive-accent);
+  border-bottom-color: var(--interactive-accent);
+  font-weight: 600;
+}
+
+@media (hover: hover) {
+  .accounting-settings-tab:hover {
+    color: var(--text-normal);
+  }
+}
+
+/* panels 容器是 contentEl 的直接 flex 子项，禁压缩以保各 panel 自然高度（contentEl 滚动） */
+.accounting-settings-panels {
+  flex-shrink: 0;
+}
+
+/* panel 显隐：默认隐藏，仅激活 panel 可见 */
+.accounting-settings-panel {
+  display: none;
+}
+
+.accounting-settings-panel.accounting-settings-panel-active {
+  display: block;
+}
+
+/* 「分类」panel 激活时改纵向 flex：让 .accounting-cat-page（收支分类两张卡）与账户类型卡片之间用 gap 统一间距，
+   与 .accounting-cat-page 内部的 gap 一致（三张卡片等距 12px）。特异性 (0,3,0) 覆盖上面的 display:block。
+   padding-top:8px 补齐首元素到顶部的间距——flex gap 不作用于容器边缘，而 .accounting-cat-flow-card 的 margin 已清零，
+   否则"支出分类"卡会紧贴 tab 栏（0px），与其它 tab 首卡 margin-top:8px 不一致。 */
+.accounting-settings-panel.accounting-settings-panel-active[data-tab='category'] {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 8px;
+}
+
+/* 账户页防横向溢出：flex/grid 项默认 min-width:auto 不收缩，长账户名或大金额会撑出横向滚动。
+   可收缩项（账户名/分组标题/统计值）给 min-width:0 + 省略号；固定项（余额金额/分组小计）nowrap 不缩，优先保金额完整。
+   极端情况下的残余溢出由 .accounting-balance-modal 的 overflow-x:hidden 兜底裁掉。 */
+.accounting-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accounting-row-amount {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.accounting-group-head>span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accounting-group-head>span:last-child {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.accounting-summary>span {
+  min-width: 0;
+}
+
+/* 统一底部固定导航条（记账 · 流水 · 账户 · 统计 · 设置），全平台渲染。
+   固定到屏幕底部，其高度已计入 .modal.accounting-fullscreen 的 padding-bottom 预留，内容不会被遮挡。 */
+.accounting-nav-bar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 8px max(env(safe-area-inset-bottom), 10px);
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+}
+
+.accounting-nav-btn {
+  flex: 1 1 0;
+  padding: 8px 4px;
+  text-align: center;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  cursor: pointer;
+  font-size: var(--font-ui-smaller);
+}
+
+/* hover 仅在真有指针的设备生效：触屏（iOS WebView）点击后 :hover 会粘住，
+   否则被点过的按钮一直挂着浅灰底（--background-modifier-hover）造成「卡住/被选中」错觉。
+   用 @media (hover:hover) 把它限制到桌面，移动端不触发。 */
+@media (hover: hover) {
+  .accounting-nav-btn:hover {
+    background: var(--background-modifier-hover);
+  }
+}
+
+.accounting-nav-btn.accounting-nav-current,
+.accounting-nav-btn:disabled {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+  cursor: default;
+  opacity: 1;
+}
+
+/* drill-down 流水页聚焦模式的右下角「‹ 返回」：固定在底部右侧（拇指易够），
+   与全屏页右上角 ✕（退出应用）拉开空间距离；叠加在下层父页之上，close() 即回父页。
+   底部 padding-bottom（.accounting-fullscreen 的 52px 预留）已为此按钮留位，内容不会被遮挡。 */
+.accounting-back-btn {
+  position: fixed;
+  right: 12px;
+  bottom: max(env(safe-area-inset-bottom), 12px);
+  z-index: 20;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: var(--font-ui-small);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+@media (hover: hover) {
+  .accounting-back-btn:hover {
+    background: var(--background-modifier-hover);
+  }
+}
+
+/* 关闭 Obsidian 默认 Modal 打开动画（容器 .modal-container + 弹层 .modal + 背景 .modal-bg + 内容 .modal-content + 伪元素），
+   避免导航切换时新页先「上跳/淡入」再左右滑入。
+   accounting-app 钩子由 prepareModalContainer 打在 .modal-container 上；
+   通配 + 伪元素覆盖 Obsidian 默认在子元素/::before/::after 里散布的过渡或 transform 起始帧。
+   滑入用更高特异性的 .accounting-app .accounting-slide-* 选择器覆盖回来（见下方）。 */
+.modal-container.accounting-app,
+.modal-container.accounting-app *,
+.modal-container.accounting-app *::before,
+.modal-container.accounting-app *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition: none !important;
+}
+
+/* 导航切换的左右滑入（简版单向：新页 contentEl 按方向滑入，旧页即时 detach）。
+   方向由 navBar.slideDirection(current,target) 按底部 tab 顺序决定。
+   特异性 .modal-container.accounting-app .accounting-slide-* (2 类+1 元素... 实为 3 类) 高于上面的通配压制，
+   且 animation 简写覆盖上面的 animation-duration 0s，故 slide 不被压制。 */
+@keyframes accounting-slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes accounting-slide-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+.modal-container.accounting-app .accounting-slide-right {
+  animation: accounting-slide-in-right 0.18s ease-out both !important;
+}
+
+.modal-container.accounting-app .accounting-slide-left {
+  animation: accounting-slide-in-left 0.18s ease-out both !important;
+}
+
+/* 设置页：账本切换卡片（自定义列表，把原本散落的 h2/说明/setting-item/刷新按钮收敛成一张卡片）。
+   当前账本高亮：accent 色调底 + 左侧 accent 竖条（inset shadow 不挤布局）+ 「当前」胶囊。 */
+.accounting-ledger-card {
+  margin-top: 8px;
+  margin-bottom: 20px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--background-primary);
+}
+
+.accounting-ledger-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.accounting-ledger-card-title {
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* 设置页功能标题字体减小一号 */
+.accounting-settings-modal h2 {
+  font-size: var(--font-ui-medium);
+  margin: 12px 0 6px;
+}
+
+.accounting-ledger-refresh {
+  height: var(--ac-control-h-compact);
+  padding: 0 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-btn);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .accounting-ledger-refresh:hover {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+  }
+}
+
+.accounting-ledger-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 40px;
+  padding: 4px 0;
+}
+
+.accounting-ledger-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  transition: background 0.15s;
+}
+
+.accounting-ledger-item:last-child {
+  border-bottom: none;
+}
+
+@media (hover: hover) {
+  .accounting-ledger-item:not(.accounting-ledger-current):hover {
+    background: var(--background-modifier-hover);
+  }
+}
+
+.accounting-ledger-current {
+  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary));
+  box-shadow: inset 3px 0 0 var(--interactive-accent);
+}
+
+.accounting-ledger-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.accounting-ledger-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accounting-ledger-current .accounting-ledger-name {
+  color: var(--interactive-accent);
+}
+
+.accounting-ledger-folder {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accounting-ledger-badge {
+  flex: 0 0 auto;
+  padding: 2px 10px;
+  border-radius: 10px;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+}
+
+.accounting-ledger-badge-muted {
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+/* 周期账分组（进行中/已暂停） */
+.accounting-recurring-section {
+  margin-bottom: 8px;
+}
+
+.accounting-recurring-section h3 {
+  margin: 0;
+  padding: 8px 12px 6px;
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.accounting-recurring-section summary {
+  padding: 8px 12px 6px;
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .accounting-recurring-section summary:hover {
+    color: var(--text-normal);
+  }
+}
+
+/* 分类管理：支出/收入两个自包含区块，每块包含新增入口、可见列表与自己的已隐藏折叠区。 */
+.accounting-cat-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.accounting-cat-flow-card {
+  /* 三张卡片同处 .accounting-cat-page（flex gap:12px），清零自身 margin 让 gap 成为唯一间距 */
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.accounting-cat-flow-card .accounting-ledger-card-head {
+  justify-content: flex-start;
+  cursor: pointer;
+}
+
+.accounting-cat-flow-card .accounting-ledger-head-actions {
+  cursor: auto;
+}
+
+.accounting-cat-toggle::before {
+  content: '▾';
+  color: var(--text-faint);
+  font-size: var(--font-ui-small);
+}
+
+.accounting-cat-flow-card.accounting-cat-collapsed .accounting-cat-toggle::before {
+  content: '▸';
+}
+
+.accounting-cat-flow-card.accounting-cat-collapsed .accounting-ledger-list,
+.accounting-cat-flow-card.accounting-cat-collapsed .accounting-cat-hidden-section {
+  display: none;
+}
+
+.accounting-cat-flow-card .accounting-ledger-card-title {
+  color: var(--text-normal);
+}
+
+.accounting-cat-flow-card .accounting-ledger-card-head>.accounting-ledger-badge {
+  margin-right: auto;
+}
+
+.accounting-cat-group-empty {
+  padding: 10px 14px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+}
+
+.accounting-cat-hidden-section {
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.accounting-cat-hidden-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.accounting-cat-hidden-head::-webkit-details-marker,
+.accounting-cat-hidden-head::marker {
+  display: none;
+}
+
+.accounting-cat-hidden-head::before {
+  content: '▸';
+  color: var(--text-faint);
+}
+
+.accounting-cat-hidden-section[open]>.accounting-cat-hidden-head::before {
+  content: '▾';
+}
+
+.accounting-cat-hidden-note {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+/* 兼容旧分类分组空态类名；旧的全局已隐藏子分组不再渲染。 */
+.accounting-cat-sub {
+  padding: 8px 12px 2px;
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* 账户类型管理（设置页「分类」tab 第二段）：复用 .accounting-ledger-* 为基线（卡片/标题/输入/按钮/计数胶囊），
+   仅补分组与类型行的排版。tap-based 编辑（不拖拽），按钮统一落在 .accounting-ledger-actions 内取既有 button 样式。 */
+.accounting-at-group {
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.accounting-at-group:last-child {
+  border-bottom: none;
+}
+
+.accounting-at-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--background-secondary);
+}
+
+.accounting-at-group-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.accounting-at-types {
+  padding: 2px 0;
+}
+
+.accounting-at-type {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.accounting-at-type:last-child {
+  border-bottom: none;
+}
+
+.accounting-at-type-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.accounting-at-add-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--background-modifier-border);
+  flex-wrap: wrap;
+}
+
+.accounting-at-add-group .accounting-ledger-input {
+  flex: 1 1 120px;
+}
+
+.accounting-at-empty {
+  padding: 10px 14px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+}
+
+/* 下一期信息行（周期账规则项底部行：左=下一期日期，右=操作按钮同行） */
+.accounting-ledger-next {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.accounting-ledger-next-date {
+  color: var(--text-muted);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* 操作按钮始终靠右（已暂停项无日期时亦然） */
+.accounting-ledger-next .accounting-ledger-actions {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* 周期账规则操作按钮统一加宽等宽（仅作用于下一期行内按钮，不影响账本列表文字按钮） */
+.accounting-ledger-next .accounting-ledger-actions button {
+  width: 50px;
+  padding: 0;
+  text-align: center;
+}
+
+/* 分类管理行操作按钮同样等宽（与周期账列表对齐；不影响账本/备份等其它 .accounting-ledger-actions） */
+.accounting-cat-actions button {
+  width: 50px;
+  padding: 0;
+  text-align: center;
+}
+
+.accounting-ledger-switch {
+  flex: 0 0 auto;
+  height: var(--ac-control-h-compact);
+  padding: 0 14px;
+  border: 1px solid var(--interactive-accent);
+  border-radius: var(--ac-radius-btn);
+  background: transparent;
+  color: var(--interactive-accent);
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .accounting-ledger-switch:hover {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+  }
+}
+
+.accounting-ledger-empty {
+  padding: 16px 12px;
+  text-align: center;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+/* 备份管理弹窗（BackupModal） */
+.accounting-backup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.accounting-backup-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-secondary);
+}
+
+.accounting-backup-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.accounting-backup-name {
+  font-weight: 500;
+  font-size: 14px;
+  word-break: break-all;
+  color: var(--text-normal);
+}
+
+.accounting-backup-time {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.accounting-backup-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.accounting-backup-actions button {
+  height: var(--ac-control-h-compact);
+  padding: 0 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-btn);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
+
+.accounting-modal-close {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+
+/* 账本管理卡片头操作组（新建 + 刷新）与列表项操作组（切换/改名/删除） */
+.accounting-ledger-head-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* 卡片 body 内的操作按钮组（备份管理：按钮放在 body 与说明同框，不放在 head）。
+   居中排列，与上方 .accounting-ledger-empty 居中说明对齐。 */
+.accounting-ledger-card-actions {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  padding: 0 12px 14px;
+}
+
+.accounting-ledger-create {
+  height: var(--ac-control-h-compact);
+  padding: 0 10px;
+  border: 1px solid var(--interactive-accent);
+  border-radius: var(--ac-radius-btn);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .accounting-ledger-create:hover {
+    opacity: 0.9;
+  }
+}
+
+/* 汇率操作栏：保存按钮（强调色，与桌面端 btn-primary 一致） */
+.accounting-currency-save {
+  height: var(--ac-control-h-compact);
+  padding: 0 10px;
+  border: 1px solid var(--interactive-accent);
+  border-radius: var(--ac-radius-btn);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .accounting-currency-save:hover {
+    opacity: 0.9;
+  }
+}
+
+.accounting-currency-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 汇率操作栏：取消按钮（中性色，与桌面端 btn-secondary 一致） */
+.accounting-currency-cancel {
+  height: var(--ac-control-h-compact);
+  padding: 0 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-btn);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .accounting-currency-cancel:hover {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+  }
+}
+
+.accounting-ledger-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.accounting-ledger-actions button {
+  height: var(--ac-control-h-compact);
+  padding: 0 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-btn);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .accounting-ledger-actions button:hover {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+  }
+
+  .accounting-ledger-delete:hover {
+    color: var(--text-error) !important;
+    border-color: var(--text-error) !important;
+  }
+}
+
+/* 新建/改名 Modal 输入框与错误文案 */
+.accounting-sub-modal .accounting-ledger-input {
+  width: 100%;
+  height: var(--ac-control-h);
+  padding: 0 8px;
+  margin: 8px 0 4px 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-input);
+  corner-shape: round;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-medium);
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.accounting-ledger-error {
+  color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+  min-height: 1.2em;
+  margin-bottom: 8px;
+}
+
+.accounting-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* 周期账管理模态框的顶部标题栏（固定到顶部，不使用底部导航条） */
+.accounting-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px max(env(safe-area-inset-top), 12px);
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.accounting-modal-title {
+  margin: 0;
+  font-size: var(--font-ui-medium);
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+/* 周期账管理模态框的内容区（有背景色和内边距） */
+.accounting-modal-content {
+  background: var(--background-primary);
+  padding: 16px;
+  min-height: calc(100vh - 60px);
+  /* 减去标题栏高度 */
+  box-sizing: border-box;
+}
+
+/* 表单容器 */
+.accounting-form-container {
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+/* 表单字段区 */
+.accounting-form-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+
+/* 错误提示 */
+.accounting-error {
+  color: var(--text-error);
+  padding: 16px;
+  text-align: center;
+}
+
+/* 空错误提示不占位（表单初始无错误时不留空白） */
+.accounting-error:empty {
+  display: none;
+}
+
+/* === 统计报表页（reportModal）===
+   只读消费 core 聚合（periodTotals/categoryBreakdown/monthlyTrend），纯 CSS/DOM 可视化
+   （横向条形 + 双柱），不引图表库——避开 WKWebView 对 CSS 动画/color-mix 的已知坑。
+   全屏滚动容器仿 balance-modal；时间段切换/区块标题/空状态复用 filter-box/group-head/empty 既有样式。 */
+.accounting-report-modal {
+  max-width: 100%;
+  max-height: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* 统计页「时间段」：label 与 6 个快捷按钮同一行、整组水平居中，且落在绿块水平中线（垂直居中）。
+   移动端全屏默认把 .accounting-filter-row 堆叠成单列（grid-template-columns:1fr），这里针对报表页解除堆叠——
+   改 flex 单行居中。原先内容靠上是因为：该行是 :last-child 仍带 6px margin-bottom，叠加 filter-box 的 2/6 padding，
+   行下方留 12px、上方仅 2px。故同时把行 margin-bottom 清零 + 区块纵向 padding 改对称，让按钮落在区块中线上。
+   按钮缩横向 padding 保证 6 个 + label 在窄屏一行放得下。选择器特异性 (0,5,0) 高于移动端全屏堆叠规则 (0,4,0)，确定覆盖。 */
+.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-report-modal .accounting-filter-box {
+  padding: 6px 12px;
+}
+
+.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-report-modal .accounting-filter-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  column-gap: 6px;
+  row-gap: 0;
+  margin-bottom: 0;
+}
+
+.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-report-modal .accounting-filter-controls {
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  justify-content: center;
+}
+
+.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-report-modal .accounting-filter-quick-btn {
+  padding: 0 6px;
+  flex: 0 1 auto;
+}
+
+/* 收支结余三数字卡 */
+.accounting-stat-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.accounting-stat-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+  padding: 10px 6px;
+  text-align: center;
+  min-width: 0;
+}
+
+.accounting-stat-card-label {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.accounting-stat-card-value {
+  font-size: var(--font-ui-medium);
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accounting-stat-income {
+  color: var(--color-green);
+}
+
+.accounting-stat-expense {
+  color: var(--color-red);
+}
+
+/* 区块间距 */
+.accounting-section {
+  margin-bottom: 14px;
+}
+
+/* 区块内紧凑空状态（区别于整页 .accounting-empty 的大留白） */
+.accounting-empty-mini {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  padding: 12px;
+  text-align: center;
+}
+
+/* 分类横向条形：info 行（标签 + 金额·占比）+ track 条 */
+.accounting-bar-row {
+  margin-bottom: 8px;
+}
+
+.accounting-bar-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--font-ui-smaller);
+  margin-bottom: 3px;
+}
+
+.accounting-bar-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-normal);
+}
+
+.accounting-bar-amount {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.accounting-bar-percent {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+.accounting-bar-track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--background-modifier-border);
+  overflow: hidden;
+}
+
+.accounting-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  /* 实色 background + width:%，不用 CSS 动画/color-mix（WKWebView 坑，见 CLAUDE.md） */
+}
+
+.accounting-bar-fill-expense {
+  background: var(--color-red);
+}
+
+.accounting-bar-fill-income {
+  background: var(--color-green);
+}
+
+/* 分类条形「展开其他 / 收起」按钮（超出 TOP_N 时出现，逐项展开不再合并为「其他」）。
+   弱化处理：去边框/底色，退化为淡色「文字动作」——padding 保留以维持移动端点击热区，
+   居中保留但不抢眼；hover 仅加深文字色、不加底色。
+   选择器带 .accounting-report-modal 祖先提到 (0,2,0)，压过 Obsidian 默认 .modal button (0,1,1)。 */
+.accounting-report-modal .accounting-bar-toggle {
+  display: block;
+  margin: 6px auto 0;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .accounting-report-modal .accounting-bar-toggle:hover {
+    color: var(--text-muted);
+  }
+}
+
+/* 趋势图：SVG 绘制（结余柱 + 收入虚线 + 支出实线），固定宽 + 横向滚动看完整。
+   纯 SVG 避免 WKWebView 对 CSS 动画/color-mix 的坑；零基线居中，正结余柱向上、负向下。 */
+.accounting-trend-chart-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-top: 8px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.accounting-trend-svg {
+  display: block;
+}
+
+.accounting-trend-axis {
+  stroke: var(--background-modifier-border);
+  stroke-width: 1;
+}
+
+.accounting-trend-bar-pos {
+  fill: var(--color-blue);
+}
+
+.accounting-trend-bar-neg {
+  fill: var(--color-red);
+}
+
+.accounting-trend-value {
+  fill: var(--text-muted);
+  font-size: 9px;
+}
+
+.accounting-trend-value-neg {
+  fill: var(--color-red);
+}
+
+.accounting-trend-axis-label {
+  fill: var(--text-muted);
+  font-size: 10px;
+}
+
+.accounting-trend-line-income {
+  fill: none;
+  stroke: var(--color-green);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+
+.accounting-trend-line-expense {
+  fill: none;
+  stroke: var(--color-red);
+  stroke-width: 1.5;
+}
+
+.accounting-trend-dot-income {
+  fill: var(--color-green);
+}
+
+.accounting-trend-dot-expense {
+  fill: var(--color-red);
+}
+
+/* 分组标题里的趋势图例：结余(蓝色块) / 收入(绿色虚线段) / 支出(红色实线段) */
+.accounting-trend-legend {
+  display: flex;
+  gap: 10px;
+  font-size: var(--font-ui-smaller);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.accounting-trend-leg-surplus,
+.accounting-trend-leg-income,
+.accounting-trend-leg-expense {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.accounting-trend-leg-surplus::before {
+  content: '';
+  width: 10px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--color-blue);
+}
+
+.accounting-trend-leg-income::before {
+  content: '';
+  width: 12px;
+  border-top: 2px dashed var(--color-green);
+}
+
+.accounting-trend-leg-expense::before {
+  content: '';
+  width: 12px;
+  border-top: 2px solid var(--color-red);
+}
+
+.accounting-trend-leg-surplus {
+  color: var(--text-muted);
+}
+
+.accounting-trend-leg-income {
+  color: var(--color-green);
+}
+
+.accounting-trend-leg-expense {
+  color: var(--color-red);
+}
+
+/* 趋势图点击明细行：点击柱子后显示该点收入/支出/结余。flex-wrap 适配窄屏换行。 */
+.accounting-trend-info {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.accounting-trend-info-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.accounting-trend-info-bucket {
+  font-weight: 600;
+  font-size: var(--font-ui-small);
+}
+
+.accounting-trend-info-cells {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.accounting-trend-info-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.accounting-trend-info-cell-label {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.accounting-trend-info-cell-value {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--font-ui-small);
+}
+
+.accounting-trend-info-income .accounting-trend-info-cell-value {
+  color: var(--color-green);
+}
+
+.accounting-trend-info-expense .accounting-trend-info-cell-value {
+  color: var(--color-red);
+}
+
+/* 点击热区：透明填充（无 fill 的 rect 默认不捕获指针事件，必须显式填色或 pointer-events:all） */
+.accounting-trend-hit {
+  fill: transparent;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .accounting-trend-hit:hover {
+    fill: var(--background-modifier-hover);
+  }
+}
+
+/* 设置页「币种」panel：本位币下拉 + 汇率表编辑器 */
+.accounting-currency-base {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.accounting-currency-base-sel {
+  max-width: 12rem;
+}
+
+/* 币种 body 内子节标题：区别于卡片头标题（卡片头=大写+间距+muted色），
+   这里用正常大小、正常颜色，与 card-head 形成视觉层次 */
+.accounting-currency-section-title {
+  display: block;
+  padding: 12px 14px 6px;
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.accounting-currency-rates {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 14px 12px;
+}
+
+.accounting-currency-rate-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 新增行按钮占位：与已有行「删除」按钮同尺寸，保持列对齐 */
+.accounting-currency-btn-spacer {
+  flex: 0 0 auto;
+  height: var(--ac-control-h-compact);
+  padding: 0 6px;
+  font-size: var(--font-ui-smaller);
+  line-height: 1;
+  visibility: hidden;
+}
+
+.accounting-settings-modal .accounting-currency-rate-row>span {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.accounting-settings-modal .accounting-currency-cur {
+  flex: 0 0 4rem;
+  width: 4rem;
+  min-width: 0;
+  max-width: 4rem;
+}
+
+/* 已有币种只读文本：与 .accounting-currency-cur 同宽，右对齐紧贴 "1 =" */
+.accounting-settings-modal .accounting-currency-cur-readonly {
+  flex: 0 0 4rem;
+  width: 4rem;
+  min-width: 4rem;
+  max-width: 4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 4px;
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.accounting-settings-modal .accounting-currency-rate {
+  flex: 1 1 3.5rem;
+  min-width: 3.5rem;
+}
+
+.accounting-settings-modal .accounting-currency-date {
+  flex: 1 1 8rem;
+  min-width: 8rem;
+}
+
+/* 行内按钮公共样式 */
+.accounting-settings-modal .accounting-currency-rate-row .accounting-ledger-delete,
+.accounting-settings-modal .accounting-currency-rate-row .accounting-ledger-rename {
+  flex: 0 0 auto;
+  height: var(--ac-control-h-compact);
+  padding: 0 6px;
+  border-radius: var(--ac-radius-btn);
+  corner-shape: round;
+  font-size: var(--font-ui-smaller);
+  line-height: 1;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* 取消按钮：中性色（与桌面端 btn-sm-secondary 一致） */
+.accounting-settings-modal .accounting-currency-rate-row .accounting-ledger-rename {
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-muted);
+}
+
+/* 删除按钮：警告色（与桌面端 btn-sm-danger 一致） */
+.accounting-settings-modal .accounting-currency-rate-row .accounting-ledger-delete {
+  border: none;
+  background: var(--text-error);
+  color: var(--text-on-accent);
+}
+
+/* 在线刷新区域：与上方内容分隔 */
+.accounting-currency-online {
+  padding: 12px 14px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.accounting-currency-online-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.accounting-currency-online-row+.accounting-currency-online-row {
+  margin-top: 8px;
+}
+
+/* 启动设置开关行：在卡片 body（.accounting-ledger-list，flex column、min-height 40px）内垂直居中——
+   margin-block:auto 吸收垂直富余空间实现上下居中；padding-left:12px 与卡片标题栏
+   （.accounting-ledger-card-head padding 8px 12px）左缩进对齐，避免勾选框贴左边缘。
+   仅作用本行，不影响币种在线刷新区同 class 行。 */
+.accounting-startup-toggle {
+  margin-block: auto;
+  padding-left: 12px;
+}
+
+/* 自动刷新 checkbox 文字样式：与 ledger-empty 统一 */
+.accounting-currency-online-label {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
