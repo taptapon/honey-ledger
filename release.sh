@@ -37,18 +37,18 @@ gh release create "$VERSION" ./main.js ./manifest.json ./styles.css \
 echo "GitHub Release 发布完成！"
 echo "https://github.com/taptapon/honey-ledger/releases/tag/$VERSION"
 
-# 发布 Gitee Release
-if [ -n "$GITEE_TOKEN" ]; then
-  echo "发布 Gitee Release v$VERSION ..."
-  GITEE_OWNER="fadgabadfaf"
-  GITEE_REPO="honey-ledger"
-  GITEE_API="https://gitee.com/api/v5/repos/$GITEE_OWNER/$GITEE_REPO"
+# 发布 GitCode Release
+if [ -n "$GITCODE_TOKEN" ]; then
+  echo "发布 GitCode Release v$VERSION ..."
+  GITCODE_OWNER="fadgabadfaf"
+  GITCODE_REPO="honey-ledger"
+  GITCODE_API="https://api.gitcode.com/api/v5/repos/$GITCODE_OWNER/$GITCODE_REPO"
 
   # 创建 Release
-  RELEASE_RESP=$(curl -s -X POST "$GITEE_API/releases" \
+  RELEASE_RESP=$(curl -s -X POST "$GITCODE_API/releases" \
     -H "Content-Type: application/json" \
     -d "{
-      \"access_token\": \"$GITEE_TOKEN\",
+      \"access_token\": \"$GITCODE_TOKEN\",
       \"tag_name\": \"$VERSION\",
       \"name\": \"v$VERSION\",
       \"body\": \"v$VERSION\",
@@ -61,15 +61,22 @@ if [ -n "$GITEE_TOKEN" ]; then
     # 上传附件
     for FILE in main.js manifest.json styles.css; do
       echo "  上传 $FILE ..."
-      curl -s -X POST "$GITEE_API/releases/$RELEASE_ID/attach_files" \
-        -F "access_token=$GITEE_TOKEN" \
-        -F "file=@$FILE" > /dev/null
+      # 获取上传地址
+      UPLOAD_URL=$(curl -s -X GET "$GITCODE_API/releases/$VERSION/upload_url" \
+        -G -d "access_token=$GITCODE_TOKEN" -d "file_name=$FILE" \
+        | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('url',''))" 2>/dev/null || echo "")
+      if [ -n "$UPLOAD_URL" ]; then
+        curl -s -X PUT "$UPLOAD_URL" \
+          -H "Content-Type: application/octet-stream" \
+          --data-binary @"$FILE" > /dev/null
+      fi
     done
-    echo "Gitee Release 发布完成！"
-    echo "https://gitee.com/$GITEE_OWNER/$GITEE_REPO/releases/tag/$VERSION"
+    echo "GitCode Release 发布完成！"
+    echo "https://gitcode.com/$GITCODE_OWNER/$GITCODE_REPO/releases/tag/$VERSION"
   else
-    echo "Gitee Release 创建失败，请检查 GITEE_TOKEN 是否正确"
+    echo "GitCode Release 创建失败，请检查 GITCODE_TOKEN 是否正确"
+    echo "$RELEASE_RESP"
   fi
 else
-  echo "跳过 Gitee Release（未设置 GITEE_TOKEN 环境变量）"
+  echo "跳过 GitCode Release（未设置 GITCODE_TOKEN 环境变量）"
 fi
