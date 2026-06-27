@@ -6,7 +6,18 @@
 
 ## 安装
 
-1. 下载本仓库的 `main.js`、`manifest.json`、`styles.css` 三个文件。
+### 方式一：BRAT 安装（推荐）
+
+1. 在 Obsidian 社区插件中搜索并安装 [BRAT](https://github.com/TfTHacker/obsidian42-brat) 插件。
+2. 打开 BRAT 设置 → 点击 **Add Beta plugin**。
+3. 输入仓库地址 `https://github.com/taptapon/honey-ledger`，点击 **Add Plugin**。
+4. 安装完成后，在第三方插件列表中启用「宏利记账」。
+
+> BRAT 会自动检测新版本并更新。
+
+### 方式二：手动安装
+
+1. 从 [Releases](https://github.com/taptapon/honey-ledger/releases) 下载最新版本的 `main.js`、`manifest.json`、`styles.css`。
 2. 在你的 Obsidian 库下新建目录 `.obsidian/plugins/accounting/`，将三个文件放入其中。
 3. Obsidian → 设置 → 第三方插件 → 关闭「安全模式」→ 启用「宏利记账」。
 
