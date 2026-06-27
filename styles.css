@@ -33,11 +33,12 @@
 }
 
 /* B. 轻量设计令牌：尺寸/圆角/焦点走自定义属性，颜色仍用 Obsidian 主题变量（深浅自适应）。
-   高度以移动端触控为准、不照搬桌面像素——标准档 36px（≈.accounting-input min-height + 移动全屏
-   筛选控件），紧凑档 30px（密集列表/工具条小按钮）。 */
+   高度以移动端触控为准、不照搬桌面像素，三档制：紧凑档 30px（密集列表/工具条小按钮）、
+   标准档 36px（主操作按钮/全屏表单输入）、Hero 档 40px（全屏表单主提交/计算器键）。 */
 :is(.accounting-fullscreen, .accounting-sub-modal, .accounting-detail-sheet) {
   --ac-control-h: 36px;
   --ac-control-h-compact: 30px;
+  --ac-control-h-hero: 40px;
   --ac-radius-input: 6px;
   --ac-radius-btn: 8px;
   --ac-focus-ring: 0 0 0 3px rgba(16, 185, 129, 0.24);
@@ -317,7 +318,7 @@
 
 .accounting-entry-submit {
   width: 120px;
-  height: 40px;
+  height: var(--ac-control-h-hero);
   border: none;
   border-radius: 8px;
   background: var(--interactive-accent);
@@ -333,7 +334,7 @@
 
 @media (hover: hover) {
   .accounting-entry-submit:hover {
-    filter: brightness(1.06);
+    filter: brightness(1.12);
   }
 }
 
@@ -406,7 +407,7 @@
 }
 
 .accounting-calc-key {
-  height: 40px;
+  height: var(--ac-control-h-hero);
   padding: 0;
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
@@ -438,7 +439,7 @@
   }
 
   .accounting-calc-key--eq:hover {
-    filter: brightness(1.06);
+    filter: brightness(1.12);
   }
 }
 
@@ -612,8 +613,8 @@
    ② 控件统一引用 --acc-* token；③ 激活态纯视觉、文字恒定，消除按钮宽度跳动；
    ④ container query 在窄面板自动改为栈式，避免换行参差。 */
 .accounting-filter-box {
-  /* token 内聚在筛选盒自身（不依赖 .accounting-app 外层作用域），后代控件统一引用。 */
-  --acc-ctrl-h: 30px;
+  /* token 内聚在筛选盒自身（不依赖 .accounting-app 外层作用域），后代控件统一引用。
+     控件高度已归并到全局紧凑档 --ac-control-h-compact（与工具条/列表小按钮一致）；此处仅保留间距 token。 */
   --acc-gap: 6px;
   --acc-row-gap: 10px;
   /* 绿色淡底卡片：先写实色 fallback（iOS WKWebView 可能不认 color-mix，退化为次级底色而非透明），
@@ -661,7 +662,7 @@
 .accounting-filter-quick-btn,
 .accounting-filter-row select.accounting-filter-account-select,
 .accounting-search-input {
-  height: var(--acc-ctrl-h);
+  height: var(--ac-control-h-compact);
   box-sizing: border-box;
   padding: 0 8px;
   border: 1px solid var(--background-modifier-border);
@@ -743,7 +744,7 @@
 .accounting-search-input {
   flex: 1;
   min-width: 0;
-  height: var(--acc-ctrl-h) !important;
+  height: var(--ac-control-h-compact) !important;
   box-sizing: border-box;
   padding-right: 28px;
   /* 给内置 × 腾位 */
@@ -933,7 +934,7 @@
 
 @media (hover: hover) {
   .accounting-batch-go:hover {
-    filter: brightness(1.06);
+    filter: brightness(1.12);
   }
 }
 
@@ -1077,11 +1078,11 @@
   }
 }
 
-/* 移动端全屏（非 .accounting-desktop 窄面板）：栈式布局 + 放大触摸目标(~36px) + 日期范围换行。
-   用 :not(.accounting-desktop) 守卫把布局/尺寸变更精确锁到移动端——桌面 Obsidian 窄面板只继承绿色卡片、
-   行布局与控件高度不变。选择器特异性 (0,4,0) 高于基线与 @container 规则，移动端确定覆盖。 */
+/* 移动端全屏（非 .accounting-desktop 窄面板）：栈式布局 + 放大行距 + 日期范围换行。
+   用 :not(.accounting-desktop) 守卫把布局变更精确锁到移动端——桌面 Obsidian 窄面板只继承绿色卡片、
+   行布局不变。选择器特异性 (0,4,0) 高于基线与 @container 规则，移动端确定覆盖。
+   注：筛选控件高度原在此处放大到 32px，已统一归并到全局紧凑档 30px（与工具条/列表小按钮一致）。 */
 .modal.accounting-fullscreen:not(.accounting-desktop) .accounting-filter-box {
-  --acc-ctrl-h: 32px;
   --acc-row-gap: 13px;
 }
 
@@ -1199,6 +1200,8 @@
 .accounting-tx-time {
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
+  /* 数字等宽：时间行宽度恒定 → 左列列宽恒定 → 类型徽章 stretch 后不再长短不一 */
+  font-variant-numeric: tabular-nums;
 }
 
 .accounting-tx-middle {
@@ -1350,6 +1353,18 @@
   display: none;
 }
 
+/* 移动端：居中子弹窗「直接出现 / 直接关闭」——.modal 本身无定位（靠 .modal-container 的
+   flex 居中）、无 transform/opacity；Obsidian 开/关动画是 JS 逐帧给 .modal 设 inline
+   style.transform（translateY 位移）再清空。故用 !important 把 transform/opacity 钉在静态值，
+   逐帧 inline（无 !important）被压住 → 瞬间出现/消失（外部 !important 高于 inline 普通）。
+   桌面端（.accounting-desktop）保留 Obsidian 原生淡入不动；流水详情底部抽屉
+   （.accounting-detail-sheet）走自有滑上/滑下动画，不在此列。 */
+.modal.accounting-sub-modal:not(.accounting-desktop) {
+  transform: none !important;
+  opacity: 1 !important;
+  animation: none !important;
+}
+
 /* 账本引导（accounting-onboarding）：放行被 sub-modal 隐藏的默认右上角 ✕——引导需可跳过/关闭，
    故单独恢复 Obsidian 原生关闭按钮。特异性 (0,4,0) 高于上方 .accounting-sub-modal 的 (0,2,0)，胜出。 */
 .modal.accounting-sub-modal.accounting-onboarding .modal-close-button {
@@ -1472,7 +1487,7 @@
    统一包进 @media (hover:hover) 守卫（见 CLAUDE.md 环境陷阱）。 */
 @media (hover: hover) {
   .accounting-btn-primary:hover {
-    filter: brightness(1.06);
+    filter: brightness(1.12);
   }
 
   .accounting-btn-secondary:hover {
@@ -1480,7 +1495,7 @@
   }
 
   .accounting-btn-danger:hover {
-    filter: brightness(1.06);
+    filter: brightness(1.12);
   }
 
   .accounting-btn-ghost:hover {
@@ -1655,9 +1670,13 @@
 /* Obsidian 给每个 Modal 自动塞的默认 .modal-close-button（默认 top:0）。
    全屏 Modal 从视口顶端 y=0 起，固定 top:0 会被状态栏/刘海遮挡；绝对定位不受
    上方 padding-top 安全区影响，需单独把它推到安全区下。限定移动端（:not(.accounting-desktop)），
-   桌面窄面板的关闭按钮保持默认位置不变。 */
+   桌面窄面板的关闭按钮保持默认位置不变。
+   scale(0.85) 把默认 ✕ 整体等比缩小一档（origin top right 让右上角不动、向左下收），
+   触控热区随之缩至约 85%，矢量 ✕ 缩放不糊。 */
 .modal.accounting-fullscreen:not(.accounting-desktop) .modal-close-button {
   top: max(env(safe-area-inset-top), 24px);
+  transform: scale(0.85);
+  transform-origin: top right;
 }
 
 /* drill-down 流水页（账户下钻/周期账查看，聚焦模式）：隐藏右上角默认 ✕——
@@ -2110,16 +2129,38 @@
   letter-spacing: 0.04em;
 }
 
-.accounting-recurring-section summary {
-  padding: 8px 12px 6px;
+/* 折叠区标题：所有 <details> 的 <summary> 统一带 .accounting-collapsible-head。
+   基线 = 弱化文字（text-muted + font-ui-smaller + 600）+ 自定义 ▸/▾ 标记，
+   不依赖原生 disclosure（WKWebView 表现一致）。页面需加底色/分隔时叠自己的类（如分类隐藏区加浅底）。 */
+.accounting-collapsible-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
   font-size: var(--font-ui-smaller);
   font-weight: 600;
   color: var(--text-muted);
   cursor: pointer;
+  list-style: none;
+}
+
+.accounting-collapsible-head::-webkit-details-marker,
+.accounting-collapsible-head::marker {
+  display: none;
+}
+
+.accounting-collapsible-head::before {
+  content: '▸';
+  color: var(--text-faint);
+  font-size: 0.9em;
+}
+
+details[open] > .accounting-collapsible-head::before {
+  content: '▾';
 }
 
 @media (hover: hover) {
-  .accounting-recurring-section summary:hover {
+  .accounting-collapsible-head:hover {
     color: var(--text-normal);
   }
 }
@@ -2179,31 +2220,10 @@
   border-top: 1px solid var(--background-modifier-border);
 }
 
+/* 分类隐藏区标题：叠在 .accounting-collapsible-head 之上，仅加浅底（卡片内与可见列表分隔）。
+   字号/字重/颜色/padding/marker 全部继承基类，不在此重复。 */
 .accounting-cat-hidden-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
   background: var(--background-secondary);
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
-  font-weight: 600;
-  cursor: pointer;
-  list-style: none;
-}
-
-.accounting-cat-hidden-head::-webkit-details-marker,
-.accounting-cat-hidden-head::marker {
-  display: none;
-}
-
-.accounting-cat-hidden-head::before {
-  content: '▸';
-  color: var(--text-faint);
-}
-
-.accounting-cat-hidden-section[open]>.accounting-cat-hidden-head::before {
-  content: '▾';
 }
 
 .accounting-cat-hidden-note {
@@ -2328,7 +2348,7 @@
 .accounting-ledger-switch {
   flex: 0 0 auto;
   height: var(--ac-control-h-compact);
-  padding: 0 14px;
+  padding: 0 10px;
   border: 1px solid var(--interactive-accent);
   border-radius: var(--ac-radius-btn);
   background: transparent;
@@ -2511,15 +2531,27 @@
   cursor: pointer;
 }
 
+/* 删除钮 .accounting-ledger-delete 静态 danger ghost：红字 + 红边 + 透明底。
+   原仅 hover 变红（@media hover），但移动端触屏无 hover → 删除钮恒为中性灰、与改名/切换无别、零危险警示。
+   故给静态 danger 视觉；hover（仅指针设备）加深为实底红白。
+   用 :is() 列出全部承载该类的父容器（账本/周期账/分类/分组的 .accounting-ledger-actions、
+   币种行 .accounting-currency-rate-row、备份 .accounting-backup-actions）抬到 (0,2,0)，
+   干净压过各容器 button 基线 (0,1,1)，免 !important。 */
+:is(.accounting-ledger-actions, .accounting-backup-actions, .accounting-currency-rate-row) .accounting-ledger-delete {
+  border: 1px solid var(--text-error);
+  background: transparent;
+  color: var(--text-error);
+}
+
 @media (hover: hover) {
   .accounting-ledger-actions button:hover {
     color: var(--text-normal);
     background: var(--background-modifier-hover);
   }
 
-  .accounting-ledger-delete:hover {
-    color: var(--text-error) !important;
-    border-color: var(--text-error) !important;
+  :is(.accounting-ledger-actions, .accounting-backup-actions, .accounting-currency-rate-row) .accounting-ledger-delete:hover {
+    background: var(--text-error);
+    color: var(--text-on-accent);
   }
 }
 
@@ -3060,12 +3092,9 @@
   color: var(--text-muted);
 }
 
-/* 删除按钮：警告色（与桌面端 btn-sm-danger 一致） */
-.accounting-settings-modal .accounting-currency-rate-row .accounting-ledger-delete {
-  border: none;
-  background: var(--text-error);
-  color: var(--text-on-accent);
-}
+/* 币种行删除钮的颜色由统一 .accounting-ledger-delete danger ghost 规则给出
+  （见上方 :is(...) .accounting-ledger-delete），此处只保留尺寸/形状（L3046 公共样式），
+   不再单独覆盖红底白字——与其它容器删除钮视觉统一。 */
 
 /* 在线刷新区域：与上方内容分隔 */
 .accounting-currency-online {
@@ -3090,6 +3119,11 @@
    仅作用本行，不影响币种在线刷新区同 class 行。 */
 .accounting-startup-toggle {
   margin-block: auto;
+  padding-left: 12px;
+}
+
+/* 重新运行账本引导按钮行：与上方启动开关行左缩进对齐，避免按钮贴卡片左边缘。 */
+.accounting-reset-onboarding-row {
   padding-left: 12px;
 }
 
