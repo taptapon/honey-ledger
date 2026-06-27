@@ -28,11 +28,48 @@ git commit -m "release: v$VERSION" || echo "没有需要提交的更改"
 echo "推送代码..."
 git push
 
-# 创建 tag 并发布 Release
-echo "发布 Release v$VERSION ..."
+# 创建 tag 并发布 GitHub Release
+echo "发布 GitHub Release v$VERSION ..."
 gh release create "$VERSION" ./main.js ./manifest.json ./styles.css \
   --title "v$VERSION" \
   --notes "v$VERSION"
 
-echo "发布完成！"
+echo "GitHub Release 发布完成！"
 echo "https://github.com/taptapon/honey-ledger/releases/tag/$VERSION"
+
+# 发布 Gitee Release
+if [ -n "$GITEE_TOKEN" ]; then
+  echo "发布 Gitee Release v$VERSION ..."
+  GITEE_OWNER="fadgabadfaf"
+  GITEE_REPO="honey-ledger"
+  GITEE_API="https://gitee.com/api/v5/repos/$GITEE_OWNER/$GITEE_REPO"
+
+  # 创建 Release
+  RELEASE_RESP=$(curl -s -X POST "$GITEE_API/releases" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"access_token\": \"$GITEE_TOKEN\",
+      \"tag_name\": \"$VERSION\",
+      \"name\": \"v$VERSION\",
+      \"body\": \"v$VERSION\",
+      \"target_commitish\": \"main\"
+    }")
+
+  RELEASE_ID=$(echo "$RELEASE_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null || echo "")
+
+  if [ -n "$RELEASE_ID" ]; then
+    # 上传附件
+    for FILE in main.js manifest.json styles.css; do
+      echo "  上传 $FILE ..."
+      curl -s -X POST "$GITEE_API/releases/$RELEASE_ID/attach_files" \
+        -F "access_token=$GITEE_TOKEN" \
+        -F "file=@$FILE" > /dev/null
+    done
+    echo "Gitee Release 发布完成！"
+    echo "https://gitee.com/$GITEE_OWNER/$GITEE_REPO/releases/tag/$VERSION"
+  else
+    echo "Gitee Release 创建失败，请检查 GITEE_TOKEN 是否正确"
+  fi
+else
+  echo "跳过 Gitee Release（未设置 GITEE_TOKEN 环境变量）"
+fi
