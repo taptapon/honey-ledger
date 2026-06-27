@@ -1350,6 +1350,12 @@
   display: none;
 }
 
+/* 账本引导（accounting-onboarding）：放行被 sub-modal 隐藏的默认右上角 ✕——引导需可跳过/关闭，
+   故单独恢复 Obsidian 原生关闭按钮。特异性 (0,4,0) 高于上方 .accounting-sub-modal 的 (0,2,0)，胜出。 */
+.modal.accounting-sub-modal.accounting-onboarding .modal-close-button {
+  display: block;
+}
+
 @keyframes accounting-sheet-up {
   from {
     transform: translateY(100%);

@@ -7360,7 +7360,10 @@ var OnboardingModal = class extends import_obsidian15.Modal {
   async onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    this.modalEl.addClass("accounting-sub-modal");
+    this.modalEl.addClass("accounting-onboarding");
     contentEl.addClass("accounting-modal");
+    if (!import_obsidian15.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     this.renderMainStep();
   }
   /** 渲染主步骤：根据是否有现有账本显示不同界面 */
