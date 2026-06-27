@@ -5883,7 +5883,9 @@ function openReport(app, adapter, navCtx, slide) {
   new ReportModal(app, adapter, navCtx, slide).open();
 }
 function openSettings(app, settingsTab, navCtx, slide, onSwitchLedger) {
-  new SettingsModal(app, settingsTab, navCtx, slide, onSwitchLedger).open();
+  const modal = new SettingsModal(app, settingsTab, navCtx, slide, onSwitchLedger);
+  modal.open();
+  return modal;
 }
 async function openEntryRecurring(app, adapter, mode, onDone) {
   const meta = await adapter.readMeta();
@@ -7353,6 +7355,8 @@ var OnboardingModal = class extends import_obsidian15.Modal {
     this.onComplete = onComplete;
   }
   currentStep = "main";
+  /** 用户在关闭前的选择；null 表示未做选择（直接关闭→跳过）。onClose 据此单点回调，避免重复触发。 */
+  result = null;
   async onOpen() {
     const { contentEl } = this;
     contentEl.empty();
@@ -7395,7 +7399,7 @@ var OnboardingModal = class extends import_obsidian15.Modal {
         cls: "accounting-btn accounting-btn-secondary accounting-btn-block"
       });
       itemEl.onclick = () => {
-        this.onComplete({ action: "selected", ledger: folder });
+        this.result = { action: "selected", ledger: folder };
         this.close();
       };
     }
@@ -7452,7 +7456,7 @@ var OnboardingModal = class extends import_obsidian15.Modal {
       try {
         await this.adapter.createLedger(name, alias || void 0);
         new import_obsidian15.Notice(`\u5DF2\u521B\u5EFA\u8D26\u672C\u300C${alias || name}\u300D`);
-        this.onComplete({ action: "created", ledger: name });
+        this.result = { action: "created", ledger: name };
         this.close();
       } catch (e) {
         errorEl.textContent = `\u521B\u5EFA\u5931\u8D25\uFF1A${e}`;
@@ -7463,9 +7467,7 @@ var OnboardingModal = class extends import_obsidian15.Modal {
   onClose() {
     const { contentEl } = this;
     contentEl.empty();
-    if (this.currentStep === "main") {
-      this.onComplete({ action: "skipped" });
-    }
+    this.onComplete(this.result ?? { action: "skipped" });
   }
 };
 
@@ -7473,23 +7475,23 @@ var OnboardingModal = class extends import_obsidian15.Modal {
 var DEFAULT_SETTINGS = { dataSubdir: "data", autoOpenOnStartup: true, onboardingCompleted: false };
 var AccountingPlugin = class extends import_obsidian16.Plugin {
   settingsTab;
+  /** 引导期间的背景设置页（应用主界面）；引导完成后按需刷新/关闭，避免双 Modal 堆叠。 */
+  onboardingBackdrop = null;
   async onload() {
     await this.loadSettings();
-    if (!this.settings.onboardingCompleted) {
-      await this.showOnboardingModal();
-      return;
-    }
     this.addCommand({
       id: "open",
       name: "\u5B8F\u5229\u8BB0\u8D26",
       callback: () => this.openEntry()
     });
     this.addRibbonIcon("coins", "\u5B8F\u5229\u8BB0\u8D26", () => this.openEntry());
-    if (this.settings.autoOpenOnStartup) {
-      this.app.workspace.onLayoutReady(() => {
+    this.app.workspace.onLayoutReady(() => {
+      if (!this.settings.onboardingCompleted) {
+        this.showOnboardingModal();
+      } else if (this.settings.autoOpenOnStartup) {
         void this.openEntry();
-      });
-    }
+      }
+    });
   }
   adapter() {
     return new ObsidianDataAdapter(this.app.vault, this.settings.dataSubdir, this);
@@ -7500,57 +7502,42 @@ var AccountingPlugin = class extends import_obsidian16.Plugin {
     const ledgers = await adapter.listLedgers();
     return ledgers.length > 0;
   }
-  /** 显示首次启动引导 Modal，处理用户选择后继续正常启动流程 */
-  async showOnboardingModal() {
+  /** 显示首次启动引导：先打开设置页（应用主界面）作背景，再在其上弹出引导 Modal——
+   *  避免引导孤立悬空在 Obsidian 笔记视图之上。命令/ribbon 已在 onload 注册，此处不 await。 */
+  showOnboardingModal() {
     const adapter = this.adapter();
-    return new Promise((resolve) => {
-      try {
-        new OnboardingModal(
-          this.app,
-          adapter,
-          async (result) => {
-            try {
-              this.settings.onboardingCompleted = true;
-              await this.saveSettings();
-              if (result.ledger) {
-                this.settings.dataSubdir = result.ledger;
-                await this.saveSettings();
-              }
-              await this.continueStartupAfterOnboarding();
-              resolve();
-            } catch (error) {
-              console.error("\u5F15\u5BFC\u5B8C\u6210\u540E\u7EED\u5904\u7406\u5931\u8D25:", error);
-              try {
-                await this.continueStartupAfterOnboarding();
-              } catch (e) {
-                console.error("\u542F\u52A8\u6D41\u7A0B\u5931\u8D25:", e);
-              }
-              resolve();
-            }
-          }
-        ).open();
-      } catch (error) {
-        console.error("\u663E\u793A\u5F15\u5BFC Modal \u5931\u8D25:", error);
-        void this.continueStartupAfterOnboarding();
-        resolve();
-      }
-    });
-  }
-  /** 引导完成后继续启动流程（注册命令/ribbon，打开记账页面） */
-  async continueStartupAfterOnboarding() {
-    this.addCommand({
-      id: "open",
-      name: "\u5B8F\u5229\u8BB0\u8D26",
-      callback: () => this.openEntry()
-    });
-    this.addRibbonIcon("coins", "\u5B8F\u5229\u8BB0\u8D26", () => this.openEntry());
-    if (this.settings.autoOpenOnStartup) {
-      this.app.workspace.onLayoutReady(() => {
-        void this.openEntry();
-      });
-    } else {
-      void this.openEntry();
+    this.onboardingBackdrop = this.openSettings();
+    try {
+      new OnboardingModal(this.app, adapter, (result) => {
+        void this.handleOnboardingResult(result);
+      }).open();
+    } catch (error) {
+      console.error("\u663E\u793A\u5F15\u5BFC Modal \u5931\u8D25:", error);
     }
+  }
+  /** 引导完成：落盘标记与所选账本，并重建 settingsTab。
+   *  账本变更时刷新背景设置页（新页叠在上层、旧背景页在下层 detach，无闪屏）；未变更（跳过）则沿用背景设置页。 */
+  async handleOnboardingResult(result) {
+    let ledgerChanged = false;
+    try {
+      this.settings.onboardingCompleted = true;
+      if (result.ledger && result.ledger !== this.settings.dataSubdir) {
+        this.settings.dataSubdir = result.ledger;
+        ledgerChanged = true;
+      }
+      await this.saveSettings();
+      if (ledgerChanged) {
+        const adapter = new ObsidianDataAdapter(this.app.vault, this.settings.dataSubdir, this);
+        this.settingsTab = new AccountingSettings(this.app, this, adapter);
+      }
+    } catch (error) {
+      console.error("\u5F15\u5BFC\u5B8C\u6210\u5904\u7406\u5931\u8D25:", error);
+    }
+    if (ledgerChanged) {
+      this.openSettings();
+      this.onboardingBackdrop?.close();
+    }
+    this.onboardingBackdrop = null;
   }
   /** 导航上下文：三个目标的打开回调，注入到各 Modal 使其底部导航条可用。public 供设置页「查看」跳转复用。 */
   navCtx(adapter) {
@@ -7622,10 +7609,11 @@ var AccountingPlugin = class extends import_obsidian16.Plugin {
     this.switchLedger(newSubdir);
     this.openSettings();
   };
-  /** 打开设置页（全屏 Modal）：每次用最新 dataSubdir 重建 adapter，导航条与切换账本回调均绑定到该新 adapter。 */
+  /** 打开设置页（全屏 Modal）：每次用最新 dataSubdir 重建 adapter，导航条与切换账本回调均绑定到该新 adapter。
+   *  返回实例，供引导背景页按需 close。 */
   openSettings() {
     const adapter = this.adapter();
-    openSettings(this.app, this.settingsTab, this.navCtx(adapter), void 0, this.switchLedgerAndReopenSettings);
+    return openSettings(this.app, this.settingsTab, this.navCtx(adapter), void 0, this.switchLedgerAndReopenSettings);
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
