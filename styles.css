@@ -267,6 +267,57 @@
   line-height: 1.4;
 }
 
+/* 账户选择下方的「当前余额」提示：左缩进对齐 select（label 64px + gap 8px = 72px），小字次要色。 */
+.accounting-entry-balance-hint {
+  margin: 2px 0 10px 72px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* 「?」渐进式帮助：summary 常驻 + 点击 ? 展开 detail（详见 openspec ui-help-disclosure）。 */
+.accounting-help-tip {
+  margin-top: 2px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.accounting-help-tip-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.accounting-help-tip-summary {
+  min-width: 0;
+}
+.accounting-help-tip-btn {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.accounting-help-tip-btn.is-open {
+  border-color: var(--interactive-accent);
+  color: var(--text-normal);
+}
+@media (hover: hover) {
+  .accounting-help-tip-btn:hover {
+    border-color: var(--interactive-accent);
+    color: var(--text-normal);
+  }
+}
+.accounting-help-tip-detail {
+  margin-top: 4px;
+  word-break: break-all;
+}
+
 .accounting-entry-control-group {
   flex: 1 1 auto;
   display: flex;
@@ -1565,16 +1616,6 @@
   gap: 8px;
   justify-content: flex-end;
   margin-top: 8px;
-}
-
-.accounting-adjust-submit {
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
-  border: none;
-  padding: 6px 16px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 600;
 }
 
 /* select 触发器统一自定义外观；弹出的 option 列表仍由系统渲染（不可定制）。 */
