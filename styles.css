@@ -538,6 +538,12 @@
   margin-bottom: 10px;
 }
 
+/* 新建账户按钮行：与账户分组保持一致间距 */
+.accounting-create-account-row {
+  margin-bottom: 10px;
+  text-align: center;
+}
+
 .accounting-group-head {
   display: flex;
   justify-content: space-between;
@@ -3079,6 +3085,107 @@
 .accounting-startup-toggle {
   margin-block: auto;
   padding-left: 12px;
+}
+
+/* ============================================================================
+   首次启动引导 Modal 样式（移动端优化）
+   ========================================================================= */
+
+/* 引导 Modal 容器：移动端全屏，桌面端居中 */
+.accounting-onboarding-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+/* 引导 Modal 标题：居中显示 */
+.accounting-modal-title {
+  text-align: center;
+  font-size: 1.3em;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  color: var(--text-normal);
+}
+
+/* 引导 Modal 描述文本：居中、次要颜色 */
+.accounting-modal-desc {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.95em;
+  line-height: 1.5;
+  margin: 0 0 16px 0;
+}
+
+/* 引导 Modal 提示文本：小字、次要颜色 */
+.accounting-modal-hint {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85em;
+  margin: 16px 0 0 0;
+}
+
+/* 引导 Modal 空状态提示：居中、次要颜色 */
+.accounting-empty-hint {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.95em;
+  padding: 16px 0;
+}
+
+/* 引导表单组：垂直布局，适当间距 */
+.accounting-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+/* 引导表单标签：正常粗细 */
+.accounting-label {
+  font-weight: 500;
+  font-size: 0.9em;
+  color: var(--text-normal);
+}
+
+/* 引导错误提示：红色、显眼 */
+.accounting-error {
+  color: var(--text-error);
+  font-size: 0.9em;
+  margin: 8px 0;
+  padding: 8px 12px;
+  background: var(--background-modifier-error);
+  border-radius: var(--ac-radius-input);
+  border-left: 3px solid var(--text-error);
+}
+
+/* 引导 Modal 按钮组：水平排列，右对齐 */
+.accounting-modal-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+/* 引导目录列表：垂直布局 */
+.accounting-onboarding-folder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 12px 0;
+  padding: 8px;
+  background: var(--background-secondary);
+  border-radius: var(--ac-radius-input);
+}
+
+/* 移动端优化：确保按钮在大屏上不超过合理宽度 */
+@media (min-width: 600px) {
+  .accounting-onboarding-options .accounting-btn {
+    max-width: 400px;
+    margin: 0 auto;
+  }
 }
 
 /* 自动刷新 checkbox 文字样式：与 ledger-empty 统一 */

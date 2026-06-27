@@ -23,8 +23,8 @@ __export(main_exports, {
   default: () => AccountingPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian14 = require("obsidian");
-var import_obsidian15 = require("obsidian");
+var import_obsidian16 = require("obsidian");
+var import_obsidian17 = require("obsidian");
 
 // src/dataAdapter.ts
 var import_obsidian = require("obsidian");
@@ -1942,7 +1942,7 @@ function moveType(s, type, dir) {
 }
 
 // src/settings.ts
-var import_obsidian13 = require("obsidian");
+var import_obsidian14 = require("obsidian");
 
 // src/transactionListModal.ts
 var import_obsidian6 = require("obsidian");
@@ -4440,7 +4440,7 @@ var TransactionListModal = class extends import_obsidian6.Modal {
 };
 
 // src/balanceModal.ts
-var import_obsidian10 = require("obsidian");
+var import_obsidian11 = require("obsidian");
 
 // src/adjustBalanceModal.ts
 var import_obsidian7 = require("obsidian");
@@ -4942,8 +4942,234 @@ var AccountActionModal = class extends import_obsidian9.Modal {
   }
 };
 
+// src/accountCreateModal.ts
+var import_obsidian10 = require("obsidian");
+var AccountCreateModal = class extends import_obsidian10.Modal {
+  constructor(app, adapter, accounts, categories, accountTypeSettings, onSaved) {
+    super(app);
+    this.adapter = adapter;
+    this.accounts = accounts;
+    this.categories = categories;
+    this.accountTypeSettings = accountTypeSettings;
+    this.onSaved = onSaved;
+  }
+  nameEl;
+  typeEl;
+  openingEl;
+  currencyEl;
+  noteEl;
+  creditLimitEl;
+  billingDayEl;
+  repaymentEl;
+  creditBlockEl;
+  footerEl;
+  rates = {};
+  baseCurrency = "CNY";
+  boundViewport;
+  activeInput = null;
+  async onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    try {
+      this.rates = await this.adapter.readRates();
+      this.baseCurrency = await this.adapter.readBaseCurrency();
+    } catch {
+    }
+    this.modalEl.addClass("accounting-sub-modal");
+    this.modalEl.addClass("accounting-adjust-modal");
+    if (!import_obsidian10.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    contentEl.createEl("div", { text: "\u65B0\u5EFA\u8D26\u6237", cls: "accounting-adjust-title" });
+    const nameRow = this.row("\u540D\u79F0");
+    this.nameEl = this.input(nameRow, "text");
+    const typeRow = this.row("\u7C7B\u578B");
+    this.typeEl = this.select(typeRow);
+    this.typeEl.onchange = () => this.toggleCredit();
+    const openRow = this.row("\u521D\u59CB\u4F59\u989D");
+    this.openingEl = this.input(openRow, "number", "0.01");
+    const curRow = this.row("\u5E01\u79CD");
+    this.currencyEl = this.currencySelect(curRow);
+    const noteRow = this.row("\u5907\u6CE8");
+    this.noteEl = this.input(noteRow, "text");
+    this.creditBlockEl = contentEl.createDiv({ cls: "accounting-credit-block" });
+    const clRow = this.row("\u4FE1\u7528\u989D\u5EA6", this.creditBlockEl);
+    this.creditLimitEl = this.input(clRow, "number", "0.01");
+    const bdRow = this.row("\u8D26\u5355\u65E5", this.creditBlockEl);
+    this.billingDayEl = this.input(bdRow, "number");
+    this.billingDayEl.min = "1";
+    this.billingDayEl.max = "31";
+    this.billingDayEl.placeholder = "1-31";
+    const rdRow = this.row("\u8FD8\u6B3E\u65E5", this.creditBlockEl);
+    this.repaymentEl = this.input(rdRow, "number");
+    this.repaymentEl.min = "1";
+    this.repaymentEl.max = "31";
+    this.repaymentEl.placeholder = "1-31";
+    this.footerEl = contentEl.createDiv({ cls: "accounting-adjust-footer" });
+    this.initializeDefaults();
+    this.renderFooter();
+    contentEl.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        this.close();
+      }
+    });
+    contentEl.addEventListener("focusin", (e) => {
+      const el = e.target;
+      if (!this.isSoftKeyboardTarget(el)) return;
+      this.activeInput = el;
+      window.setTimeout(() => this.liftActive(), 320);
+    });
+    contentEl.addEventListener("focusout", () => {
+      this.activeInput = null;
+      window.setTimeout(() => this.liftActive(), 320);
+    });
+    this.boundViewport = () => {
+      if (this.activeInput) this.liftActive();
+    };
+    window.visualViewport?.addEventListener("resize", this.boundViewport);
+  }
+  row(label, parent) {
+    const host = parent ?? this.contentEl;
+    const r = host.createDiv({ cls: "accounting-adjust-row" });
+    r.createEl("label", { text: label, cls: "accounting-adjust-label" });
+    return r;
+  }
+  input(parent, type, step) {
+    const el = parent.createEl("input", { cls: "accounting-adjust-input" });
+    el.type = type;
+    if (step) el.step = step;
+    if (type === "number") el.inputMode = "decimal";
+    return el;
+  }
+  select(parent) {
+    const el = parent.createEl("select", { cls: "accounting-adjust-input" });
+    for (const t of this.accountTypeSettings.types) {
+      el.createEl("option", { text: t.label, value: t.type });
+    }
+    return el;
+  }
+  currencySelect(parent) {
+    const el = parent.createEl("select", { cls: "accounting-adjust-input" });
+    const currencies = currencyOptions(this.rates, this.accounts, this.baseCurrency);
+    for (const c of currencies) {
+      el.createEl("option", { text: c, value: c });
+    }
+    return el;
+  }
+  toggleCredit() {
+    this.creditBlockEl.style.display = this.typeEl.value === "credit" ? "" : "none";
+  }
+  /** 初始化默认值：币种=本位币，类型=第一个启用类型，其他为空 */
+  initializeDefaults() {
+    for (const opt of Array.from(this.currencyEl.options)) {
+      opt.selected = opt.value === this.baseCurrency;
+    }
+    const firstEnabled = this.accountTypeSettings.types.find((t) => t.active !== false);
+    if (firstEnabled) {
+      for (const opt of Array.from(this.typeEl.options)) {
+        opt.selected = opt.value === firstEnabled.type;
+      }
+    }
+    this.openingEl.value = "0";
+    this.toggleCredit();
+    this.nameEl.addEventListener("input", () => this.updateSaveButton());
+    this.updateSaveButton();
+  }
+  /** 更新保存按钮状态（名称为空时禁用） */
+  updateSaveButton() {
+    const saveBtn = this.footerEl?.querySelector(".accounting-btn-primary");
+    if (saveBtn) {
+      saveBtn.disabled = !this.nameEl.value.trim();
+    }
+  }
+  /** 渲染底部按钮：取消 / 保存 */
+  renderFooter() {
+    this.footerEl.empty();
+    const cancel = this.footerEl.createEl("button", { text: "\u53D6\u6D88", cls: "accounting-btn-secondary" });
+    cancel.onclick = () => this.close();
+    const save = this.footerEl.createEl("button", { text: "\u4FDD\u5B58", cls: "accounting-btn-primary" });
+    save.disabled = true;
+    save.onclick = () => void this.submit();
+  }
+  get isSmallScreen() {
+    return import_obsidian10.Platform.isMobile || window.innerWidth < 768;
+  }
+  /** 仅对「唤起遮挡型软键盘/IME」的文本输入放行：textarea 与 type=text（与 EntryModal/AdjustBalanceModal 一致）。 */
+  isSoftKeyboardTarget(el) {
+    if (el.tagName === "TEXTAREA") return true;
+    return el.tagName === "INPUT" && el.type === "text";
+  }
+  liftActive() {
+    if (!this.isSmallScreen) return;
+    this.modalEl.style.transform = "";
+    const el = this.activeInput;
+    if (!el) return;
+    void this.modalEl.offsetWidth;
+    const rect = el.getBoundingClientRect();
+    const modalTop = this.modalEl.getBoundingClientRect().top;
+    const targetBottom = window.innerHeight * 0.45;
+    let shift = Math.max(0, Math.round(rect.bottom - targetBottom));
+    shift = Math.min(shift, Math.max(0, modalTop));
+    if (shift > 12) {
+      this.modalEl.style.transform = `translateY(${-shift}px)`;
+      window.setTimeout(() => el.scrollIntoView({ block: "center" }), 30);
+    }
+  }
+  async submit() {
+    const name = this.nameEl.value.trim();
+    const type = this.typeEl.value;
+    const openingBalance = this.openingEl.value;
+    const currency = this.currencyEl.value || "CNY";
+    const note = this.noteEl.value;
+    const creditLimit = this.creditLimitEl.value;
+    const billingDay = this.billingDayEl.value;
+    const repaymentDay = this.repaymentEl.value;
+    if (billingDay && (parseInt(billingDay) < 1 || parseInt(billingDay) > 31)) {
+      new import_obsidian10.Notice("\u8D26\u5355\u65E5\u5FC5\u987B\u5728 1-31 \u4E4B\u95F4");
+      return;
+    }
+    if (repaymentDay && (parseInt(repaymentDay) < 1 || parseInt(repaymentDay) > 31)) {
+      new import_obsidian10.Notice("\u8FD8\u6B3E\u65E5\u5FC5\u987B\u5728 1-31 \u4E4B\u95F4");
+      return;
+    }
+    const id = crypto.randomUUID();
+    const now = nowISO();
+    const newAccount = {
+      id,
+      name,
+      type,
+      openingBalance: parseFloat(openingBalance) || 0,
+      currency,
+      note: note || void 0,
+      creditLimit: type === "credit" ? parseFloat(creditLimit) || void 0 : void 0,
+      billingDay: type === "credit" ? parseInt(billingDay) || void 0 : void 0,
+      repaymentDay: type === "credit" ? parseInt(repaymentDay) || void 0 : void 0,
+      active: true,
+      createdAt: now,
+      updatedAt: now
+    };
+    try {
+      await this.adapter.writeMeta({
+        accounts: [...this.accounts, newAccount],
+        categories: this.categories
+      });
+      new import_obsidian10.Notice(`\u5DF2\u521B\u5EFA\u8D26\u6237\u300C${name}\u300D`);
+      this.onSaved();
+      this.close();
+    } catch (err) {
+      new import_obsidian10.Notice("\u521B\u5EFA\u8D26\u6237\u5931\u8D25\uFF1A" + (err instanceof Error ? err.message : String(err)));
+    }
+  }
+  onClose() {
+    if (this.boundViewport) {
+      window.visualViewport?.removeEventListener("resize", this.boundViewport);
+    }
+    this.activeInput = null;
+    this.modalEl.style.transform = "";
+    this.contentEl.empty();
+  }
+};
+
 // src/balanceModal.ts
-var BalanceModal = class extends import_obsidian10.Modal {
+var BalanceModal = class extends import_obsidian11.Modal {
   constructor(app, adapter, navCtx, slide) {
     super(app);
     this.adapter = adapter;
@@ -4985,9 +5211,24 @@ var BalanceModal = class extends import_obsidian10.Modal {
     }
     if (snap.accounts.length === 0 && snap.transactions.length === 0) {
       contentEl.createEl("div", {
-        text: "\u6682\u65E0\u8D26\u672C\u6570\u636E\u3002\u8BF7\u5728\u684C\u9762\u7AEF\u521D\u59CB\u5316\u8D26\u672C\u6216\u68C0\u67E5\u6570\u636E\u5B50\u76EE\u5F55\u3002",
+        text: "\u6682\u65E0\u8D26\u6237\uFF0C\u70B9\u300C\uFF0B \u65B0\u5EFA\u8D26\u6237\u300D\u521B\u5EFA",
         cls: "accounting-empty"
       });
+      const createAccountEl2 = contentEl.createDiv({ cls: "accounting-create-account-row" });
+      const createBtn2 = createAccountEl2.createEl("button", {
+        text: "\uFF0B \u65B0\u5EFA\u8D26\u6237",
+        cls: "accounting-ledger-create"
+      });
+      createBtn2.onclick = () => {
+        new AccountCreateModal(
+          this.app,
+          this.adapter,
+          snap.accounts,
+          snap.categories,
+          this.accountTypeSettings,
+          () => this.refresh()
+        ).open();
+      };
       return;
     }
     const storedTypes = await this.adapter.readAccountTypeSettings();
@@ -5020,6 +5261,21 @@ var BalanceModal = class extends import_obsidian10.Modal {
       h.createEl("summary", { text: `\u9690\u85CF\u8D26\u6237\uFF08\u4ECD\u8BA1\u5165\u51C0\u8D44\u4EA7\uFF09` });
       this.renderGroups(h, hidden, balances, snap);
     }
+    const createAccountEl = contentEl.createDiv({ cls: "accounting-create-account-row" });
+    const createBtn = createAccountEl.createEl("button", {
+      text: "\uFF0B \u65B0\u5EFA\u8D26\u6237",
+      cls: "accounting-ledger-create"
+    });
+    createBtn.onclick = () => {
+      new AccountCreateModal(
+        this.app,
+        this.adapter,
+        snap.accounts,
+        snap.categories,
+        this.accountTypeSettings,
+        () => this.refresh()
+      ).open();
+    };
   }
   /** 统一底部导航条（由 CSS 固定到底部，内容区预留 safe-area）。 */
   renderNav() {
@@ -5105,7 +5361,7 @@ var BalanceModal = class extends import_obsidian10.Modal {
 };
 
 // src/reportModal.ts
-var import_obsidian11 = require("obsidian");
+var import_obsidian12 = require("obsidian");
 var RANGE_OPTIONS = [
   { key: "thisMonth", label: "\u672C\u6708" },
   { key: "last1m", label: "\u8FD11\u6708" },
@@ -5175,7 +5431,7 @@ function rangeBounds(key) {
   }
   return { start: startIso(startDate), end: endExclusiveIso(today) };
 }
-var ReportModal = class extends import_obsidian11.Modal {
+var ReportModal = class extends import_obsidian12.Modal {
   constructor(app, adapter, navCtx, slide) {
     super(app);
     this.adapter = adapter;
@@ -5548,8 +5804,8 @@ var ReportModal = class extends import_obsidian11.Modal {
 };
 
 // src/settingsModal.ts
-var import_obsidian12 = require("obsidian");
-var SettingsModal = class extends import_obsidian12.Modal {
+var import_obsidian13 = require("obsidian");
+var SettingsModal = class extends import_obsidian13.Modal {
   constructor(app, settingsTab, navCtx, slide, onSwitchLedger) {
     super(app);
     this.settingsTab = settingsTab;
@@ -5716,7 +5972,7 @@ var AccountingSettings = class {
     panel.setAttribute("data-tab", tab);
     return panel;
   }
-  /** 通用设置 panel：插件级开关（不依赖账本数据）。当前含「启动自动打开记账」。 */
+  /** 通用设置 panel：插件级开关（不依赖账本数据）。当前含「启动自动打开记账」+「重新运行账本引导」。 */
   renderGeneralSettings(panel) {
     const cardEl = panel.createDiv("accounting-ledger-card");
     const headEl = cardEl.createDiv("accounting-ledger-card-head");
@@ -5730,12 +5986,20 @@ var AccountingSettings = class {
       this.plugin.settings.autoOpenOnStartup = cb.checked;
       try {
         await this.plugin.saveSettings();
-        new import_obsidian13.Notice(cb.checked ? "\u5DF2\u5F00\u542F\uFF1A\u4E0B\u6B21\u6253\u5F00 Obsidian \u81EA\u52A8\u8FDB\u5165\u8BB0\u8D26" : "\u5DF2\u5173\u95ED\uFF1A\u4E0B\u6B21\u6253\u5F00 Obsidian \u751F\u6548");
+        new import_obsidian14.Notice(cb.checked ? "\u5DF2\u5F00\u542F\uFF1A\u4E0B\u6B21\u6253\u5F00 Obsidian \u81EA\u52A8\u8FDB\u5165\u8BB0\u8D26" : "\u5DF2\u5173\u95ED\uFF1A\u4E0B\u6B21\u6253\u5F00 Obsidian \u751F\u6548");
       } catch (e) {
-        new import_obsidian13.Notice(`\u4FDD\u5B58\u5931\u8D25\uFF1A${e}`);
+        new import_obsidian14.Notice(`\u4FDD\u5B58\u5931\u8D25\uFF1A${e}`);
       }
     };
     row.createEl("span", { text: "\u6253\u5F00 Obsidian \u65F6\u81EA\u52A8\u8FDB\u5165\u8BB0\u8D26", cls: "accounting-currency-online-label" });
+    const resetOnboardingRow = bodyEl.createDiv("accounting-currency-online-row");
+    const resetBtn = resetOnboardingRow.createEl("button", {
+      text: "\u21BB \u91CD\u65B0\u8FD0\u884C\u8D26\u672C\u5F15\u5BFC",
+      cls: "accounting-btn accounting-btn-secondary"
+    });
+    resetBtn.onclick = () => {
+      void this.handleResetOnboarding();
+    };
   }
   /** 账本管理 panel：账本卡片（新建/刷新/切换/改名/删除）。 */
   renderLedgerPanel(panel, onSwitchLedger) {
@@ -5783,11 +6047,11 @@ var AccountingSettings = class {
                 } else {
                   this.plugin.settings.dataSubdir = name;
                   await this.plugin.saveSettings();
-                  new import_obsidian13.Notice(`\u5DF2\u5207\u6362\u5230\u300C${alias}\u300D\uFF0C\u8BF7\u5173\u95ED\u5E76\u91CD\u65B0\u6253\u5F00\u8BB0\u8D26\u754C\u9762`);
+                  new import_obsidian14.Notice(`\u5DF2\u5207\u6362\u5230\u300C${alias}\u300D\uFF0C\u8BF7\u5173\u95ED\u5E76\u91CD\u65B0\u6253\u5F00\u8BB0\u8D26\u754C\u9762`);
                   void refreshLedgerList();
                 }
               } catch (error) {
-                new import_obsidian13.Notice(`\u5207\u6362\u8D26\u672C\u5931\u8D25\uFF1A${error}`);
+                new import_obsidian14.Notice(`\u5207\u6362\u8D26\u672C\u5931\u8D25\uFF1A${error}`);
               }
             };
           }
@@ -5815,7 +6079,7 @@ var AccountingSettings = class {
     };
     refreshLedgerBtn.onclick = async () => {
       await refreshLedgerList();
-      new import_obsidian13.Notice("\u8D26\u672C\u5217\u8868\u5DF2\u5237\u65B0");
+      new import_obsidian14.Notice("\u8D26\u672C\u5217\u8868\u5DF2\u5237\u65B0");
     };
     void refreshLedgerList();
   }
@@ -5835,9 +6099,9 @@ var AccountingSettings = class {
     createBackupBtn.onclick = async () => {
       try {
         const backupPath = await this.currentAdapter().backup("manual");
-        new import_obsidian13.Notice(`\u5DF2\u521B\u5EFA\u5907\u4EFD\uFF1A${backupPath}`);
+        new import_obsidian14.Notice(`\u5DF2\u521B\u5EFA\u5907\u4EFD\uFF1A${backupPath}`);
       } catch (error) {
-        new import_obsidian13.Notice(`\u5907\u4EFD\u5931\u8D25\uFF1A${error}`);
+        new import_obsidian14.Notice(`\u5907\u4EFD\u5931\u8D25\uFF1A${error}`);
       }
     };
     listBackupBtn.onclick = () => {
@@ -5880,10 +6144,10 @@ var AccountingSettings = class {
     baseSel.onchange = async () => {
       try {
         await adapter.writeBaseCurrency(baseSel.value);
-        new import_obsidian13.Notice(`\u672C\u4F4D\u5E01\u5DF2\u8BBE\u4E3A ${baseSel.value}`);
+        new import_obsidian14.Notice(`\u672C\u4F4D\u5E01\u5DF2\u8BBE\u4E3A ${baseSel.value}`);
         await refresh();
       } catch (error) {
-        new import_obsidian13.Notice(`\u8BBE\u7F6E\u5931\u8D25\uFF1A${error}`);
+        new import_obsidian14.Notice(`\u8BBE\u7F6E\u5931\u8D25\uFF1A${error}`);
       }
     };
     baseRow.createEl("div", { text: "\u51C0\u8D44\u4EA7\u4E0E\u6536\u652F\u62A5\u8868\u6309\u672C\u4F4D\u5E01\u6C47\u603B\u6298\u7B97\uFF08\u5916\u5E01\u6309\u6C47\u7387\u6298\u7B97\uFF09\u3002\u9ED8\u8BA4 CNY\u3002", cls: "accounting-ledger-empty" });
@@ -5978,32 +6242,32 @@ var AccountingSettings = class {
     saveBtn.onclick = async () => {
       const { invalid, duplicates, missingRate, emptyRows, baseRows } = validateRateRows(rows, baseCurrency);
       if (emptyRows > 0) {
-        new import_obsidian13.Notice(`\u6709 ${emptyRows} \u884C\u5E01\u79CD\u672A\u586B\u5199\uFF0C\u8BF7\u586B\u5199\u6216\u5220\u9664`, 5e3);
+        new import_obsidian14.Notice(`\u6709 ${emptyRows} \u884C\u5E01\u79CD\u672A\u586B\u5199\uFF0C\u8BF7\u586B\u5199\u6216\u5220\u9664`, 5e3);
         return;
       }
       if (invalid.length > 0) {
-        new import_obsidian13.Notice(`\u65E0\u6548\u5E01\u79CD\uFF08\u975E ISO 4217 \u5E01\u79CD\u4EE3\u7801\uFF09\uFF1A${invalid.join(", ")}`, 5e3);
+        new import_obsidian14.Notice(`\u65E0\u6548\u5E01\u79CD\uFF08\u975E ISO 4217 \u5E01\u79CD\u4EE3\u7801\uFF09\uFF1A${invalid.join(", ")}`, 5e3);
         return;
       }
       if (baseRows.length > 0) {
-        new import_obsidian13.Notice(`\u672C\u4F4D\u5E01 ${baseCurrency} \u65E0\u9700\u5728\u6C47\u7387\u8868\u4E2D\u7EF4\u62A4\uFF0C\u8BF7\u5220\u9664\u8BE5\u884C`, 5e3);
+        new import_obsidian14.Notice(`\u672C\u4F4D\u5E01 ${baseCurrency} \u65E0\u9700\u5728\u6C47\u7387\u8868\u4E2D\u7EF4\u62A4\uFF0C\u8BF7\u5220\u9664\u8BE5\u884C`, 5e3);
         return;
       }
       if (missingRate.length > 0) {
-        new import_obsidian13.Notice(`\u4EE5\u4E0B\u5E01\u79CD\u7F3A\u5C11\u6709\u6548\u6C47\u7387\uFF1A${missingRate.join(", ")}`, 5e3);
+        new import_obsidian14.Notice(`\u4EE5\u4E0B\u5E01\u79CD\u7F3A\u5C11\u6709\u6548\u6C47\u7387\uFF1A${missingRate.join(", ")}`, 5e3);
         return;
       }
       if (duplicates.length > 0) {
-        new import_obsidian13.Notice(`\u91CD\u590D\u5E01\u79CD\uFF1A${duplicates.join(", ")}`, 5e3);
+        new import_obsidian14.Notice(`\u91CD\u590D\u5E01\u79CD\uFF1A${duplicates.join(", ")}`, 5e3);
         return;
       }
       try {
         await adapter.writeRates(rateRowsToTable(rows, baseCurrency));
-        new import_obsidian13.Notice("\u5DF2\u4FDD\u5B58\u6C47\u7387\u8868");
+        new import_obsidian14.Notice("\u5DF2\u4FDD\u5B58\u6C47\u7387\u8868");
         setDirty(false);
         await refresh();
       } catch (error) {
-        new import_obsidian13.Notice(`\u4FDD\u5B58\u5931\u8D25\uFF1A${error}`, 5e3);
+        new import_obsidian14.Notice(`\u4FDD\u5B58\u5931\u8D25\uFF1A${error}`, 5e3);
       }
     };
     bodyEl.createEl("p", {
@@ -6023,25 +6287,25 @@ var AccountingSettings = class {
         btn.setText("\u5237\u65B0\u4E2D\u2026");
         try {
           const url = `https://api.frankfurter.app/latest?from=${baseCurrency.toUpperCase()}`;
-          const resp = await (0, import_obsidian13.requestUrl)({ url, method: "GET" });
+          const resp = await (0, import_obsidian14.requestUrl)({ url, method: "GET" });
           const fetched = parseRateResponse(resp.json, baseCurrency, nowISO());
           if (!fetched) {
-            new import_obsidian13.Notice("\u54CD\u5E94\u89E3\u6790\u5931\u8D25\uFF0C\u5DF2\u4FDD\u7559\u65E2\u6709\u6C47\u7387\u8868");
+            new import_obsidian14.Notice("\u54CD\u5E94\u89E3\u6790\u5931\u8D25\uFF0C\u5DF2\u4FDD\u7559\u65E2\u6709\u6C47\u7387\u8868");
             return;
           }
           const currentVisible = rows.map((r) => r.currency.trim().toUpperCase()).filter((c) => c && c !== baseCurrency);
           const { merged, updated } = mergeRatesByVisible(rates, fetched, currentVisible);
           if (updated === 0) {
-            new import_obsidian13.Notice("\u54CD\u5E94\u4E2D\u6CA1\u6709\u5173\u5FC3\u7684\u5E01\u79CD\uFF0C\u5DF2\u4FDD\u7559\u65E2\u6709\u6C47\u7387\u8868");
+            new import_obsidian14.Notice("\u54CD\u5E94\u4E2D\u6CA1\u6709\u5173\u5FC3\u7684\u5E01\u79CD\uFF0C\u5DF2\u4FDD\u7559\u65E2\u6709\u6C47\u7387\u8868");
             return;
           }
           await adapter.writeRates(merged);
           const next = { ...cfg, lastSuccess: nowISO() };
           await adapter.writeRateConfig(next);
-          new import_obsidian13.Notice(`\u5DF2\u5237\u65B0 ${updated} \u4E2A\u5E01\u79CD\u6C47\u7387`);
+          new import_obsidian14.Notice(`\u5DF2\u5237\u65B0 ${updated} \u4E2A\u5E01\u79CD\u6C47\u7387`);
           await refresh();
         } catch (e) {
-          new import_obsidian13.Notice(`\u5237\u65B0\u5931\u8D25\uFF1A${e}`);
+          new import_obsidian14.Notice(`\u5237\u65B0\u5931\u8D25\uFF1A${e}`);
         } finally {
           btn.disabled = false;
           btn.setText("\u5237\u65B0\u6C47\u7387");
@@ -6056,7 +6320,7 @@ var AccountingSettings = class {
         try {
           await adapter.writeRateConfig(next);
         } catch (e) {
-          new import_obsidian13.Notice(`\u4FDD\u5B58\u5931\u8D25\uFF1A${e}`);
+          new import_obsidian14.Notice(`\u4FDD\u5B58\u5931\u8D25\uFF1A${e}`);
         }
       };
       autoRow.createEl("span", { text: "\u6BCF\u6B21\u6253\u5F00\u81EA\u52A8\u5237\u65B0\uFF08\u5F53\u5929\u5DF2\u5237\u65B0\u5219\u8DF3\u8FC7\uFF09", cls: "accounting-currency-online-label" });
@@ -6072,10 +6336,10 @@ var AccountingSettings = class {
         await adapter.createLedger(name);
         this.plugin.settings.dataSubdir = name;
         await this.plugin.saveSettings();
-        new import_obsidian13.Notice(`\u5DF2\u65B0\u5EFA\u5E76\u5207\u6362\u5230\u300C${name}\u300D\uFF0C\u8BF7\u5173\u95ED\u5E76\u91CD\u65B0\u6253\u5F00\u8BB0\u8D26\u754C\u9762`);
+        new import_obsidian14.Notice(`\u5DF2\u65B0\u5EFA\u5E76\u5207\u6362\u5230\u300C${name}\u300D\uFF0C\u8BF7\u5173\u95ED\u5E76\u91CD\u65B0\u6253\u5F00\u8BB0\u8D26\u754C\u9762`);
         await onDone();
       } catch (error) {
-        new import_obsidian13.Notice(`\u65B0\u5EFA\u8D26\u672C\u5931\u8D25\uFF1A${error}`);
+        new import_obsidian14.Notice(`\u65B0\u5EFA\u8D26\u672C\u5931\u8D25\uFF1A${error}`);
       }
     });
     modal.open();
@@ -6086,13 +6350,24 @@ var AccountingSettings = class {
     const modal = new RenameLedgerAliasModal(this.app, folder, currentAlias, async (alias) => {
       try {
         await adapter.writeLedgerAlias(folder, alias);
-        new import_obsidian13.Notice(`\u5DF2\u66F4\u65B0\u522B\u540D\uFF1A${alias || folder}`);
+        new import_obsidian14.Notice(`\u5DF2\u66F4\u65B0\u522B\u540D\uFF1A${alias || folder}`);
         await onDone();
       } catch (error) {
-        new import_obsidian13.Notice(`\u6539\u540D\u5931\u8D25\uFF1A${error}`);
+        new import_obsidian14.Notice(`\u6539\u540D\u5931\u8D25\uFF1A${error}`);
       }
     });
     modal.open();
+  }
+  /** 重新运行账本引导：清除 onboardingCompleted 标记，下次启动时重新显示引导 */
+  async handleResetOnboarding() {
+    if (!confirm("\u786E\u8BA4\u91CD\u65B0\u8FD0\u884C\u8D26\u672C\u5F15\u5BFC\uFF1F\u8FD9\u5C06\u6E05\u9664\u5F15\u5BFC\u5B8C\u6210\u6807\u8BB0\uFF0C\u4E0B\u6B21\u542F\u52A8\u63D2\u4EF6\u65F6\u5C06\u91CD\u65B0\u663E\u793A\u5F15\u5BFC\u3002")) return;
+    try {
+      this.plugin.settings.onboardingCompleted = false;
+      await this.plugin.saveSettings();
+      new import_obsidian14.Notice("\u5DF2\u6E05\u9664\u5F15\u5BFC\u6807\u8BB0\uFF0C\u4E0B\u6B21\u542F\u52A8\u63D2\u4EF6\u65F6\u5C06\u91CD\u65B0\u663E\u793A\u5F15\u5BFC");
+    } catch (error) {
+      new import_obsidian14.Notice(`\u64CD\u4F5C\u5931\u8D25\uFF1A${error}`);
+    }
   }
   /** 删除账本：两步 confirm，递归删整目录 */
   async handleDeleteLedger(folder, alias, onDone) {
@@ -6101,10 +6376,10 @@ var AccountingSettings = class {
     const adapter = this.currentAdapter();
     try {
       await adapter.deleteLedger(folder);
-      new import_obsidian13.Notice(`\u5DF2\u5220\u9664\u8D26\u672C\uFF1A${alias}`);
+      new import_obsidian14.Notice(`\u5DF2\u5220\u9664\u8D26\u672C\uFF1A${alias}`);
       await onDone();
     } catch (error) {
-      new import_obsidian13.Notice(`\u5220\u9664\u5931\u8D25\uFF1A${error}`);
+      new import_obsidian14.Notice(`\u5220\u9664\u5931\u8D25\uFF1A${error}`);
     }
   }
   /** 显示备份列表弹窗 */
@@ -6123,7 +6398,7 @@ var AccountingSettings = class {
       });
       modal.open();
     } catch (error) {
-      new import_obsidian13.Notice(`\u52A0\u8F7D\u5907\u4EFD\u5217\u8868\u5931\u8D25\uFF1A${error}`);
+      new import_obsidian14.Notice(`\u52A0\u8F7D\u5907\u4EFD\u5217\u8868\u5931\u8D25\uFF1A${error}`);
     }
   }
   /** 处理恢复备份（两步确认；adapter.restoreBackup 内部自动创建 pre-restore 兜底） */
@@ -6136,9 +6411,9 @@ var AccountingSettings = class {
 \u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\uFF08\u6062\u590D\u524D\u4F1A\u81EA\u52A8\u521B\u5EFA pre-restore \u515C\u5E95\u5907\u4EFD\uFF09\u3002`)) return;
     try {
       await adapter.restoreBackup(backupName);
-      new import_obsidian13.Notice(`\u5DF2\u6062\u590D\u5907\u4EFD\uFF1A${backupName}\uFF0C\u8BF7\u5173\u95ED\u5E76\u91CD\u65B0\u6253\u5F00\u8BB0\u8D26\u754C\u9762`);
+      new import_obsidian14.Notice(`\u5DF2\u6062\u590D\u5907\u4EFD\uFF1A${backupName}\uFF0C\u8BF7\u5173\u95ED\u5E76\u91CD\u65B0\u6253\u5F00\u8BB0\u8D26\u754C\u9762`);
     } catch (error) {
-      new import_obsidian13.Notice(`\u6062\u590D\u5931\u8D25\uFF1A${error}`);
+      new import_obsidian14.Notice(`\u6062\u590D\u5931\u8D25\uFF1A${error}`);
     }
   }
   /** 处理删除备份（单步确认） */
@@ -6146,10 +6421,10 @@ var AccountingSettings = class {
     if (!confirm(`\u5220\u9664\u5907\u4EFD\u300C${backupName}\u300D\uFF1F`)) return false;
     try {
       await adapter.deleteBackup(backupName);
-      new import_obsidian13.Notice(`\u5DF2\u5220\u9664\u5907\u4EFD\uFF1A${backupName}`);
+      new import_obsidian14.Notice(`\u5DF2\u5220\u9664\u5907\u4EFD\uFF1A${backupName}`);
       return true;
     } catch (error) {
-      new import_obsidian13.Notice(`\u5220\u9664\u5931\u8D25\uFF1A${error}`);
+      new import_obsidian14.Notice(`\u5220\u9664\u5931\u8D25\uFF1A${error}`);
       return false;
     }
   }
@@ -6206,7 +6481,7 @@ var AccountingSettings = class {
     };
     refreshBtn.onclick = async () => {
       await refreshRules();
-      new import_obsidian13.Notice("\u5468\u671F\u8D26\u89C4\u5219\u5DF2\u5237\u65B0");
+      new import_obsidian14.Notice("\u5468\u671F\u8D26\u89C4\u5219\u5DF2\u5237\u65B0");
     };
     void refreshRules();
   }
@@ -6258,10 +6533,10 @@ var AccountingSettings = class {
         const rules = await adapter.readRecurringRules();
         const updated = rules.map((r) => r.id === rule.id ? { ...r, active: !r.active } : r);
         await adapter.writeRecurringRules(updated);
-        new import_obsidian13.Notice(rule.active ? "\u5DF2\u6682\u505C" : "\u5DF2\u542F\u7528");
+        new import_obsidian14.Notice(rule.active ? "\u5DF2\u6682\u505C" : "\u5DF2\u542F\u7528");
         void refreshRules();
       } catch (error) {
-        new import_obsidian13.Notice(`\u64CD\u4F5C\u5931\u8D25\uFF1A${error}`);
+        new import_obsidian14.Notice(`\u64CD\u4F5C\u5931\u8D25\uFF1A${error}`);
       }
     };
     const editBtn = actionsEl.createEl("button", {
@@ -6282,10 +6557,10 @@ var AccountingSettings = class {
       try {
         const rules = await adapter.readRecurringRules();
         await adapter.writeRecurringRules(rules.filter((r) => r.id !== rule.id));
-        new import_obsidian13.Notice("\u5DF2\u5220\u9664");
+        new import_obsidian14.Notice("\u5DF2\u5220\u9664");
         void refreshRules();
       } catch (error) {
-        new import_obsidian13.Notice(`\u5220\u9664\u5931\u8D25\uFF1A${error}`);
+        new import_obsidian14.Notice(`\u5220\u9664\u5931\u8D25\uFF1A${error}`);
       }
     };
   }
@@ -6412,16 +6687,16 @@ var AccountingSettings = class {
       new CreateCategoryModal(this.app, flow, title, placeholder, async (name) => {
         try {
           await this.handleAddCategory(name, flow);
-          new import_obsidian13.Notice(`\u5DF2\u6DFB\u52A0\u5206\u7C7B\u300C${name}\u300D`);
+          new import_obsidian14.Notice(`\u5DF2\u6DFB\u52A0\u5206\u7C7B\u300C${name}\u300D`);
           await refreshCategories();
         } catch (error) {
-          new import_obsidian13.Notice(`\u6DFB\u52A0\u5931\u8D25\uFF1A${error}`);
+          new import_obsidian14.Notice(`\u6DFB\u52A0\u5931\u8D25\uFF1A${error}`);
         }
       }).open();
     };
     refreshBtn.onclick = async () => {
       await refreshCategories();
-      new import_obsidian13.Notice(`${title}\u5DF2\u5237\u65B0`);
+      new import_obsidian14.Notice(`${title}\u5DF2\u5237\u65B0`);
     };
   }
   /** 可见分类行：重命名 / 合并 / 删除（删除双态：被引用→隐藏，未引用→物理删） */
@@ -6436,10 +6711,10 @@ var AccountingSettings = class {
       new RenameCategoryModal(this.app, cat, async (newName) => {
         try {
           const { rewritten } = await this.handleRenameCategory(cat.id, newName);
-          new import_obsidian13.Notice(rewritten > 0 ? `\u5DF2\u6539\u540D\uFF0C\u91CD\u5199 ${rewritten} \u6761\u5386\u53F2\u4EA4\u6613` : `\u5DF2\u6539\u540D`);
+          new import_obsidian14.Notice(rewritten > 0 ? `\u5DF2\u6539\u540D\uFF0C\u91CD\u5199 ${rewritten} \u6761\u5386\u53F2\u4EA4\u6613` : `\u5DF2\u6539\u540D`);
           await refresh();
         } catch (error) {
-          new import_obsidian13.Notice(`\u6539\u540D\u5931\u8D25\uFF1A${error}`);
+          new import_obsidian14.Notice(`\u6539\u540D\u5931\u8D25\uFF1A${error}`);
         }
       }).open();
     };
@@ -6448,16 +6723,16 @@ var AccountingSettings = class {
     mergeBtn.setAttribute("aria-label", "\u5408\u5E76\u5230\u5176\u4ED6\u5206\u7C7B");
     mergeBtn.onclick = () => {
       if (targets.length === 0) {
-        new import_obsidian13.Notice("\u6CA1\u6709\u540C\u7C7B\u578B\uFF08\u652F\u51FA/\u6536\u5165\uFF09\u7684\u5176\u4ED6\u5206\u7C7B\u53EF\u5408\u5E76");
+        new import_obsidian14.Notice("\u6CA1\u6709\u540C\u7C7B\u578B\uFF08\u652F\u51FA/\u6536\u5165\uFF09\u7684\u5176\u4ED6\u5206\u7C7B\u53EF\u5408\u5E76");
         return;
       }
       new MergeCategoryModal(this.app, cat, targets, refCount, async (toId) => {
         try {
           const { rewritten } = await this.handleMergeCategory(cat.id, toId);
-          new import_obsidian13.Notice(rewritten > 0 ? `\u5DF2\u5408\u5E76\uFF0C\u6539\u5199 ${rewritten} \u6761\u5386\u53F2\u4EA4\u6613` : `\u5DF2\u5408\u5E76`);
+          new import_obsidian14.Notice(rewritten > 0 ? `\u5DF2\u5408\u5E76\uFF0C\u6539\u5199 ${rewritten} \u6761\u5386\u53F2\u4EA4\u6613` : `\u5DF2\u5408\u5E76`);
           await refresh();
         } catch (error) {
-          new import_obsidian13.Notice(`\u5408\u5E76\u5931\u8D25\uFF1A${error}`);
+          new import_obsidian14.Notice(`\u5408\u5E76\u5931\u8D25\uFF1A${error}`);
         }
       }).open();
     };
@@ -6468,7 +6743,7 @@ var AccountingSettings = class {
         await this.handleDeleteCategory(cat, refCount);
         await refresh();
       } catch (error) {
-        new import_obsidian13.Notice(`\u5220\u9664\u5931\u8D25\uFF1A${error}`);
+        new import_obsidian14.Notice(`\u5220\u9664\u5931\u8D25\uFF1A${error}`);
       }
     };
   }
@@ -6482,10 +6757,10 @@ var AccountingSettings = class {
     restoreBtn.onclick = async () => {
       try {
         await this.handleRestoreCategory(cat);
-        new import_obsidian13.Notice(`\u5DF2\u6062\u590D\u300C${cat.name}\u300D`);
+        new import_obsidian14.Notice(`\u5DF2\u6062\u590D\u300C${cat.name}\u300D`);
         await refresh();
       } catch (error) {
-        new import_obsidian13.Notice(`\u6062\u590D\u5931\u8D25\uFF1A${error}`);
+        new import_obsidian14.Notice(`\u6062\u590D\u5931\u8D25\uFF1A${error}`);
       }
     };
     if (refCount === 0) {
@@ -6496,7 +6771,7 @@ var AccountingSettings = class {
           await this.handleDeleteCategory(cat, 0);
           await refresh();
         } catch (error) {
-          new import_obsidian13.Notice(`\u5220\u9664\u5931\u8D25\uFF1A${error}`);
+          new import_obsidian14.Notice(`\u5220\u9664\u5931\u8D25\uFF1A${error}`);
         }
       };
     }
@@ -6540,12 +6815,12 @@ var AccountingSettings = class {
       if (!confirm(`\u5206\u7C7B\u300C${cat.name}\u300D\u5DF2\u88AB ${refCount} \u6761\u4EA4\u6613\u4F7F\u7528\uFF0C\u5C06\u9690\u85CF\uFF08\u4E0D\u5F71\u54CD\u5386\u53F2\u4EA4\u6613\uFF09\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F`)) return;
       const next = categories.map((c) => c.id === cat.id ? { ...c, active: false } : c);
       await adapter.writeMeta({ accounts, categories: next });
-      new import_obsidian13.Notice(`\u5DF2\u9690\u85CF\u300C${cat.name}\u300D`);
+      new import_obsidian14.Notice(`\u5DF2\u9690\u85CF\u300C${cat.name}\u300D`);
     } else {
       if (!confirm(`\u5F7B\u5E95\u5220\u9664\u5206\u7C7B\u300C${cat.name}\u300D\uFF1F`)) return;
       const next = categories.filter((c) => c.id !== cat.id);
       await adapter.writeMeta({ accounts, categories: next });
-      new import_obsidian13.Notice(`\u5DF2\u5220\u9664\u300C${cat.name}\u300D`);
+      new import_obsidian14.Notice(`\u5DF2\u5220\u9664\u300C${cat.name}\u300D`);
     }
   }
   /** 恢复隐藏分类：active 置为可见。 */
@@ -6687,9 +6962,9 @@ var AccountingSettings = class {
         try {
           await this.saveAccountTypeDraft(draft);
           baseline = JSON.stringify(draft);
-          new import_obsidian13.Notice("\u5DF2\u4FDD\u5B58\u8D26\u6237\u7C7B\u578B");
+          new import_obsidian14.Notice("\u5DF2\u4FDD\u5B58\u8D26\u6237\u7C7B\u578B");
         } catch (error) {
-          new import_obsidian13.Notice(`\u4FDD\u5B58\u5931\u8D25\uFF1A${error}`);
+          new import_obsidian14.Notice(`\u4FDD\u5B58\u5931\u8D25\uFF1A${error}`);
         } finally {
           renderList();
         }
@@ -6711,7 +6986,7 @@ var AccountingSettings = class {
     };
     refreshBtn.onclick = async () => {
       await refresh();
-      new import_obsidian13.Notice("\u8D26\u6237\u7C7B\u578B\u5DF2\u5237\u65B0");
+      new import_obsidian14.Notice("\u8D26\u6237\u7C7B\u578B\u5DF2\u5237\u65B0");
     };
     resetBtn.onclick = () => {
       if (!confirm("\u6062\u590D\u4E3A\u9ED8\u8BA4\u8D26\u6237\u7C7B\u578B\u914D\u7F6E\uFF1F\u5F53\u524D\u7684\u81EA\u5B9A\u4E49\u5206\u7EC4\u3001\u6807\u7B7E\u4E0E\u987A\u5E8F\u5C06\u88AB\u8986\u76D6\u3002")) return;
@@ -6772,7 +7047,7 @@ var AccountingSettings = class {
     });
   }
 };
-var CreateLedgerModal = class extends import_obsidian13.Modal {
+var CreateLedgerModal = class extends import_obsidian14.Modal {
   constructor(app, existing, onSubmit) {
     super(app);
     this.existing = existing;
@@ -6785,7 +7060,7 @@ var CreateLedgerModal = class extends import_obsidian13.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian13.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian14.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.createEl("h2", { text: "\u65B0\u5EFA\u8D26\u672C" });
     this.input = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
     this.input.placeholder = "\u4F8B\u5982\uFF1A2027 \u6216 \u4E2A\u4EBA";
@@ -6818,7 +7093,7 @@ var CreateLedgerModal = class extends import_obsidian13.Modal {
     this.contentEl.empty();
   }
 };
-var RenameLedgerAliasModal = class extends import_obsidian13.Modal {
+var RenameLedgerAliasModal = class extends import_obsidian14.Modal {
   constructor(app, folder, currentAlias, onSubmit) {
     super(app);
     this.folder = folder;
@@ -6830,7 +7105,7 @@ var RenameLedgerAliasModal = class extends import_obsidian13.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian13.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian14.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.createEl("h2", { text: "\u6539\u8D26\u672C\u522B\u540D" });
     this.input = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
     this.input.value = this.currentAlias;
@@ -6850,7 +7125,7 @@ var RenameLedgerAliasModal = class extends import_obsidian13.Modal {
     this.contentEl.empty();
   }
 };
-var BackupModal = class extends import_obsidian13.Modal {
+var BackupModal = class extends import_obsidian14.Modal {
   constructor(app, backups, onAction) {
     super(app);
     this.backups = backups;
@@ -6858,7 +7133,7 @@ var BackupModal = class extends import_obsidian13.Modal {
   }
   onOpen() {
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian13.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian14.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     this.render();
   }
   onClose() {
@@ -6903,7 +7178,7 @@ var BackupModal = class extends import_obsidian13.Modal {
     closeBtn.onclick = () => this.close();
   }
 };
-var CreateCategoryModal = class extends import_obsidian13.Modal {
+var CreateCategoryModal = class extends import_obsidian14.Modal {
   constructor(app, flow, flowTitle, placeholder, onSubmit) {
     super(app);
     this.flow = flow;
@@ -6917,7 +7192,7 @@ var CreateCategoryModal = class extends import_obsidian13.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian13.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian14.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.createEl("h2", { text: `\u65B0\u5EFA${this.flowTitle}` });
     this.nameInput = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
     this.nameInput.placeholder = this.placeholder;
@@ -6941,7 +7216,7 @@ var CreateCategoryModal = class extends import_obsidian13.Modal {
     this.contentEl.empty();
   }
 };
-var RenameCategoryModal = class extends import_obsidian13.Modal {
+var RenameCategoryModal = class extends import_obsidian14.Modal {
   constructor(app, cat, onSubmit) {
     super(app);
     this.cat = cat;
@@ -6952,7 +7227,7 @@ var RenameCategoryModal = class extends import_obsidian13.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian13.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian14.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.createEl("h2", { text: "\u91CD\u547D\u540D\u5206\u7C7B" });
     this.input = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
     this.input.value = this.cat.name;
@@ -6978,7 +7253,7 @@ var RenameCategoryModal = class extends import_obsidian13.Modal {
     this.contentEl.empty();
   }
 };
-var MergeCategoryModal = class extends import_obsidian13.Modal {
+var MergeCategoryModal = class extends import_obsidian14.Modal {
   constructor(app, from, targets, refCount, onSubmit) {
     super(app);
     this.from = from;
@@ -6992,7 +7267,7 @@ var MergeCategoryModal = class extends import_obsidian13.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian13.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian14.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.createEl("h2", { text: "\u5408\u5E76\u5206\u7C7B" });
     contentEl.createEl("div", {
       text: `\u5C06\u300C${this.from.name}\u300D\u7684\u5168\u90E8\u5386\u53F2\u6539\u5199\u5E76\u5165\u76EE\u6807\u5206\u7C7B\uFF0C\u539F\u5206\u7C7B\u5C06\u88AB\u5220\u9664\uFF08\u4E0D\u53EF\u64A4\u9500\uFF09`,
@@ -7029,7 +7304,7 @@ var MergeCategoryModal = class extends import_obsidian13.Modal {
     this.contentEl.empty();
   }
 };
-var RegroupTypeModal = class extends import_obsidian13.Modal {
+var RegroupTypeModal = class extends import_obsidian14.Modal {
   constructor(app, typeLabel, currentGroupId, groups, onSubmit) {
     super(app);
     this.typeLabel = typeLabel;
@@ -7041,7 +7316,7 @@ var RegroupTypeModal = class extends import_obsidian13.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian13.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian14.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.createEl("h2", { text: "\u91CD\u5206\u7EC4" });
     contentEl.createEl("div", { text: `\u5C06\u300C${this.typeLabel}\u300D\u79FB\u52A8\u5230\uFF1A`, cls: "accounting-ledger-folder" });
     const list = contentEl.createDiv("accounting-backup-list");
@@ -7069,12 +7344,141 @@ var RegroupTypeModal = class extends import_obsidian13.Modal {
   }
 };
 
+// src/onboardingModal.ts
+var import_obsidian15 = require("obsidian");
+var OnboardingModal = class extends import_obsidian15.Modal {
+  constructor(app, adapter, onComplete) {
+    super(app);
+    this.adapter = adapter;
+    this.onComplete = onComplete;
+  }
+  currentStep = "main";
+  async onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("accounting-modal");
+    this.renderMainStep();
+  }
+  /** 渲染主步骤：根据是否有现有账本显示不同界面 */
+  async renderMainStep() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.currentStep = "main";
+    const existing = await this.adapter.listLedgers();
+    const titleEl = contentEl.createEl("h2", { text: "\u6B22\u8FCE\u4F7F\u7528\u5B8F\u5229\u8BB0\u8D26" });
+    titleEl.addClass("accounting-modal-title");
+    const descEl = contentEl.createEl("p", {
+      text: "\u8D26\u672C\u662F\u5B58\u653E\u8BB0\u8D26\u6570\u636E\u7684\u76EE\u5F55\u3002\u8BF7\u9009\u62E9\u73B0\u6709\u8D26\u672C\u6216\u521B\u5EFA\u65B0\u8D26\u672C\u3002"
+    });
+    descEl.addClass("accounting-modal-desc");
+    if (existing.length === 0) {
+      this.renderCreateForm();
+    } else {
+      this.renderLedgerSelection(existing);
+    }
+  }
+  /** 渲染现有账本选择列表 */
+  renderLedgerSelection(existing) {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.currentStep = "main";
+    const titleEl = contentEl.createEl("h2", { text: "\u9009\u62E9\u8D26\u672C" });
+    titleEl.addClass("accounting-modal-title");
+    const descEl = contentEl.createEl("p", {
+      text: "\u8BF7\u9009\u62E9\u8981\u4F7F\u7528\u7684\u8D26\u672C\uFF0C\u6216\u521B\u5EFA\u65B0\u8D26\u672C\u3002"
+    });
+    descEl.addClass("accounting-modal-desc");
+    const listEl = contentEl.createDiv("accounting-onboarding-folder-list");
+    for (const folder of existing.sort()) {
+      const itemEl = listEl.createEl("button", {
+        text: folder,
+        cls: "accounting-btn accounting-btn-secondary accounting-btn-block"
+      });
+      itemEl.onclick = () => {
+        this.onComplete({ action: "selected", ledger: folder });
+        this.close();
+      };
+    }
+    const createBtn = contentEl.createEl("button", {
+      text: "+ \u521B\u5EFA\u65B0\u8D26\u672C",
+      cls: "accounting-btn accounting-btn-primary accounting-btn-block"
+    });
+    createBtn.onclick = () => this.renderCreateForm();
+  }
+  /** 渲染创建新账本表单 */
+  async renderCreateForm() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.currentStep = "create";
+    const titleEl = contentEl.createEl("h2", { text: "\u521B\u5EFA\u65B0\u8D26\u672C" });
+    titleEl.addClass("accounting-modal-title");
+    const descEl = contentEl.createEl("p", {
+      text: "\u8BF7\u8F93\u5165\u8D26\u672C\u540D\u79F0\uFF0C\u5C06\u521B\u5EFA\u65B0\u76EE\u5F55\u5B58\u653E\u8BB0\u8D26\u6570\u636E\u3002"
+    });
+    descEl.addClass("accounting-modal-desc");
+    const nameContainer = contentEl.createDiv("accounting-form-group");
+    const nameLabel = nameContainer.createEl("label", { text: "\u8D26\u672C\u540D\u79F0\uFF08\u6587\u4EF6\u5939\u540D\uFF09" });
+    nameLabel.addClass("accounting-label");
+    const nameInput = nameContainer.createEl("input", { cls: "accounting-input" });
+    nameInput.placeholder = "\u4F8B\u5982\uFF1A\u6211\u7684\u8D26\u672C\u3001\u5BB6\u5EAD\u8BB0\u8D26";
+    nameInput.autofocus = true;
+    const aliasContainer = contentEl.createDiv("accounting-form-group");
+    const aliasLabel = aliasContainer.createEl("label", { text: "\u522B\u540D\uFF08\u53EF\u9009\uFF09" });
+    aliasLabel.addClass("accounting-label");
+    const aliasInput = aliasContainer.createEl("input", { cls: "accounting-input" });
+    aliasInput.placeholder = "\u4F8B\u5982\uFF1A\u5BB6\u5EAD\u8D26\u672C\u3001\u4E2A\u4EBA\u8BB0\u8D26";
+    const errorEl = contentEl.createEl("div", { cls: "accounting-error" });
+    errorEl.hide();
+    const buttonsEl = contentEl.createDiv("accounting-modal-buttons");
+    const cancelBtn = buttonsEl.createEl("button", {
+      text: "\u8FD4\u56DE",
+      cls: "accounting-btn accounting-btn-ghost"
+    });
+    cancelBtn.onclick = () => this.renderMainStep();
+    const submitBtn = buttonsEl.createEl("button", {
+      text: "\u521B\u5EFA",
+      cls: "accounting-btn accounting-btn-primary"
+    });
+    submitBtn.onclick = async () => {
+      const name = nameInput.value.trim();
+      const alias = aliasInput.value.trim();
+      const existing = await this.adapter.listLedgers();
+      const error = validateLedgerName(name, existing);
+      if (error) {
+        errorEl.textContent = error;
+        errorEl.show();
+        return;
+      }
+      try {
+        await this.adapter.createLedger(name, alias || void 0);
+        new import_obsidian15.Notice(`\u5DF2\u521B\u5EFA\u8D26\u672C\u300C${alias || name}\u300D`);
+        this.onComplete({ action: "created", ledger: name });
+        this.close();
+      } catch (e) {
+        errorEl.textContent = `\u521B\u5EFA\u5931\u8D25\uFF1A${e}`;
+        errorEl.show();
+      }
+    };
+  }
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+    if (this.currentStep === "main") {
+      this.onComplete({ action: "skipped" });
+    }
+  }
+};
+
 // src/main.ts
-var DEFAULT_SETTINGS = { dataSubdir: "data", autoOpenOnStartup: true };
-var AccountingPlugin = class extends import_obsidian14.Plugin {
+var DEFAULT_SETTINGS = { dataSubdir: "data", autoOpenOnStartup: true, onboardingCompleted: false };
+var AccountingPlugin = class extends import_obsidian16.Plugin {
   settingsTab;
   async onload() {
     await this.loadSettings();
+    if (!this.settings.onboardingCompleted) {
+      await this.showOnboardingModal();
+      return;
+    }
     this.addCommand({
       id: "open",
       name: "\u5B8F\u5229\u8BB0\u8D26",
@@ -7089,6 +7493,64 @@ var AccountingPlugin = class extends import_obsidian14.Plugin {
   }
   adapter() {
     return new ObsidianDataAdapter(this.app.vault, this.settings.dataSubdir, this);
+  }
+  /** 检测 vault 中是否已存在账本（任意子目录包含 transactions.jsonl） */
+  async hasExistingLedger() {
+    const adapter = this.adapter();
+    const ledgers = await adapter.listLedgers();
+    return ledgers.length > 0;
+  }
+  /** 显示首次启动引导 Modal，处理用户选择后继续正常启动流程 */
+  async showOnboardingModal() {
+    const adapter = this.adapter();
+    return new Promise((resolve) => {
+      try {
+        new OnboardingModal(
+          this.app,
+          adapter,
+          async (result) => {
+            try {
+              this.settings.onboardingCompleted = true;
+              await this.saveSettings();
+              if (result.ledger) {
+                this.settings.dataSubdir = result.ledger;
+                await this.saveSettings();
+              }
+              await this.continueStartupAfterOnboarding();
+              resolve();
+            } catch (error) {
+              console.error("\u5F15\u5BFC\u5B8C\u6210\u540E\u7EED\u5904\u7406\u5931\u8D25:", error);
+              try {
+                await this.continueStartupAfterOnboarding();
+              } catch (e) {
+                console.error("\u542F\u52A8\u6D41\u7A0B\u5931\u8D25:", e);
+              }
+              resolve();
+            }
+          }
+        ).open();
+      } catch (error) {
+        console.error("\u663E\u793A\u5F15\u5BFC Modal \u5931\u8D25:", error);
+        void this.continueStartupAfterOnboarding();
+        resolve();
+      }
+    });
+  }
+  /** 引导完成后继续启动流程（注册命令/ribbon，打开记账页面） */
+  async continueStartupAfterOnboarding() {
+    this.addCommand({
+      id: "open",
+      name: "\u5B8F\u5229\u8BB0\u8D26",
+      callback: () => this.openEntry()
+    });
+    this.addRibbonIcon("coins", "\u5B8F\u5229\u8BB0\u8D26", () => this.openEntry());
+    if (this.settings.autoOpenOnStartup) {
+      this.app.workspace.onLayoutReady(() => {
+        void this.openEntry();
+      });
+    } else {
+      void this.openEntry();
+    }
   }
   /** 导航上下文：三个目标的打开回调，注入到各 Modal 使其底部导航条可用。public 供设置页「查看」跳转复用。 */
   navCtx(adapter) {
@@ -7117,7 +7579,7 @@ var AccountingPlugin = class extends import_obsidian14.Plugin {
       if (cfg.lastSuccess?.slice(0, 10) === today) return;
       const baseCurrency = await adapter.readBaseCurrency();
       const url = `https://api.frankfurter.app/latest?from=${baseCurrency.toUpperCase()}`;
-      const resp = await (0, import_obsidian15.requestUrl)({ url, method: "GET" });
+      const resp = await (0, import_obsidian17.requestUrl)({ url, method: "GET" });
       const fetched = parseRateResponse(resp.json, baseCurrency, nowISO());
       if (!fetched) return;
       const rates = await adapter.readRates();
