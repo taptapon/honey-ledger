@@ -37,6 +37,20 @@
 └── recurring.json       周期账规则
 ```
 
+## 发布新版本
+
+1. 修改 `manifest.json` 中的 `version` 字段（如 `"0.2.0"`）。
+2. 替换仓库中的 `main.js`、`styles.css` 等文件。
+3. 执行一键发布脚本：
+
+```bash
+./release.sh
+```
+
+脚本会自动完成：提交更改 → 推送代码 → 创建 tag → 发布 GitHub Release（附带插件文件）。
+
+> 前提：已安装 [gh](https://cli.github.com/) 并登录。
+
 ## 与桌面端共享数据
 
 数据格式与桌面端（macOS）完全一致。把桌面端的「账本」指向 Obsidian 库根目录、数据子目录名设为一致，即可通过 iCloud 在两端共享同一份数据。
