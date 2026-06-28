@@ -163,6 +163,12 @@ function formatLocalTimestamp(iso) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+function isoToDateStr(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
 function isoToMonthStr(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
@@ -193,10 +199,53 @@ function nowLocalISO() {
 function localDateStartISO(year, monthOneBased, day) {
   return dateToLocalISO(new Date(year, monthOneBased - 1, day, 0, 0, 0, 0));
 }
+function datetimeLocalToISO(input) {
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return nowLocalISO();
+  return dateToLocalISO(d);
+}
+function nowDatetimeLocal() {
+  return isoToDatetimeLocal(nowISO());
+}
+
+// ../../packages/core/src/dateRange.ts
+function todayDateInput() {
+  const d = /* @__PURE__ */ new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function daysAgoDateInput(n) {
+  const d = /* @__PURE__ */ new Date();
+  d.setDate(d.getDate() - n);
+  const p = (n2) => String(n2).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function monthsAgoDateInput(n) {
+  const d = /* @__PURE__ */ new Date();
+  d.setMonth(d.getMonth() - n);
+  const p = (n2) => String(n2).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
 
 // ../../packages/core/src/money.ts
 function round2(n) {
   return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+// ../../packages/core/src/format.ts
+function formatMoney(n, currency = "CNY") {
+  const sign = n < 0 ? "-" : "";
+  const abs = Math.abs(n);
+  const s = abs.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const sym = currency === "CNY" ? "\xA5" : `${currency} `;
+  return `${sign}${sym}${s}`;
+}
+function formatMoneyInt(n, currency = "CNY") {
+  const sign = n < 0 ? "-" : "";
+  const abs = Math.round(Math.abs(n));
+  const s = abs.toLocaleString("zh-CN", { maximumFractionDigits: 0 });
+  const sym = currency === "CNY" ? "\xA5" : `${currency} `;
+  return `${sign}${sym}${s}`;
 }
 
 // ../../packages/core/src/amountCalc.ts
@@ -803,6 +852,29 @@ function sortTransactions(transactions, sort) {
     });
   }
   return indexed.map(([t]) => t);
+}
+
+// ../../packages/core/src/listFilter.ts
+function filterAndSortTransactions(transactions, filters) {
+  const query = filters.query.trim().toLowerCase();
+  const list = transactions.filter((t) => {
+    if (filters.types.length > 0 && !filters.types.includes(t.type)) return false;
+    if (filters.account && ![t.account, t.fromAccount, t.toAccount, t.person].includes(filters.account)) return false;
+    if (filters.category && t.category !== filters.category) return false;
+    if (filters.recurringRuleId && t.recurringRuleId !== filters.recurringRuleId) return false;
+    if (filters.minAmount != null && t.amount < filters.minAmount) return false;
+    if (filters.maxAmount != null && t.amount > filters.maxAmount) return false;
+    if (filters.from && isoToDateStr(t.ts) < filters.from) return false;
+    if (filters.to && isoToDateStr(t.ts) > filters.to) return false;
+    if (query) {
+      const hay = [t.note, (t.tags ?? []).join(" "), t.category, t.subcategory].filter(Boolean).join(" ").toLowerCase();
+      const queryNum = Number(query);
+      const amountMatch = query.trim() !== "" && Number.isFinite(queryNum) && t.amount === queryNum;
+      if (!hay.includes(query) && !amountMatch) return false;
+    }
+    return true;
+  });
+  return sortTransactions(list, filters.sort);
 }
 
 // ../../packages/core/src/balance.ts
@@ -1749,9 +1821,8 @@ function buildBatchUpsertEvents(input) {
 }
 
 // src/dataAdapter.ts
-var round22 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 function normalizeTxAmount(data) {
-  return { ...data, amount: round22(data.amount) };
+  return { ...data, amount: round2(data.amount) };
 }
 var ObsidianDataAdapter = class {
   constructor(vault, dataSubdir, _plugin) {
@@ -2248,72 +2319,460 @@ var import_obsidian16 = require("obsidian");
 // src/transactionListModal.ts
 var import_obsidian7 = require("obsidian");
 
-// src/format.ts
-function formatMoney(n, currency = "CNY") {
-  const sign = n < 0 ? "-" : "";
-  const abs = Math.abs(n);
-  const s = abs.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const sym = currency === "CNY" ? "\xA5" : `${currency} `;
-  return `${sign}${sym}${s}`;
-}
-function formatMoneyInt(n, currency = "CNY") {
-  const sign = n < 0 ? "-" : "";
-  const abs = Math.round(Math.abs(n));
-  const s = abs.toLocaleString("zh-CN", { maximumFractionDigits: 0 });
-  const sym = currency === "CNY" ? "\xA5" : `${currency} `;
-  return `${sign}${sym}${s}`;
-}
-function round23(n) {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
-}
-function nowLocalInput() {
-  const d = /* @__PURE__ */ new Date();
-  const pad = (x) => String(x).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-function dateInputToMs(dateStr) {
-  const parts = dateStr.split("-").map(Number);
-  const [y, m, d] = parts;
-  if (!y || !m || !d) return Date.now();
-  return new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
-}
-function todayDateInput() {
-  const d = /* @__PURE__ */ new Date();
-  const pad = (x) => String(x).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-function daysAgoDateInput(n) {
-  const d = /* @__PURE__ */ new Date();
-  d.setDate(d.getDate() - n);
-  const pad = (x) => String(x).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-function monthsAgoDateInput(n) {
-  const d = /* @__PURE__ */ new Date();
-  d.setMonth(d.getMonth() - n);
-  const pad = (x) => String(x).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-function localInputToISO(input) {
-  const d = new Date(input);
-  if (Number.isNaN(d.getTime())) return (/* @__PURE__ */ new Date()).toISOString();
-  const off = -d.getTimezoneOffset();
-  const sign = off >= 0 ? "+" : "-";
-  const abs = Math.abs(off);
-  const pad = (x) => String(x).padStart(2, "0");
-  const tz = `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
-  const p = (x) => String(x).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}${tz}`;
+// src/accountGrouping.ts
+var byName = (a, b) => a.name.localeCompare(b.name, "zh");
+function fillAccountOptions(sel, accounts, value, includeHidden, settings, typeFilter) {
+  const typeToGroup = new Map(settings.types.map((t) => [t.type, t.groupId]));
+  const pool = accounts.filter((a) => typeFilter ? a.type === typeFilter : true);
+  const active = pool.filter((a) => a.active).sort(byName);
+  const hidden = includeHidden ? pool.filter((a) => !a.active).sort(byName) : [];
+  const selectedAcc = value ? pool.find((a) => a.id === value) : void 0;
+  if (selectedAcc && !selectedAcc.active && !includeHidden) {
+    hidden.push(selectedAcc);
+  }
+  const groups = resolveTypeGroups(settings).map((g) => ({ label: g.label, items: active.filter((a) => typeToGroup.get(a.type) === g.id) })).filter((g) => g.items.length > 0);
+  if (hidden.length > 0) groups.push({ label: "\u9690\u85CF\u8D26\u6237", items: hidden });
+  for (const g of groups) {
+    const og = sel.createEl("optgroup", { attr: { label: g.label } });
+    for (const a of g.items) {
+      const o = og.createEl("option", { text: a.name });
+      o.value = a.id;
+      if (a.id === value) o.selected = true;
+    }
+  }
 }
 
-// src/transactionDetailModal.ts
-var import_obsidian5 = require("obsidian");
+// src/batchModifyModal.ts
+var import_obsidian3 = require("obsidian");
 
-// src/entryModal.ts
-var import_obsidian4 = require("obsidian");
+// src/keyboardAvoidance.ts
+var import_obsidian2 = require("obsidian");
+function bindKeyboardAvoidance(options) {
+  const { rootEl, modalEl, mode } = options;
+  const targetBottomRatio = options.targetBottomRatio ?? 0.45;
+  const delayMs = options.delayMs ?? 320;
+  let activeInput = null;
+  let disposed = false;
+  const reset = () => {
+    if (mode === "transform") {
+      modalEl.style.transform = "";
+    } else {
+      modalEl.style.top = "";
+      modalEl.style.position = "";
+    }
+  };
+  const isSmallScreen = () => import_obsidian2.Platform.isMobile || window.innerWidth < 768;
+  const isSoftKeyboardTarget = (el) => {
+    if (el.tagName === "TEXTAREA") return true;
+    return el.tagName === "INPUT" && el.type === "text";
+  };
+  const liftActive = () => {
+    if (disposed || !isSmallScreen()) return;
+    reset();
+    const el = activeInput;
+    if (!el) return;
+    void modalEl.offsetWidth;
+    const rect = el.getBoundingClientRect();
+    const modalTop = modalEl.getBoundingClientRect().top;
+    const targetBottom = window.innerHeight * targetBottomRatio;
+    let shift = Math.max(0, Math.round(rect.bottom - targetBottom));
+    shift = Math.min(shift, Math.max(0, modalTop));
+    if (shift > 12) {
+      if (mode === "transform") {
+        modalEl.style.transform = `translateY(${-shift}px)`;
+      } else {
+        modalEl.style.position = "relative";
+        modalEl.style.top = `${-shift}px`;
+      }
+      window.setTimeout(() => el.scrollIntoView({ block: "center" }), 30);
+    }
+  };
+  const onFocusIn = (e) => {
+    const el = e.target;
+    if (!el || !isSoftKeyboardTarget(el)) return;
+    activeInput = el;
+    window.setTimeout(liftActive, delayMs);
+  };
+  const onFocusOut = () => {
+    activeInput = null;
+    window.setTimeout(liftActive, delayMs);
+  };
+  const onViewportResize = () => {
+    if (activeInput) liftActive();
+  };
+  rootEl.addEventListener("focusin", onFocusIn);
+  rootEl.addEventListener("focusout", onFocusOut);
+  window.visualViewport?.addEventListener("resize", onViewportResize);
+  return {
+    reset,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      rootEl.removeEventListener("focusin", onFocusIn);
+      rootEl.removeEventListener("focusout", onFocusOut);
+      window.visualViewport?.removeEventListener("resize", onViewportResize);
+      activeInput = null;
+      reset();
+    }
+  };
+}
+
+// src/batchModifyModal.ts
+var KEEP_HINT = "\u7559\u7A7A\u4FDD\u6301\u539F\u503C";
+var TYPES = [
+  { key: "expense", label: "\u652F\u51FA" },
+  { key: "income", label: "\u6536\u5165" },
+  { key: "transfer", label: "\u8F6C\u8D26" },
+  { key: "loan", label: "\u501F\u8D37" }
+];
+var BatchModifyModal = class extends import_obsidian3.Modal {
+  constructor(app, adapter, transactions, baseUpdatedAtById, accounts, categories, accountTypeSettings, onDone) {
+    super(app);
+    this.adapter = adapter;
+    this.transactions = transactions;
+    this.baseUpdatedAtById = baseUpdatedAtById;
+    this.accounts = accounts;
+    this.categories = categories;
+    this.accountTypeSettings = accountTypeSettings;
+    this.onDone = onDone;
+    this.originalType = this.transactions[0]?.type ?? "expense";
+    this.state = {
+      type: this.originalType,
+      amount: "",
+      account: "",
+      category: "",
+      fromAccount: "",
+      toAccount: "",
+      person: "",
+      direction: "",
+      ts: "",
+      tags: "",
+      note: ""
+    };
+  }
+  state;
+  errorEl = null;
+  fieldContainer = null;
+  originalType;
+  submitting = false;
+  keyboardAvoidance;
+  keyboardBound = false;
+  onOpen() {
+    this.modalEl.addClass("accounting-sub-modal");
+    if (!import_obsidian3.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("accounting-modal");
+    this.renderView();
+  }
+  renderView() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h2", { text: `\u6279\u91CF\u4FEE\u6539\uFF08${this.transactions.length} \u6761\uFF09` });
+    const hint = contentEl.createDiv({ cls: "accounting-batch-hint" });
+    hint.createEl("div", { text: "\u4EC5\u586B\u5199\u8981\u4FEE\u6539\u7684\u5B57\u6BB5\uFF0C\u7559\u7A7A\u4FDD\u6301\u5404\u6761\u539F\u503C\u3002" });
+    const typeChanged = this.state.type !== this.originalType;
+    if (typeChanged) {
+      hint.createEl("div", {
+        text: "\u5DF2\u6539\u53D8\u7C7B\u578B\uFF0C\u76EE\u6807\u7C7B\u578B\u7684\u5FC5\u586B\u5B57\u6BB5\u5FC5\u987B\u586B\u5199\u3002",
+        cls: "accounting-batch-warn"
+      });
+    }
+    this.renderTypePills(contentEl);
+    this.fieldContainer = contentEl.createDiv({ cls: "accounting-batch-fields" });
+    this.renderFields();
+    this.errorEl = contentEl.createDiv({ cls: "accounting-error" });
+    this.errorEl.style.display = "none";
+    this.bindKeyboardAvoidance();
+    const footer = contentEl.createDiv({ cls: "accounting-batch-footer" });
+    const submitBtn = footer.createEl("button", {
+      text: `\u6279\u91CF\u4FEE\u6539 ${this.transactions.length} \u6761`,
+      cls: "accounting-btn-primary"
+    });
+    submitBtn.onclick = () => this.submit();
+    const cancelBtn = footer.createEl("button", { text: "\u53D6\u6D88", cls: "accounting-btn-secondary" });
+    cancelBtn.onclick = () => this.close();
+  }
+  renderTypePills(container) {
+    const row = container.createDiv({ cls: "accounting-type-pills" });
+    for (const t of TYPES) {
+      const active = this.state.type === t.key;
+      const pill = row.createEl("button", {
+        text: t.label,
+        cls: `accounting-type-pill${active ? " accounting-type-pill-active" : ""}`
+      });
+      pill.onclick = () => {
+        this.state.type = t.key;
+        this.renderView();
+      };
+    }
+  }
+  renderFields() {
+    const fc = this.fieldContainer;
+    if (!fc) return;
+    fc.empty();
+    const s = this.state;
+    const typeChanged = s.type !== this.originalType;
+    const keepHint = typeChanged ? "\u8BF7\u9009\u62E9" : KEEP_HINT;
+    this.addField(fc, "\u91D1\u989D", (wrap) => {
+      const input = wrap.createEl("input", {
+        type: "text",
+        value: s.amount,
+        cls: "accounting-input",
+        attr: { placeholder: KEEP_HINT, inputmode: "decimal" }
+      });
+      input.oninput = () => {
+        s.amount = input.value;
+      };
+    });
+    if (s.type === "expense" || s.type === "income") {
+      const cats = this.categories.filter((c) => c.flow === (s.type === "expense" ? "expense" : "income")).slice().sort((a, b) => a.name.localeCompare(b.name, "zh"));
+      this.addField(fc, "\u8D26\u6237", (wrap) => {
+        const sel = wrap.createEl("select", { cls: "accounting-input" });
+        sel.createEl("option", { text: keepHint }).value = "";
+        fillAccountOptions(sel, this.accounts, s.account, false, this.accountTypeSettings);
+        sel.onchange = () => {
+          s.account = sel.value;
+        };
+      });
+      this.addField(fc, "\u5206\u7C7B", (wrap) => {
+        const sel = wrap.createEl("select", { cls: "accounting-input" });
+        sel.createEl("option", { text: keepHint }).value = "";
+        for (const c of cats) {
+          const o = sel.createEl("option", { text: c.name });
+          o.value = c.name;
+          if (c.name === s.category) o.selected = true;
+        }
+        sel.onchange = () => {
+          s.category = sel.value;
+        };
+      });
+    } else if (s.type === "transfer") {
+      this.addField(fc, "\u8F6C\u51FA\u8D26\u6237", (wrap) => {
+        const sel = wrap.createEl("select", { cls: "accounting-input" });
+        sel.createEl("option", { text: keepHint }).value = "";
+        fillAccountOptions(sel, this.accounts, s.fromAccount, false, this.accountTypeSettings);
+        sel.onchange = () => {
+          s.fromAccount = sel.value;
+        };
+      });
+      this.addField(fc, "\u8F6C\u5165\u8D26\u6237", (wrap) => {
+        const sel = wrap.createEl("select", { cls: "accounting-input" });
+        sel.createEl("option", { text: keepHint }).value = "";
+        fillAccountOptions(sel, this.accounts, s.toAccount, false, this.accountTypeSettings);
+        sel.onchange = () => {
+          s.toAccount = sel.value;
+        };
+      });
+    } else if (s.type === "loan") {
+      this.addField(fc, "\u65B9\u5411", (wrap) => {
+        const sel = wrap.createEl("select", { cls: "accounting-input" });
+        sel.createEl("option", { text: keepHint }).value = "";
+        const lend = sel.createEl("option", { text: "\u501F\u51FA\uFF08\u5BF9\u65B9\u6B20\u6211\uFF09" });
+        lend.value = "lend";
+        const borrow = sel.createEl("option", { text: "\u501F\u5165\uFF08\u6211\u6B20\u5BF9\u65B9\uFF09" });
+        borrow.value = "borrow";
+        if (s.direction === "lend") lend.selected = true;
+        if (s.direction === "borrow") borrow.selected = true;
+        sel.onchange = () => {
+          s.direction = sel.value;
+        };
+      });
+      this.addField(fc, "\u5DF1\u65B9\u8D26\u6237", (wrap) => {
+        const sel = wrap.createEl("select", { cls: "accounting-input" });
+        sel.createEl("option", { text: keepHint }).value = "";
+        fillAccountOptions(sel, this.accounts, s.account, false, this.accountTypeSettings);
+        sel.onchange = () => {
+          s.account = sel.value;
+        };
+      });
+      this.addField(fc, "\u5BF9\u65B9\uFF08\u4EBA\u8D26\u6237\uFF09", (wrap) => {
+        const sel = wrap.createEl("select", { cls: "accounting-input" });
+        sel.createEl("option", { text: keepHint }).value = "";
+        for (const a of this.accounts.filter((a2) => a2.type === "person" && a2.active).slice().sort((a2, b) => a2.name.localeCompare(b.name, "zh"))) {
+          const o = sel.createEl("option", { text: a.name });
+          o.value = a.id;
+          if (a.id === s.person) o.selected = true;
+        }
+        sel.onchange = () => {
+          s.person = sel.value;
+        };
+      });
+    }
+    this.addField(fc, "\u65F6\u95F4", (wrap) => {
+      const input = wrap.createEl("input", {
+        type: "datetime-local",
+        value: s.ts,
+        cls: "accounting-input"
+      });
+      input.onchange = () => {
+        s.ts = input.value;
+      };
+    });
+    this.addField(fc, "\u6807\u7B7E\uFF08\u7A7A\u683C\u5206\u9694\uFF09", (wrap) => {
+      const input = wrap.createEl("input", {
+        type: "text",
+        value: s.tags,
+        cls: "accounting-input",
+        attr: { placeholder: KEEP_HINT }
+      });
+      input.oninput = () => {
+        s.tags = input.value;
+      };
+    });
+    this.addField(fc, "\u5907\u6CE8", (wrap) => {
+      const ta = wrap.createEl("textarea", { cls: "accounting-input" });
+      ta.value = s.note;
+      ta.setAttr("rows", "2");
+      ta.oninput = () => {
+        s.note = ta.value;
+      };
+    });
+  }
+  addField(container, label, renderControl) {
+    const wrap = container.createDiv({ cls: "accounting-batch-field" });
+    wrap.createEl("div", { text: label, cls: "accounting-batch-field-label" });
+    renderControl(wrap);
+  }
+  showError(msg) {
+    if (!this.errorEl) return;
+    this.errorEl.setText(msg);
+    this.errorEl.style.display = "";
+  }
+  buildPatch() {
+    const s = this.state;
+    const patch = {};
+    const typeChanged = s.type !== this.originalType;
+    if (typeChanged) patch.type = s.type;
+    if (s.amount.trim() !== "") {
+      const amt = evaluateAmount(s.amount);
+      if (!amt.ok || amt.value <= 0) {
+        this.showError("\u91D1\u989D\u9700\u4E3A\u5927\u4E8E 0 \u7684\u6570");
+        return null;
+      }
+      patch.amount = round2(amt.value);
+    }
+    if (s.account) patch.account = s.account;
+    if (s.category) patch.category = s.category;
+    if (s.fromAccount) patch.fromAccount = s.fromAccount;
+    if (s.toAccount) patch.toAccount = s.toAccount;
+    if (s.person) patch.person = s.person;
+    if (s.direction) patch.direction = s.direction;
+    if (s.ts) {
+      const iso = datetimeLocalToISO(s.ts);
+      if (!iso) {
+        this.showError("\u65F6\u95F4\u683C\u5F0F\u4E0D\u6B63\u786E");
+        return null;
+      }
+      patch.ts = iso;
+    }
+    const tags = parseTagsInput(s.tags);
+    if (tags) patch.tags = tags;
+    if (s.note.trim() !== "") patch.note = s.note.trim();
+    if (Object.keys(patch).length === 0) {
+      this.showError("\u8BF7\u81F3\u5C11\u4FEE\u6539\u4E00\u9879");
+      return null;
+    }
+    if (typeChanged) {
+      if (s.type === "expense" || s.type === "income") {
+        if (!s.account) {
+          this.showError("\u6539\u7C7B\u578B\u540E\u8BF7\u9009\u62E9\u8D26\u6237");
+          return null;
+        }
+        if (!s.category) {
+          this.showError("\u6539\u7C7B\u578B\u540E\u8BF7\u9009\u62E9\u5206\u7C7B");
+          return null;
+        }
+      } else if (s.type === "transfer") {
+        if (!s.fromAccount) {
+          this.showError("\u6539\u7C7B\u578B\u540E\u8BF7\u9009\u62E9\u8F6C\u51FA\u8D26\u6237");
+          return null;
+        }
+        if (!s.toAccount) {
+          this.showError("\u6539\u7C7B\u578B\u540E\u8BF7\u9009\u62E9\u8F6C\u5165\u8D26\u6237");
+          return null;
+        }
+        if (s.fromAccount === s.toAccount) {
+          this.showError("\u8F6C\u51FA\u4E0E\u8F6C\u5165\u8D26\u6237\u4E0D\u80FD\u76F8\u540C");
+          return null;
+        }
+      } else if (s.type === "loan") {
+        if (!s.account) {
+          this.showError("\u6539\u7C7B\u578B\u540E\u8BF7\u9009\u62E9\u5DF1\u65B9\u8D26\u6237");
+          return null;
+        }
+        if (!s.person) {
+          this.showError("\u6539\u7C7B\u578B\u540E\u8BF7\u9009\u62E9\u5BF9\u65B9");
+          return null;
+        }
+        if (!s.direction) {
+          this.showError("\u6539\u7C7B\u578B\u540E\u8BF7\u9009\u62E9\u501F\u8D37\u65B9\u5411");
+          return null;
+        }
+      }
+    }
+    return patch;
+  }
+  async submit() {
+    if (this.submitting) return;
+    const patch = this.buildPatch();
+    if (!patch) return;
+    this.submitting = true;
+    try {
+      await this.adapter.backup("pre-batch-modify");
+      const fresh = await this.adapter.loadLog();
+      const latestUpdatedAt = latestUpdatedAtById(fresh);
+      for (const t of this.transactions) {
+        const current = latestUpdatedAt.get(t.id);
+        const base = this.baseUpdatedAtById.get(t.id) ?? "";
+        if (hasUpdatedSince(current, base)) {
+          new import_obsidian3.Notice("\u6240\u9009\u8BB0\u5F55\u5DF2\u88AB\u53E6\u4E00\u7AEF\u66F4\u65B0\uFF0C\u5DF2\u5237\u65B0\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u5E76\u91CD\u8BD5");
+          this.onDone();
+          this.close();
+          return;
+        }
+      }
+      const folded = foldEvents(fresh);
+      const ids = this.transactions.map((t) => t.id);
+      const { events } = buildBatchUpsertEvents({
+        folded,
+        ids,
+        patch,
+        latestUpdatedAtById: latestUpdatedAt,
+        now: nowISO()
+      });
+      if (events.length > 0) {
+        await this.adapter.appendEvents(events);
+      }
+      new import_obsidian3.Notice(`\u5DF2\u66F4\u65B0 ${events.length} \u6761`);
+      this.onDone();
+      this.close();
+    } catch (e) {
+      const msg = "\u6279\u91CF\u4FEE\u6539\u5931\u8D25\uFF1A" + (e instanceof Error ? e.message : String(e));
+      this.showError(msg);
+      new import_obsidian3.Notice(msg);
+    } finally {
+      this.submitting = false;
+    }
+  }
+  onClose() {
+    this.keyboardAvoidance?.dispose();
+    this.keyboardAvoidance = void 0;
+    this.contentEl.empty();
+  }
+  bindKeyboardAvoidance() {
+    if (this.keyboardBound) return;
+    this.keyboardBound = true;
+    this.keyboardAvoidance = bindKeyboardAvoidance({
+      rootEl: this.contentEl,
+      modalEl: this.modalEl,
+      mode: "top"
+    });
+  }
+};
 
 // src/navBar.ts
-var import_obsidian2 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 function navIndex(p) {
   switch (p) {
     case "entry":
@@ -2365,7 +2824,7 @@ function slideClass(slide) {
 }
 function presetModalChrome(modalEl, containerEl) {
   modalEl.addClass("accounting-fullscreen");
-  if (!import_obsidian2.Platform.isMobile) modalEl.addClass("accounting-desktop");
+  if (!import_obsidian4.Platform.isMobile) modalEl.addClass("accounting-desktop");
   containerEl.addClass("accounting-app");
   const m = modalEl;
   const c = containerEl;
@@ -2424,28 +2883,11 @@ function renderNavOrBack(container, page, navCtx, closeSelf, drillDown) {
   else if (navCtx) renderNavBar(container, page, navCtx, closeSelf);
 }
 
-// src/accountGrouping.ts
-var byName = (a, b) => a.name.localeCompare(b.name, "zh");
-function fillAccountOptions(sel, accounts, value, includeHidden, settings, typeFilter) {
-  const typeToGroup = new Map(settings.types.map((t) => [t.type, t.groupId]));
-  const pool = accounts.filter((a) => typeFilter ? a.type === typeFilter : true);
-  const active = pool.filter((a) => a.active).sort(byName);
-  const hidden = includeHidden ? pool.filter((a) => !a.active).sort(byName) : [];
-  const selectedAcc = value ? pool.find((a) => a.id === value) : void 0;
-  if (selectedAcc && !selectedAcc.active && !includeHidden) {
-    hidden.push(selectedAcc);
-  }
-  const groups = resolveTypeGroups(settings).map((g) => ({ label: g.label, items: active.filter((a) => typeToGroup.get(a.type) === g.id) })).filter((g) => g.items.length > 0);
-  if (hidden.length > 0) groups.push({ label: "\u9690\u85CF\u8D26\u6237", items: hidden });
-  for (const g of groups) {
-    const og = sel.createEl("optgroup", { attr: { label: g.label } });
-    for (const a of g.items) {
-      const o = og.createEl("option", { text: a.name });
-      o.value = a.id;
-      if (a.id === value) o.selected = true;
-    }
-  }
-}
+// src/transactionDetailModal.ts
+var import_obsidian6 = require("obsidian");
+
+// src/entryModal.ts
+var import_obsidian5 = require("obsidian");
 
 // src/settlement.ts
 async function ensureCategories(adapter, accounts, categories, items) {
@@ -2513,7 +2955,7 @@ function mountCalculatorKeypad(host, h) {
   function renderPreview() {
     const v = h.getValue();
     const r = evaluateAmount(v);
-    preview.setText(r.ok && v.trim() !== "" && hasOperator(v) ? "= " + String(round23(r.value)) : "");
+    preview.setText(r.ok && v.trim() !== "" && hasOperator(v) ? "= " + String(round2(r.value)) : "");
   }
   function press(k) {
     const v = h.getValue();
@@ -2528,7 +2970,7 @@ function mountCalculatorKeypad(host, h) {
       if (v.trim() === "") {
         shouldClose = true;
       } else if (r.ok && r.value > 0) {
-        next = String(round23(r.value));
+        next = String(round2(r.value));
         shouldClose = true;
       } else {
         preview.empty();
@@ -2551,80 +2993,8 @@ function mountCalculatorKeypad(host, h) {
   renderPreview();
 }
 
-// src/keyboardAvoidance.ts
-var import_obsidian3 = require("obsidian");
-function bindKeyboardAvoidance(options) {
-  const { rootEl, modalEl, mode } = options;
-  const targetBottomRatio = options.targetBottomRatio ?? 0.45;
-  const delayMs = options.delayMs ?? 320;
-  let activeInput = null;
-  let disposed = false;
-  const reset = () => {
-    if (mode === "transform") {
-      modalEl.style.transform = "";
-    } else {
-      modalEl.style.top = "";
-      modalEl.style.position = "";
-    }
-  };
-  const isSmallScreen = () => import_obsidian3.Platform.isMobile || window.innerWidth < 768;
-  const isSoftKeyboardTarget = (el) => {
-    if (el.tagName === "TEXTAREA") return true;
-    return el.tagName === "INPUT" && el.type === "text";
-  };
-  const liftActive = () => {
-    if (disposed || !isSmallScreen()) return;
-    reset();
-    const el = activeInput;
-    if (!el) return;
-    void modalEl.offsetWidth;
-    const rect = el.getBoundingClientRect();
-    const modalTop = modalEl.getBoundingClientRect().top;
-    const targetBottom = window.innerHeight * targetBottomRatio;
-    let shift = Math.max(0, Math.round(rect.bottom - targetBottom));
-    shift = Math.min(shift, Math.max(0, modalTop));
-    if (shift > 12) {
-      if (mode === "transform") {
-        modalEl.style.transform = `translateY(${-shift}px)`;
-      } else {
-        modalEl.style.position = "relative";
-        modalEl.style.top = `${-shift}px`;
-      }
-      window.setTimeout(() => el.scrollIntoView({ block: "center" }), 30);
-    }
-  };
-  const onFocusIn = (e) => {
-    const el = e.target;
-    if (!el || !isSoftKeyboardTarget(el)) return;
-    activeInput = el;
-    window.setTimeout(liftActive, delayMs);
-  };
-  const onFocusOut = () => {
-    activeInput = null;
-    window.setTimeout(liftActive, delayMs);
-  };
-  const onViewportResize = () => {
-    if (activeInput) liftActive();
-  };
-  rootEl.addEventListener("focusin", onFocusIn);
-  rootEl.addEventListener("focusout", onFocusOut);
-  window.visualViewport?.addEventListener("resize", onViewportResize);
-  return {
-    reset,
-    dispose() {
-      if (disposed) return;
-      disposed = true;
-      rootEl.removeEventListener("focusin", onFocusIn);
-      rootEl.removeEventListener("focusout", onFocusOut);
-      window.visualViewport?.removeEventListener("resize", onViewportResize);
-      activeInput = null;
-      reset();
-    }
-  };
-}
-
 // src/entryModal.ts
-var TYPES = [
+var TYPES2 = [
   { key: "expense", label: "\u652F\u51FA" },
   { key: "income", label: "\u6536\u5165" },
   { key: "transfer", label: "\u8F6C\u8D26" },
@@ -2641,7 +3011,7 @@ function flashAmountError(el) {
     }
   }, 160);
 }
-var EntryModal = class extends import_obsidian4.Modal {
+var EntryModal = class extends import_obsidian5.Modal {
   constructor(app, adapter, accounts, categories, onSubmitted, initialTx, isCopy = true, navCtx, slide, onSwitchLedger, recurring, onRecurringSaved) {
     super(app);
     this.adapter = adapter;
@@ -2665,7 +3035,7 @@ var EntryModal = class extends import_obsidian4.Modal {
       person: "",
       direction: "lend",
       settle: false,
-      ts: nowLocalInput(),
+      ts: nowDatetimeLocal(),
       note: "",
       tags: "",
       toAmount: "",
@@ -2724,7 +3094,7 @@ var EntryModal = class extends import_obsidian4.Modal {
       ts: isoToDatetimeLocal(tx.ts),
       note: tx.note || "",
       tags: tx.tags?.join(" ") || "",
-      toAmount: tx.toAmount != null ? String(round23(tx.toAmount)) : "",
+      toAmount: tx.toAmount != null ? String(round2(tx.toAmount)) : "",
       rate: tx.rate != null ? String(tx.rate) : "",
       personCurrency: "CNY"
     };
@@ -2807,7 +3177,7 @@ var EntryModal = class extends import_obsidian4.Modal {
     const input = this.amountInputEl;
     if (input) {
       if (r.ok && r.value > 0) {
-        const folded = String(round23(r.value));
+        const folded = String(round2(r.value));
         this.state.amount = folded;
         input.value = folded;
       } else {
@@ -2822,7 +3192,7 @@ var EntryModal = class extends import_obsidian4.Modal {
   };
   renderTypeButtons() {
     this.typeRow.empty();
-    for (const t of TYPES) {
+    for (const t of TYPES2) {
       const active = this.state.type === t.key;
       const btn = this.typeRow.createEl("button", {
         text: t.label,
@@ -2898,7 +3268,7 @@ var EntryModal = class extends import_obsidian4.Modal {
     const updateHint = () => {
       const amt = amountValueOr(this.state.amount);
       const toAmt = amountValueOr(this.state.toAmount);
-      hint.setText(amt > 0 && toAmt > 0 ? `\u9690\u542B\u6C47\u7387 1 ${fc} = ${round23(toAmt / amt)} ${tc}\uFF08\u4EC5\u4F9B\u53C2\u8003\uFF09` : `\u8DE8\u5E01\u79CD\uFF1A\u586B\u8F6C\u5165\u8D26\u6237\uFF08${tc}\uFF09\u7684\u5B9E\u5230\u91D1\u989D`);
+      hint.setText(amt > 0 && toAmt > 0 ? `\u9690\u542B\u6C47\u7387 1 ${fc} = ${round2(toAmt / amt)} ${tc}\uFF08\u4EC5\u4F9B\u53C2\u8003\uFF09` : `\u8DE8\u5E01\u79CD\uFF1A\u586B\u8F6C\u5165\u8D26\u6237\uFF08${tc}\uFF09\u7684\u5B9E\u5230\u91D1\u989D`);
     };
     input.addEventListener("input", () => {
       this.state.toAmount = input.value;
@@ -3289,7 +3659,7 @@ var EntryModal = class extends import_obsidian4.Modal {
       }
     } else {
       const after = outstanding > 0 ? outstanding - paid : outstanding + paid;
-      text += `\uFF1B\u90E8\u5206\u5F52\u8FD8\u540E\u5BF9\u65B9\u4F59\u989D ${formatMoney(round23(after), pc)}`;
+      text += `\uFF1B\u90E8\u5206\u5F52\u8FD8\u540E\u5BF9\u65B9\u4F59\u989D ${formatMoney(round2(after), pc)}`;
     }
     el.setText(text);
   }
@@ -3319,7 +3689,7 @@ var EntryModal = class extends import_obsidian4.Modal {
     }
     const entryCurrency = this.accCurrency();
     const rateRes = evaluateAmount(s.rate);
-    const rateVal = rateRes.ok && rateRes.value > 0 ? round23(rateRes.value) : void 0;
+    const rateVal = rateRes.ok && rateRes.value > 0 ? round2(rateRes.value) : void 0;
     const collect = {
       amount,
       currency: entryCurrency,
@@ -3327,7 +3697,7 @@ var EntryModal = class extends import_obsidian4.Modal {
       account: s.account,
       person: s.person,
       direction,
-      ts: localInputToISO(s.ts),
+      ts: datetimeLocalToISO(s.ts),
       note: s.note.trim() || void 0,
       tags: parseTagsInput(s.tags)
     };
@@ -3356,10 +3726,10 @@ var EntryModal = class extends import_obsidian4.Modal {
       this.showError("\u8BF7\u8F93\u5165\u5927\u4E8E 0 \u7684\u91D1\u989D");
       return;
     }
-    const amount = round23(amtRes.value);
+    const amount = round2(amtRes.value);
     const entryCurrency = this.amountCurrency();
     const rateRes = evaluateAmount(s.rate);
-    const rateVal = rateRes.ok && rateRes.value > 0 ? round23(rateRes.value) : void 0;
+    const rateVal = rateRes.ok && rateRes.value > 0 ? round2(rateRes.value) : void 0;
     if (!this.schedule.name.trim()) {
       this.showError("\u8BF7\u586B\u5199\u89C4\u5219\u540D\u79F0");
       return;
@@ -3405,7 +3775,7 @@ var EntryModal = class extends import_obsidian4.Modal {
       if (generated.length > 0) {
         await this.adapter.appendEvents(generated);
       }
-      new import_obsidian4.Notice(
+      new import_obsidian5.Notice(
         generated.length > 0 ? `\u5DF2\u4FDD\u5B58\u89C4\u5219\u5E76\u751F\u6210 ${generated.length} \u7B14\u5230\u671F\u4EA4\u6613` : "\u5DF2\u4FDD\u5B58\u89C4\u5219\uFF08\u6682\u65E0\u5230\u671F\u4EA4\u6613\uFF09"
       );
     } catch (e) {
@@ -3422,19 +3792,19 @@ var EntryModal = class extends import_obsidian4.Modal {
       this.showError("\u8BF7\u8F93\u5165\u5927\u4E8E 0 \u7684\u91D1\u989D");
       return;
     }
-    const amount = round23(amtRes.value);
+    const amount = round2(amtRes.value);
     if (this.repeatOn) {
       return this.submitRecurring();
     }
     const entryCurrency = this.amountCurrency();
     const rateRes = evaluateAmount(s.rate);
-    const rateVal = rateRes.ok && rateRes.value > 0 ? round23(rateRes.value) : void 0;
+    const rateVal = rateRes.ok && rateRes.value > 0 ? round2(rateRes.value) : void 0;
     const toAmtRes = evaluateAmount(s.toAmount);
-    const toAmountVal = toAmtRes.ok && toAmtRes.value > 0 ? round23(toAmtRes.value) : void 0;
+    const toAmountVal = toAmtRes.ok && toAmtRes.value > 0 ? round2(toAmtRes.value) : void 0;
     const base = {
       id: this.isCopy ? newTxId() : this.originalTxId || newTxId(),
       type: s.type,
-      ts: localInputToISO(s.ts),
+      ts: datetimeLocalToISO(s.ts),
       amount,
       currency: entryCurrency,
       note: s.note.trim() || void 0,
@@ -3516,7 +3886,7 @@ var EntryModal = class extends import_obsidian4.Modal {
     this.contentEl.empty();
   }
 };
-var LedgerSwitchModal = class extends import_obsidian4.Modal {
+var LedgerSwitchModal = class extends import_obsidian5.Modal {
   constructor(app, current, ledgers, onPick) {
     super(app);
     this.current = current;
@@ -3569,7 +3939,7 @@ var LedgerSwitchModal = class extends import_obsidian4.Modal {
 };
 
 // src/transactionDetailModal.ts
-var TransactionDetailModal = class extends import_obsidian5.Modal {
+var TransactionDetailModal = class extends import_obsidian6.Modal {
   constructor(app, adapter, transaction, accounts, categories, allTransactions, onUpdated, navCtx) {
     super(app);
     this.adapter = adapter;
@@ -3590,7 +3960,7 @@ var TransactionDetailModal = class extends import_obsidian5.Modal {
   async onOpen() {
     this.opened = true;
     this.modalEl.addClass("accounting-detail-sheet");
-    if (!import_obsidian5.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian6.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     this.contentEl.addClass("accounting-modal");
     this.containerEl.addEventListener("click", this.onBackdropClick);
     try {
@@ -3652,7 +4022,7 @@ var TransactionDetailModal = class extends import_obsidian5.Modal {
       const toCur = this.accounts.find((a) => a.id === tx.toAccount)?.currency ?? this.baseCurrency;
       this.addRow(detailEl, "\u8F6C\u5165\u91D1\u989D", formatMoney(tx.toAmount, toCur));
       if (fromCur !== toCur && tx.amount > 0) {
-        this.addRow(detailEl, "\u9690\u542B\u6C47\u7387", `1 ${fromCur} = ${round23(tx.toAmount / tx.amount)} ${toCur}`);
+        this.addRow(detailEl, "\u9690\u542B\u6C47\u7387", `1 ${fromCur} = ${round2(tx.toAmount / tx.amount)} ${toCur}`);
       }
     }
     if (tx.type === "expense" || tx.type === "income") {
@@ -3815,361 +4185,6 @@ var TransactionDetailModal = class extends import_obsidian5.Modal {
   }
   onClose() {
     this.contentEl.empty();
-  }
-};
-
-// src/batchModifyModal.ts
-var import_obsidian6 = require("obsidian");
-var KEEP_HINT = "\u7559\u7A7A\u4FDD\u6301\u539F\u503C";
-var TYPES2 = [
-  { key: "expense", label: "\u652F\u51FA" },
-  { key: "income", label: "\u6536\u5165" },
-  { key: "transfer", label: "\u8F6C\u8D26" },
-  { key: "loan", label: "\u501F\u8D37" }
-];
-var BatchModifyModal = class extends import_obsidian6.Modal {
-  constructor(app, adapter, transactions, baseUpdatedAtById, accounts, categories, accountTypeSettings, onDone) {
-    super(app);
-    this.adapter = adapter;
-    this.transactions = transactions;
-    this.baseUpdatedAtById = baseUpdatedAtById;
-    this.accounts = accounts;
-    this.categories = categories;
-    this.accountTypeSettings = accountTypeSettings;
-    this.onDone = onDone;
-    this.originalType = this.transactions[0]?.type ?? "expense";
-    this.state = {
-      type: this.originalType,
-      amount: "",
-      account: "",
-      category: "",
-      fromAccount: "",
-      toAccount: "",
-      person: "",
-      direction: "",
-      ts: "",
-      tags: "",
-      note: ""
-    };
-  }
-  state;
-  errorEl = null;
-  fieldContainer = null;
-  originalType;
-  submitting = false;
-  keyboardAvoidance;
-  keyboardBound = false;
-  onOpen() {
-    this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian6.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
-    const { contentEl } = this;
-    contentEl.empty();
-    contentEl.addClass("accounting-modal");
-    this.renderView();
-  }
-  renderView() {
-    const { contentEl } = this;
-    contentEl.empty();
-    contentEl.createEl("h2", { text: `\u6279\u91CF\u4FEE\u6539\uFF08${this.transactions.length} \u6761\uFF09` });
-    const hint = contentEl.createDiv({ cls: "accounting-batch-hint" });
-    hint.createEl("div", { text: "\u4EC5\u586B\u5199\u8981\u4FEE\u6539\u7684\u5B57\u6BB5\uFF0C\u7559\u7A7A\u4FDD\u6301\u5404\u6761\u539F\u503C\u3002" });
-    const typeChanged = this.state.type !== this.originalType;
-    if (typeChanged) {
-      hint.createEl("div", {
-        text: "\u5DF2\u6539\u53D8\u7C7B\u578B\uFF0C\u76EE\u6807\u7C7B\u578B\u7684\u5FC5\u586B\u5B57\u6BB5\u5FC5\u987B\u586B\u5199\u3002",
-        cls: "accounting-batch-warn"
-      });
-    }
-    this.renderTypePills(contentEl);
-    this.fieldContainer = contentEl.createDiv({ cls: "accounting-batch-fields" });
-    this.renderFields();
-    this.errorEl = contentEl.createDiv({ cls: "accounting-error" });
-    this.errorEl.style.display = "none";
-    this.bindKeyboardAvoidance();
-    const footer = contentEl.createDiv({ cls: "accounting-batch-footer" });
-    const submitBtn = footer.createEl("button", {
-      text: `\u6279\u91CF\u4FEE\u6539 ${this.transactions.length} \u6761`,
-      cls: "accounting-btn-primary"
-    });
-    submitBtn.onclick = () => this.submit();
-    const cancelBtn = footer.createEl("button", { text: "\u53D6\u6D88", cls: "accounting-btn-secondary" });
-    cancelBtn.onclick = () => this.close();
-  }
-  renderTypePills(container) {
-    const row = container.createDiv({ cls: "accounting-type-pills" });
-    for (const t of TYPES2) {
-      const active = this.state.type === t.key;
-      const pill = row.createEl("button", {
-        text: t.label,
-        cls: `accounting-type-pill${active ? " accounting-type-pill-active" : ""}`
-      });
-      pill.onclick = () => {
-        this.state.type = t.key;
-        this.renderView();
-      };
-    }
-  }
-  renderFields() {
-    const fc = this.fieldContainer;
-    if (!fc) return;
-    fc.empty();
-    const s = this.state;
-    const typeChanged = s.type !== this.originalType;
-    const keepHint = typeChanged ? "\u8BF7\u9009\u62E9" : KEEP_HINT;
-    this.addField(fc, "\u91D1\u989D", (wrap) => {
-      const input = wrap.createEl("input", {
-        type: "text",
-        value: s.amount,
-        cls: "accounting-input",
-        attr: { placeholder: KEEP_HINT, inputmode: "decimal" }
-      });
-      input.oninput = () => {
-        s.amount = input.value;
-      };
-    });
-    if (s.type === "expense" || s.type === "income") {
-      const cats = this.categories.filter((c) => c.flow === (s.type === "expense" ? "expense" : "income")).slice().sort((a, b) => a.name.localeCompare(b.name, "zh"));
-      this.addField(fc, "\u8D26\u6237", (wrap) => {
-        const sel = wrap.createEl("select", { cls: "accounting-input" });
-        sel.createEl("option", { text: keepHint }).value = "";
-        fillAccountOptions(sel, this.accounts, s.account, false, this.accountTypeSettings);
-        sel.onchange = () => {
-          s.account = sel.value;
-        };
-      });
-      this.addField(fc, "\u5206\u7C7B", (wrap) => {
-        const sel = wrap.createEl("select", { cls: "accounting-input" });
-        sel.createEl("option", { text: keepHint }).value = "";
-        for (const c of cats) {
-          const o = sel.createEl("option", { text: c.name });
-          o.value = c.name;
-          if (c.name === s.category) o.selected = true;
-        }
-        sel.onchange = () => {
-          s.category = sel.value;
-        };
-      });
-    } else if (s.type === "transfer") {
-      this.addField(fc, "\u8F6C\u51FA\u8D26\u6237", (wrap) => {
-        const sel = wrap.createEl("select", { cls: "accounting-input" });
-        sel.createEl("option", { text: keepHint }).value = "";
-        fillAccountOptions(sel, this.accounts, s.fromAccount, false, this.accountTypeSettings);
-        sel.onchange = () => {
-          s.fromAccount = sel.value;
-        };
-      });
-      this.addField(fc, "\u8F6C\u5165\u8D26\u6237", (wrap) => {
-        const sel = wrap.createEl("select", { cls: "accounting-input" });
-        sel.createEl("option", { text: keepHint }).value = "";
-        fillAccountOptions(sel, this.accounts, s.toAccount, false, this.accountTypeSettings);
-        sel.onchange = () => {
-          s.toAccount = sel.value;
-        };
-      });
-    } else if (s.type === "loan") {
-      this.addField(fc, "\u65B9\u5411", (wrap) => {
-        const sel = wrap.createEl("select", { cls: "accounting-input" });
-        sel.createEl("option", { text: keepHint }).value = "";
-        const lend = sel.createEl("option", { text: "\u501F\u51FA\uFF08\u5BF9\u65B9\u6B20\u6211\uFF09" });
-        lend.value = "lend";
-        const borrow = sel.createEl("option", { text: "\u501F\u5165\uFF08\u6211\u6B20\u5BF9\u65B9\uFF09" });
-        borrow.value = "borrow";
-        if (s.direction === "lend") lend.selected = true;
-        if (s.direction === "borrow") borrow.selected = true;
-        sel.onchange = () => {
-          s.direction = sel.value;
-        };
-      });
-      this.addField(fc, "\u5DF1\u65B9\u8D26\u6237", (wrap) => {
-        const sel = wrap.createEl("select", { cls: "accounting-input" });
-        sel.createEl("option", { text: keepHint }).value = "";
-        fillAccountOptions(sel, this.accounts, s.account, false, this.accountTypeSettings);
-        sel.onchange = () => {
-          s.account = sel.value;
-        };
-      });
-      this.addField(fc, "\u5BF9\u65B9\uFF08\u4EBA\u8D26\u6237\uFF09", (wrap) => {
-        const sel = wrap.createEl("select", { cls: "accounting-input" });
-        sel.createEl("option", { text: keepHint }).value = "";
-        for (const a of this.accounts.filter((a2) => a2.type === "person" && a2.active).slice().sort((a2, b) => a2.name.localeCompare(b.name, "zh"))) {
-          const o = sel.createEl("option", { text: a.name });
-          o.value = a.id;
-          if (a.id === s.person) o.selected = true;
-        }
-        sel.onchange = () => {
-          s.person = sel.value;
-        };
-      });
-    }
-    this.addField(fc, "\u65F6\u95F4", (wrap) => {
-      const input = wrap.createEl("input", {
-        type: "datetime-local",
-        value: s.ts,
-        cls: "accounting-input"
-      });
-      input.onchange = () => {
-        s.ts = input.value;
-      };
-    });
-    this.addField(fc, "\u6807\u7B7E\uFF08\u7A7A\u683C\u5206\u9694\uFF09", (wrap) => {
-      const input = wrap.createEl("input", {
-        type: "text",
-        value: s.tags,
-        cls: "accounting-input",
-        attr: { placeholder: KEEP_HINT }
-      });
-      input.oninput = () => {
-        s.tags = input.value;
-      };
-    });
-    this.addField(fc, "\u5907\u6CE8", (wrap) => {
-      const ta = wrap.createEl("textarea", { cls: "accounting-input" });
-      ta.value = s.note;
-      ta.setAttr("rows", "2");
-      ta.oninput = () => {
-        s.note = ta.value;
-      };
-    });
-  }
-  addField(container, label, renderControl) {
-    const wrap = container.createDiv({ cls: "accounting-batch-field" });
-    wrap.createEl("div", { text: label, cls: "accounting-batch-field-label" });
-    renderControl(wrap);
-  }
-  showError(msg) {
-    if (!this.errorEl) return;
-    this.errorEl.setText(msg);
-    this.errorEl.style.display = "";
-  }
-  buildPatch() {
-    const s = this.state;
-    const patch = {};
-    const typeChanged = s.type !== this.originalType;
-    if (typeChanged) patch.type = s.type;
-    if (s.amount.trim() !== "") {
-      const amt = evaluateAmount(s.amount);
-      if (!amt.ok || amt.value <= 0) {
-        this.showError("\u91D1\u989D\u9700\u4E3A\u5927\u4E8E 0 \u7684\u6570");
-        return null;
-      }
-      patch.amount = round2(amt.value);
-    }
-    if (s.account) patch.account = s.account;
-    if (s.category) patch.category = s.category;
-    if (s.fromAccount) patch.fromAccount = s.fromAccount;
-    if (s.toAccount) patch.toAccount = s.toAccount;
-    if (s.person) patch.person = s.person;
-    if (s.direction) patch.direction = s.direction;
-    if (s.ts) {
-      const iso = localInputToISO(s.ts);
-      if (!iso) {
-        this.showError("\u65F6\u95F4\u683C\u5F0F\u4E0D\u6B63\u786E");
-        return null;
-      }
-      patch.ts = iso;
-    }
-    const tags = parseTagsInput(s.tags);
-    if (tags) patch.tags = tags;
-    if (s.note.trim() !== "") patch.note = s.note.trim();
-    if (Object.keys(patch).length === 0) {
-      this.showError("\u8BF7\u81F3\u5C11\u4FEE\u6539\u4E00\u9879");
-      return null;
-    }
-    if (typeChanged) {
-      if (s.type === "expense" || s.type === "income") {
-        if (!s.account) {
-          this.showError("\u6539\u7C7B\u578B\u540E\u8BF7\u9009\u62E9\u8D26\u6237");
-          return null;
-        }
-        if (!s.category) {
-          this.showError("\u6539\u7C7B\u578B\u540E\u8BF7\u9009\u62E9\u5206\u7C7B");
-          return null;
-        }
-      } else if (s.type === "transfer") {
-        if (!s.fromAccount) {
-          this.showError("\u6539\u7C7B\u578B\u540E\u8BF7\u9009\u62E9\u8F6C\u51FA\u8D26\u6237");
-          return null;
-        }
-        if (!s.toAccount) {
-          this.showError("\u6539\u7C7B\u578B\u540E\u8BF7\u9009\u62E9\u8F6C\u5165\u8D26\u6237");
-          return null;
-        }
-        if (s.fromAccount === s.toAccount) {
-          this.showError("\u8F6C\u51FA\u4E0E\u8F6C\u5165\u8D26\u6237\u4E0D\u80FD\u76F8\u540C");
-          return null;
-        }
-      } else if (s.type === "loan") {
-        if (!s.account) {
-          this.showError("\u6539\u7C7B\u578B\u540E\u8BF7\u9009\u62E9\u5DF1\u65B9\u8D26\u6237");
-          return null;
-        }
-        if (!s.person) {
-          this.showError("\u6539\u7C7B\u578B\u540E\u8BF7\u9009\u62E9\u5BF9\u65B9");
-          return null;
-        }
-        if (!s.direction) {
-          this.showError("\u6539\u7C7B\u578B\u540E\u8BF7\u9009\u62E9\u501F\u8D37\u65B9\u5411");
-          return null;
-        }
-      }
-    }
-    return patch;
-  }
-  async submit() {
-    if (this.submitting) return;
-    const patch = this.buildPatch();
-    if (!patch) return;
-    this.submitting = true;
-    try {
-      await this.adapter.backup("pre-batch-modify");
-      const fresh = await this.adapter.loadLog();
-      const latestUpdatedAt = latestUpdatedAtById(fresh);
-      for (const t of this.transactions) {
-        const current = latestUpdatedAt.get(t.id);
-        const base = this.baseUpdatedAtById.get(t.id) ?? "";
-        if (hasUpdatedSince(current, base)) {
-          new import_obsidian6.Notice("\u6240\u9009\u8BB0\u5F55\u5DF2\u88AB\u53E6\u4E00\u7AEF\u66F4\u65B0\uFF0C\u5DF2\u5237\u65B0\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u5E76\u91CD\u8BD5");
-          this.onDone();
-          this.close();
-          return;
-        }
-      }
-      const folded = foldEvents(fresh);
-      const ids = this.transactions.map((t) => t.id);
-      const { events } = buildBatchUpsertEvents({
-        folded,
-        ids,
-        patch,
-        latestUpdatedAtById: latestUpdatedAt,
-        now: nowISO()
-      });
-      if (events.length > 0) {
-        await this.adapter.appendEvents(events);
-      }
-      new import_obsidian6.Notice(`\u5DF2\u66F4\u65B0 ${events.length} \u6761`);
-      this.onDone();
-      this.close();
-    } catch (e) {
-      const msg = "\u6279\u91CF\u4FEE\u6539\u5931\u8D25\uFF1A" + (e instanceof Error ? e.message : String(e));
-      this.showError(msg);
-      new import_obsidian6.Notice(msg);
-    } finally {
-      this.submitting = false;
-    }
-  }
-  onClose() {
-    this.keyboardAvoidance?.dispose();
-    this.keyboardAvoidance = void 0;
-    this.contentEl.empty();
-  }
-  bindKeyboardAvoidance() {
-    if (this.keyboardBound) return;
-    this.keyboardBound = true;
-    this.keyboardAvoidance = bindKeyboardAvoidance({
-      rootEl: this.contentEl,
-      modalEl: this.modalEl,
-      mode: "top"
-    });
   }
 };
 
@@ -4382,7 +4397,7 @@ var TransactionListModal = class extends import_obsidian7.Modal {
     const keywordInput = searchWrap.createEl("input", {
       type: "text",
       value: this.filter.keyword,
-      placeholder: "\u5907\u6CE8\u641C\u7D22...",
+      placeholder: "\u5907\u6CE8/\u6807\u7B7E\u641C\u7D22...",
       cls: "accounting-search-input"
     });
     keywordInput.addEventListener("keydown", (e) => {
@@ -4663,32 +4678,18 @@ var TransactionListModal = class extends import_obsidian7.Modal {
     };
   }
   applyFilter() {
-    const DAY_MS = 24 * 60 * 60 * 1e3;
-    const startMs = dateInputToMs(this.filter.start);
-    const endMs = dateInputToMs(this.filter.end) + DAY_MS;
-    this.filteredTransactions = sortTransactions(
-      this.transactions.filter((tx) => {
-        const txMs = Date.parse(tx.ts);
-        if (txMs < startMs || txMs >= endMs) return false;
-        if (this.filter.types.length > 0 && !this.filter.types.includes(tx.type)) {
-          return false;
-        }
-        if (this.filter.keyword && !tx.note?.toLowerCase().includes(this.filter.keyword.toLowerCase())) {
-          return false;
-        }
-        if (this.filter.accountId) {
-          const id = this.filter.accountId;
-          if (tx.account !== id && tx.fromAccount !== id && tx.toAccount !== id && tx.person !== id) {
-            return false;
-          }
-        }
-        if (this.filter.recurringRuleId && tx.recurringRuleId !== this.filter.recurringRuleId) {
-          return false;
-        }
-        return true;
-      }),
-      this.filter.sort
-    );
+    this.filteredTransactions = filterAndSortTransactions(this.transactions, {
+      types: this.filter.types,
+      account: this.filter.accountId,
+      category: "",
+      recurringRuleId: this.filter.recurringRuleId,
+      minAmount: null,
+      maxAmount: null,
+      from: this.filter.start,
+      to: this.filter.end,
+      query: this.filter.keyword,
+      sort: this.filter.sort
+    });
   }
   async reloadAndRender() {
     try {
@@ -4817,7 +4818,7 @@ var AdjustBalanceModal = class extends import_obsidian8.Modal {
     this.targetEl.type = "number";
     this.targetEl.step = "0.01";
     this.targetEl.inputMode = "decimal";
-    this.targetEl.value = String(round23(this.currentBalance));
+    this.targetEl.value = String(round2(this.currentBalance));
     this.targetEl.addEventListener("input", () => this.updateDelta());
     this.targetEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter") this.submit();
@@ -4864,7 +4865,7 @@ var AdjustBalanceModal = class extends import_obsidian8.Modal {
       this.renderCategoryOptions();
       return;
     }
-    const delta = round23(res.value - this.currentBalance);
+    const delta = round2(res.value - this.currentBalance);
     if (delta === 0) {
       this.deltaEl.setText("\u5DEE\u989D\u4E3A 0\uFF0C\u65E0\u9700\u8C03\u6574");
     } else if (delta > 0) {
@@ -4878,7 +4879,7 @@ var AdjustBalanceModal = class extends import_obsidian8.Modal {
   renderCategoryOptions() {
     if (!this.categoryEl) return;
     const res = evaluateAmount(this.targetEl.value);
-    const delta = res.ok ? round23(res.value - this.currentBalance) : 0;
+    const delta = res.ok ? round2(res.value - this.currentBalance) : 0;
     const flow = delta > 0 ? "income" : "expense";
     const opts = adjustCategoryOptions(this.categories, flow);
     this.categoryEl.empty();
@@ -4916,9 +4917,9 @@ var AdjustBalanceModal = class extends import_obsidian8.Modal {
     const targetRaw = this.targetEl.value;
     if (!targetRaw) return this.showError("\u8BF7\u8F93\u5165\u76EE\u6807\u4F59\u989D");
     const targetRes = evaluateAmount(targetRaw);
-    const target = targetRes.ok ? round23(targetRes.value) : Number.NaN;
+    const target = targetRes.ok ? round2(targetRes.value) : Number.NaN;
     if (Number.isNaN(target)) return this.showError("\u8BF7\u8F93\u5165\u6709\u6548\u7684\u4F59\u989D");
-    const delta = round23(target - this.currentBalance);
+    const delta = round2(target - this.currentBalance);
     if (delta === 0) {
       this.close();
       return;
@@ -6280,7 +6281,32 @@ async function openEntryRecurring(app, adapter, mode, onDone) {
   ).open();
 }
 
+// ../../packages/core/package.json
+var package_default = {
+  name: "@accounting/core",
+  version: "0.1.0",
+  private: true,
+  type: "module",
+  main: "./src/index.ts",
+  types: "./src/index.ts",
+  exports: {
+    ".": "./src/index.ts",
+    "./types": "./src/types/index.ts"
+  },
+  scripts: {
+    build: "tsc -p tsconfig.json",
+    test: "vitest run",
+    "test:watch": "vitest",
+    typecheck: "tsc --noEmit"
+  },
+  devDependencies: {
+    typescript: "^5.6.3",
+    vitest: "^2.1.8"
+  }
+};
+
 // src/settings.ts
+var FEEDBACK_EMAIL = "honeyledger@163.com";
 var AccountingSettings = class {
   constructor(app, plugin, adapter) {
     this.app = app;
@@ -6324,7 +6350,8 @@ var AccountingSettings = class {
       { key: "ledger", label: "\u901A\u7528" },
       { key: "recurring", label: "\u5468\u671F\u8D26" },
       { key: "category", label: "\u5206\u7C7B" },
-      { key: "currency", label: "\u5E01\u79CD" }
+      { key: "currency", label: "\u5E01\u79CD" },
+      { key: "about", label: "\u5173\u4E8E" }
     ];
     for (const { key, label } of TABS) {
       const tabBtn = tabsEl.createEl("button", { text: label, cls: "accounting-settings-tab" });
@@ -6340,6 +6367,7 @@ var AccountingSettings = class {
     this.renderCategoryListView(categoryPanel);
     this.renderAccountTypeView(categoryPanel);
     this.renderCurrencyPanel(this.createPanel(panelsEl, "currency"));
+    this.renderAboutPanel(this.createPanel(panelsEl, "about"));
     setActiveTab(this.activeTab);
   }
   /** 保存周期账规则后回到设置页「周期账」tab。
@@ -6384,6 +6412,26 @@ var AccountingSettings = class {
     resetBtn.onclick = () => {
       void this.handleResetOnboarding();
     };
+  }
+  /** 关于 panel：应用名 / 版本 / 核心库版本 / 反馈邮箱（版本号从版本源动态读取，不硬编码）。 */
+  renderAboutPanel(panel) {
+    const cardEl = panel.createDiv("accounting-ledger-card");
+    const headEl = cardEl.createDiv("accounting-ledger-card-head");
+    headEl.createEl("span", { text: "\u5173\u4E8E", cls: "accounting-ledger-card-title" });
+    const bodyEl = cardEl.createDiv("accounting-ledger-list");
+    const row = (label, value, link = false) => {
+      const r = bodyEl.createDiv("accounting-about-row");
+      r.createEl("span", { text: label, cls: "accounting-about-label" });
+      if (link) {
+        const a = r.createEl("a", { text: value, cls: "accounting-about-value accounting-about-link", href: `mailto:${FEEDBACK_EMAIL}` });
+      } else {
+        r.createEl("span", { text: value, cls: "accounting-about-value" });
+      }
+    };
+    row("\u5E94\u7528", "\u5B8F\u5229\u8BB0\u8D26 \xB7 Honey Ledger \xB7 Obsidian \u63D2\u4EF6");
+    row("\u7248\u672C", `v${this.plugin.manifest.version}`);
+    row("\u6838\u5FC3", `@accounting/core ${package_default.version}`);
+    row("\u53CD\u9988", FEEDBACK_EMAIL, true);
   }
   /** 账本管理 panel：账本卡片（新建/刷新/切换/改名/删除）。 */
   renderLedgerPanel(panel, onSwitchLedger) {
@@ -7753,7 +7801,7 @@ var OnboardingModal = class extends import_obsidian17.Modal {
     titleEl.addClass("accounting-modal-title");
     contentEl.createEl("p", {
       text: "\u8BE5\u4F4D\u7F6E\u8FD8\u6CA1\u6709\u8D26\u672C\u3002\u60A8\u53EF\u4EE5\u5148\u6253\u5F00\u793A\u4F8B\u8D26\u672C\u5B66\u4E60\uFF0C\u6216\u521B\u5EFA\u81EA\u5DF1\u7684\u8D26\u672C\u3002",
-      cls: "text-sm text-neutral-600 mb-4"
+      cls: "accounting-onboarding-desc"
     });
     const sampleBtn = contentEl.createEl("button", {
       text: "\u521B\u5EFA\u793A\u4F8B\u8D26\u672C\uFF08\u542B\u793A\u4F8B\u6570\u636E\uFF09",
@@ -7768,7 +7816,7 @@ var OnboardingModal = class extends import_obsidian17.Modal {
         new import_obsidian17.Notice(`\u521B\u5EFA\u793A\u4F8B\u8D26\u672C\u5931\u8D25\uFF1A${e}`);
       }
     };
-    contentEl.createEl("p", { text: "\u2014 \u6216 \u2014", cls: "text-center text-xs text-neutral-400 my-3" });
+    contentEl.createEl("p", { text: "\u2014 \u6216 \u2014", cls: "accounting-onboarding-sep" });
     const createBtn = contentEl.createEl("button", {
       text: "\u521B\u5EFA\u65B0\u8D26\u672C",
       cls: "accounting-btn accounting-btn-secondary accounting-btn-block"

@@ -271,7 +271,8 @@
   margin-top: 4px;
   text-align: right;
   font-size: var(--font-ui-smaller);
-  color: #10b981;
+  /* 用主题绿变量（随明暗自适应），不硬编码 hex（见 mobile-ui-style §6 红线） */
+  color: var(--color-green);
   line-height: 1.4;
 }
 
@@ -1551,6 +1552,13 @@
   border-color: transparent;
 }
 
+/* 块级全宽变体：引导页按钮独占一行、左右铺满。叠加在 .accounting-btn 基类（inline-flex）之上，
+   用组合选择器 (0,2,0) 干净覆盖 display/width，无需 !important。 */
+.accounting-btn.accounting-btn-block {
+  display: flex;
+  width: 100%;
+}
+
 /* hover 仅悬停设备生效：iOS 触屏（WKWebView）:hover 会粘住——被点过的按钮挂浅灰底像「卡住」，
    统一包进 @media (hover:hover) 守卫（见 CLAUDE.md 环境陷阱）。 */
 @media (hover: hover) {
@@ -2120,6 +2128,8 @@
 }
 
 .accounting-ledger-current {
+  /* 实色 fallback 在前：color-mix 不可用时降级为纯卡片底（竖条仍标识当前项） */
+  background: var(--background-primary);
   background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary));
   box-shadow: inset 3px 0 0 var(--interactive-accent);
 }
@@ -2155,6 +2165,34 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 关于 panel：键值对行（label 固定列宽，value 跟随；最后一行去底边）。 */
+.accounting-about-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ac-gap-md);
+  padding: 8px var(--ac-card-content-x);
+  border-bottom: 1px solid var(--background-modifier-border);
+  font-size: var(--font-ui-small);
+}
+.accounting-about-row:last-child {
+  border-bottom: none;
+}
+.accounting-about-label {
+  flex: 0 0 3.5em;
+  color: var(--text-muted);
+}
+.accounting-about-value {
+  color: var(--text-normal);
+  word-break: break-all;
+}
+.accounting-about-link {
+  color: var(--text-accent, var(--interactive-accent));
+  text-decoration: none;
+}
+.accounting-about-link:hover {
+  text-decoration: underline;
 }
 
 .accounting-ledger-badge {
@@ -2458,14 +2496,14 @@ details[open] > .accounting-collapsible-head::before {
 
 .accounting-backup-name {
   font-weight: 500;
-  font-size: 14px;
+  font-size: var(--font-ui-small);
   word-break: break-all;
   color: var(--text-normal);
 }
 
 .accounting-backup-time {
   margin-top: 2px;
-  font-size: 12px;
+  font-size: var(--font-ui-smaller);
   color: var(--text-muted);
 }
 
@@ -2660,49 +2698,6 @@ details[open] > .accounting-collapsible-head::before {
   gap: 8px;
   margin-top: 12px;
 }
-
-/* 周期账管理模态框的顶部标题栏（固定到顶部，不使用底部导航条） */
-.accounting-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px max(env(safe-area-inset-top), 12px);
-  border-bottom: 1px solid var(--background-modifier-border);
-  background: var(--background-secondary);
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-
-.accounting-modal-title {
-  margin: 0;
-  font-size: var(--font-ui-medium);
-  font-weight: 600;
-  color: var(--text-normal);
-}
-
-/* 周期账管理模态框的内容区（有背景色和内边距） */
-.accounting-modal-content {
-  background: var(--background-primary);
-  padding: 16px;
-  min-height: calc(100vh - 60px);
-  /* 减去标题栏高度 */
-  box-sizing: border-box;
-}
-
-/* 表单容器 */
-.accounting-form-container {
-  max-width: 600px;
-  margin: 0 auto;
-}
-
-/* 表单字段区 */
-.accounting-form-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
 
 /* 错误提示 */
 .accounting-error {
@@ -3210,82 +3205,34 @@ details[open] > .accounting-collapsible-head::before {
 
 /* ============================================================================
    首次启动引导 Modal 样式（移动端优化）
+   引导页（onboardingModal）：标题/说明/分隔线/目录列表 + 全宽按钮（.accounting-btn-block）。
+   字号统一走 --font-ui-* 变量（不混 em/Tailwind）；按钮走标准 .accounting-btn 族。
    ========================================================================= */
 
-/* 引导 Modal 容器：移动端全屏，桌面端居中 */
-.accounting-onboarding-options {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin: 16px 0;
-}
-
-/* 引导 Modal 标题：居中显示 */
+/* 引导标题：居中、大号（替代原 1.3em，对齐主题字号变量） */
 .accounting-modal-title {
   text-align: center;
-  font-size: 1.3em;
+  font-size: var(--font-ui-large);
   font-weight: 600;
   margin: 0 0 8px 0;
   color: var(--text-normal);
 }
 
-/* 引导 Modal 描述文本：居中、次要颜色 */
-.accounting-modal-desc {
+/* 引导说明文字：居中、次要色、小字（替代原失效的 Tailwind text-sm/text-neutral 类） */
+.accounting-onboarding-desc {
   text-align: center;
   color: var(--text-muted);
-  font-size: 0.95em;
+  font-size: var(--font-ui-small);
   line-height: 1.5;
   margin: 0 0 16px 0;
 }
 
-/* 引导 Modal 提示文本：小字、次要颜色 */
-.accounting-modal-hint {
+/* 引导分隔线（「— 或 —」）：居中、更弱一档 */
+.accounting-onboarding-sep {
   text-align: center;
-  color: var(--text-muted);
-  font-size: 0.85em;
-  margin: 16px 0 0 0;
-}
-
-/* 引导 Modal 空状态提示：居中、次要颜色 */
-.accounting-empty-hint {
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 0.95em;
-  padding: 16px 0;
-}
-
-/* 引导表单组：垂直布局，适当间距 */
-.accounting-form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
   margin: 12px 0;
-}
-
-/* 引导表单标签：正常粗细 */
-.accounting-label {
-  font-weight: 500;
-  font-size: 0.9em;
-  color: var(--text-normal);
-}
-
-/* 引导错误提示：红色、显眼 */
-.accounting-error {
-  color: var(--text-error);
-  font-size: 0.9em;
-  margin: 8px 0;
-  padding: 8px 12px;
-  background: var(--background-modifier-error);
-  border-radius: var(--ac-radius-input);
-  border-left: 3px solid var(--text-error);
-}
-
-/* 引导 Modal 按钮组：水平排列，右对齐 */
-.accounting-modal-buttons {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  margin-top: 16px;
 }
 
 /* 引导目录列表：垂直布局 */
@@ -3299,14 +3246,6 @@ details[open] > .accounting-collapsible-head::before {
   padding: 8px;
   background: var(--background-secondary);
   border-radius: var(--ac-radius-input);
-}
-
-/* 移动端优化：确保按钮在大屏上不超过合理宽度 */
-@media (min-width: 600px) {
-  .accounting-onboarding-options .accounting-btn {
-    max-width: 400px;
-    margin: 0 auto;
-  }
 }
 
 /* 自动刷新 checkbox 文字样式：与 ledger-empty 统一 */
