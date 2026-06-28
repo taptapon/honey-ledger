@@ -1814,6 +1814,15 @@ function buildBatchUpsertEvents(input) {
   return { events, skipped };
 }
 
+// ../../packages/core/src/changelog.ts
+var RECENT_UPDATES = [
+  "\u591A\u5E01\u79CD\u8BB0\u8D26\uFF1A\u6BCF\u7B14\u4EA4\u6613\u5E26\u5E01\u79CD\u4E0E\u6C47\u7387\u5FEB\u7167\uFF0C\u8DE8\u5E01\u79CD\u8F6C\u8D26\u652F\u6301\u53CC\u91D1\u989D\uFF0C\u4F59\u989D\u4E0E\u62A5\u8868\u6309\u672C\u4F4D\u5E01\u6298\u7B97",
+  "\u5728\u7EBF\u6C47\u7387\u5237\u65B0\uFF1A\u4E00\u952E\u62C9\u53D6\u6700\u65B0\u6C47\u7387\u5199\u5165\u6C47\u7387\u8868\uFF0C\u501F\u8D37\u591A\u5E01\u79CD\u4E00\u5E76\u652F\u6301",
+  "\u8D26\u6237\u5408\u5E76\uFF1A\u8DE8\u7AEF\u7EDF\u4E00\u5408\u5E76\u903B\u8F91\uFF0C\u4E24\u7AEF\u5747\u53EF\u5408\u5E76\u8D26\u6237\u5E76\u4FDD\u7559\u5386\u53F2",
+  "\u793A\u4F8B\u8D26\u672C\u5F15\u5BFC\uFF1A\u9996\u6B21\u4F7F\u7528\u81EA\u5E26\u793A\u4F8B\u6570\u636E\uFF0C\u5FEB\u901F\u4E0A\u624B\u5404\u7C7B\u8BB0\u8D26\u573A\u666F",
+  "\u8D26\u6237\u5C5E\u6027\u7BA1\u7406\uFF1A\u8D26\u6237\u652F\u6301\u9690\u85CF / \u542F\u7528\u4E0E\u5C5E\u6027\u7F16\u8F91\uFF0C\u79FB\u52A8\u7AEF\u8865\u9F50\u8D26\u6237\u64CD\u4F5C\u83DC\u5355"
+];
+
 // src/dataAdapter.ts
 function normalizeTxAmount(data) {
   return { ...data, amount: round2(data.amount) };
@@ -6314,30 +6323,6 @@ async function openEntryRecurring(app, adapter, mode, onDone) {
   ).open();
 }
 
-// ../../packages/core/package.json
-var package_default = {
-  name: "@accounting/core",
-  version: "0.1.0",
-  private: true,
-  type: "module",
-  main: "./src/index.ts",
-  types: "./src/index.ts",
-  exports: {
-    ".": "./src/index.ts",
-    "./types": "./src/types/index.ts"
-  },
-  scripts: {
-    build: "tsc -p tsconfig.json",
-    test: "vitest run",
-    "test:watch": "vitest",
-    typecheck: "tsc --noEmit"
-  },
-  devDependencies: {
-    typescript: "^5.6.3",
-    vitest: "^2.1.8"
-  }
-};
-
 // src/settings.ts
 var FEEDBACK_EMAIL = "honeyledger@163.com";
 var AccountingSettings = class {
@@ -6463,8 +6448,16 @@ var AccountingSettings = class {
     };
     row("\u5E94\u7528", "\u5B8F\u5229\u8BB0\u8D26 \xB7 Honey Ledger \xB7 Obsidian \u63D2\u4EF6");
     row("\u7248\u672C", `v${this.plugin.manifest.version}`);
-    row("\u6838\u5FC3", `@accounting/core ${package_default.version}`);
     row("\u53CD\u9988", FEEDBACK_EMAIL, true);
+    const recentCardEl = panel.createDiv("accounting-ledger-card");
+    const recentHeadEl = recentCardEl.createDiv("accounting-ledger-card-head");
+    recentHeadEl.createEl("span", { text: "\u6700\u8FD1\u66F4\u65B0", cls: "accounting-ledger-card-title" });
+    const recentBodyEl = recentCardEl.createDiv("accounting-ledger-list");
+    RECENT_UPDATES.forEach((text, i) => {
+      const item = recentBodyEl.createDiv("accounting-about-row");
+      item.createEl("span", { text: `${i + 1}.`, cls: "accounting-about-label" });
+      item.createEl("span", { text, cls: "accounting-about-value" });
+    });
   }
   /** 账本管理 panel：账本卡片（新建/刷新/切换/改名/删除）。 */
   renderLedgerPanel(panel, onSwitchLedger) {
@@ -6740,10 +6733,19 @@ var AccountingSettings = class {
     const renderOnline = (cfg) => {
       onlineEl.empty();
       const btnRow = onlineEl.createDiv({ cls: "accounting-currency-online-row" });
+      const autoCb = btnRow.createEl("input", { cls: "accounting-checkbox" });
+      autoCb.type = "checkbox";
+      autoCb.checked = !!cfg.autoRefresh;
+      autoCb.onchange = async () => {
+        const next = { ...cfg, autoRefresh: autoCb.checked || void 0 };
+        try {
+          await adapter.writeRateConfig(next);
+        } catch (e) {
+          new import_obsidian16.Notice(`\u4FDD\u5B58\u5931\u8D25\uFF1A${e}`);
+        }
+      };
+      btnRow.createEl("span", { text: "\u81EA\u52A8\u5237\u65B0\u6C47\u7387\uFF08\u6BCF\u5929\uFF09", cls: "accounting-currency-online-label" });
       const btn = btnRow.createEl("button", { text: "\u5237\u65B0\u6C47\u7387", cls: "accounting-ledger-refresh" });
-      if (cfg.lastSuccess) {
-        btnRow.createEl("span", { text: formatLocalTimestamp(cfg.lastSuccess), cls: "accounting-currency-online-label" });
-      }
       btn.onclick = async () => {
         btn.disabled = true;
         btn.setText("\u5237\u65B0\u4E2D\u2026");
@@ -6773,19 +6775,10 @@ var AccountingSettings = class {
           btn.setText("\u5237\u65B0\u6C47\u7387");
         }
       };
-      const autoRow = onlineEl.createDiv({ cls: "accounting-currency-online-row" });
-      const autoCb = autoRow.createEl("input", { cls: "accounting-checkbox" });
-      autoCb.type = "checkbox";
-      autoCb.checked = !!cfg.autoRefresh;
-      autoCb.onchange = async () => {
-        const next = { ...cfg, autoRefresh: autoCb.checked || void 0 };
-        try {
-          await adapter.writeRateConfig(next);
-        } catch (e) {
-          new import_obsidian16.Notice(`\u4FDD\u5B58\u5931\u8D25\uFF1A${e}`);
-        }
-      };
-      autoRow.createEl("span", { text: "\u81EA\u52A8\u5237\u65B0\u6C47\u7387\uFF08\u6BCF\u5929\u4E00\u6B21\uFF09", cls: "accounting-currency-online-label" });
+      if (cfg.lastSuccess) {
+        const timeRow = onlineEl.createDiv({ cls: "accounting-currency-online-row" });
+        timeRow.createEl("span", { text: formatLocalTimestamp(cfg.lastSuccess), cls: "accounting-currency-online-label" });
+      }
     };
     void adapter.readRateConfig().then(renderOnline).catch(() => renderOnline({}));
   }

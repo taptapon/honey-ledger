@@ -3086,14 +3086,16 @@ details[open] > .accounting-collapsible-head::before {
 /* 设置页「币种」panel：本位币下拉 + 汇率表编辑器 */
 .accounting-currency-base {
   display: flex;
-  flex-direction: column;
-  gap: var(--ac-gap-sm);
+  flex-direction: row;
+  align-items: center;
+  gap: var(--ac-gap-md);
   padding: var(--ac-card-pad-y) var(--ac-card-content-x);
   border-bottom: 1px solid var(--background-modifier-border);
 }
 
 .accounting-currency-base-sel {
   max-width: 12rem;
+  margin-left: auto;
 }
 
 /* 币种 body 内子节标题：区别于卡片头标题（卡片头=大写+间距+muted色），
@@ -3210,6 +3212,11 @@ details[open] > .accounting-collapsible-head::before {
 .accounting-currency-online-row+.accounting-currency-online-row,
 .accounting-settings-row+.accounting-settings-row {
   margin-top: var(--ac-gap-md);
+}
+
+/* 第一行刷新按钮靠右：与自动刷新勾选/文字同行、贴右 */
+.accounting-currency-online-row .accounting-ledger-refresh {
+  margin-left: auto;
 }
 
 /* 启动设置行：在卡片 body 内用卡片 body 外缘 token 控制上下/左右留白，
