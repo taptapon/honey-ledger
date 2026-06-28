@@ -331,6 +331,33 @@
   margin-top: 4px;
   word-break: break-all;
 }
+/* 设置页卡片标题栏帮助：只有 ? 常驻，说明以悬浮提示展示；不占用卡片 body 空间。 */
+.accounting-header-help {
+  position: relative;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+.accounting-header-help-detail {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: max-content;
+  max-width: min(260px, calc(100vw - 32px));
+  padding: 8px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-btn);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
+  font-size: var(--font-ui-smaller);
+  font-weight: 400;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: normal;
+  word-break: break-word;
+}
 /* 说明文字后面紧跟分隔线/下一分区时，加大下间距，避免文字贴线。 */
 .accounting-help-tip-before-divider {
   padding-bottom: var(--ac-card-pad-y);

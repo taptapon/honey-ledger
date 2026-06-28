@@ -1,7 +1,7 @@
 {
   "id": "accounting",
   "name": "宏利记账",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "minAppVersion": "1.4.0",
   "description": "在 Obsidian 记账与查看账户余额，与桌面端共享 iCloud JSONL 数据",
   "author": "JasonJiang",

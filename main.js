@@ -214,12 +214,6 @@ function todayDateInput() {
   const p = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
-function daysAgoDateInput(n) {
-  const d = /* @__PURE__ */ new Date();
-  d.setDate(d.getDate() - n);
-  const p = (n2) => String(n2).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
 function monthsAgoDateInput(n) {
   const d = /* @__PURE__ */ new Date();
   d.setMonth(d.getMonth() - n);
@@ -2260,6 +2254,45 @@ function moveType(s, type, dir) {
 }
 
 // src/helpDisclosure.ts
+var activeHeaderHelp = null;
+var headerHelpIdSeq = 0;
+function closeHeaderHelp() {
+  if (!activeHeaderHelp) return;
+  activeHeaderHelp.detail.hidden = true;
+  activeHeaderHelp.btn.classList.remove("is-open");
+  activeHeaderHelp.btn.setAttribute("aria-expanded", "false");
+  activeHeaderHelp = null;
+  document.removeEventListener("click", closeHeaderHelp);
+}
+function appendHeaderHelp(parent, opts) {
+  const wrap = parent.createDiv({ cls: `accounting-header-help${opts.cls ? " " + opts.cls : ""}` });
+  const btn = wrap.createEl("button", { text: "?", cls: "accounting-help-tip-btn accounting-header-help-btn" });
+  btn.type = "button";
+  btn.setAttribute("aria-label", opts.ariaLabel ?? "\u67E5\u770B\u8BF4\u660E");
+  btn.setAttribute("aria-expanded", "false");
+  const detailId = `accounting-header-help-${++headerHelpIdSeq}`;
+  const detail = wrap.createEl("div", { text: opts.detail, cls: "accounting-header-help-detail" });
+  detail.id = detailId;
+  detail.hidden = true;
+  btn.setAttribute("aria-controls", detailId);
+  wrap.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+  btn.onclick = (event) => {
+    event.stopPropagation();
+    if (activeHeaderHelp?.wrap === wrap) {
+      closeHeaderHelp();
+      return;
+    }
+    closeHeaderHelp();
+    detail.hidden = false;
+    btn.classList.add("is-open");
+    btn.setAttribute("aria-expanded", "true");
+    activeHeaderHelp = { wrap, btn, detail };
+    document.addEventListener("click", closeHeaderHelp);
+  };
+  return wrap;
+}
 function appendHelp(parent, opts) {
   const wrap = parent.createDiv({ cls: `accounting-help-tip${opts.cls ? " " + opts.cls : ""}` });
   const head = wrap.createDiv({ cls: "accounting-help-tip-head" });
@@ -4205,15 +4238,15 @@ var TransactionListModal = class extends import_obsidian7.Modal {
     this.drillDown = drillDown;
     const hasPreset = !!presetAccountId || !!presetRecurringRuleId;
     this.filter = {
-      // preset 跳转（账户或周期账规则）：默认时间不限（全部历史）；否则默认近一周
+      // preset 跳转（账户或周期账规则）：默认时间不限（全部历史）；否则默认近1月
       // 结束日 = 当天，配合「整天包含」语义把今天完整包进来
-      start: hasPreset ? "1970-01-01" : daysAgoDateInput(7),
+      start: hasPreset ? "1970-01-01" : monthsAgoDateInput(1),
       end: todayDateInput(),
       types: [],
       keyword: "",
       accountId: presetAccountId ?? "",
       recurringRuleId: presetRecurringRuleId ?? "",
-      quickActive: hasPreset ? "all" : "week",
+      quickActive: hasPreset ? "all" : "month",
       sort: "time-desc"
     };
   }
@@ -4305,10 +4338,10 @@ var TransactionListModal = class extends import_obsidian7.Modal {
     timeRow.createSpan({ text: "\u65F6\u95F4\u8303\u56F4", cls: "accounting-filter-label" });
     const timeControls = timeRow.createDiv({ cls: "accounting-filter-controls" });
     const quickOptions = [
-      { key: "week", label: "\u8FD11\u5468", start: daysAgoDateInput(7) },
       { key: "month", label: "\u8FD11\u6708", start: monthsAgoDateInput(1) },
       { key: "quarter", label: "\u8FD13\u6708", start: monthsAgoDateInput(3) },
-      { key: "all", label: "\u4E0D\u9650", start: "1970-01-01" }
+      { key: "halfYear", label: "\u8FD16\u6708", start: monthsAgoDateInput(6) },
+      { key: "all", label: "\u5168\u90E8", start: "1970-01-01" }
     ];
     for (const opt of quickOptions) {
       const active = this.filter.quickActive === opt.key;
@@ -4661,18 +4694,18 @@ var TransactionListModal = class extends import_obsidian7.Modal {
   /** 是否有任意筛选项生效（决定是否显示统一「清除」按钮；对齐桌面 hasFilter）。 */
   hasActiveFilter() {
     const f = this.filter;
-    return f.types.length > 0 || !!f.accountId || !!f.keyword || !!f.recurringRuleId || f.quickActive !== "week" || f.start !== daysAgoDateInput(7) || f.end !== todayDateInput();
+    return f.types.length > 0 || !!f.accountId || !!f.keyword || !!f.recurringRuleId || f.quickActive !== "month" || f.start !== monthsAgoDateInput(1) || f.end !== todayDateInput();
   }
-  /** 重置所有筛选项到默认（近一周 + 全部类型/账户 + 无关键词 + 无周期账；对齐桌面 clearAll）。 */
+  /** 重置所有筛选项到默认（近1月 + 全部类型/账户 + 无关键词 + 无周期账；对齐桌面 clearAll）。 */
   resetFilter() {
     this.filter = {
-      start: daysAgoDateInput(7),
+      start: monthsAgoDateInput(1),
       end: todayDateInput(),
       types: [],
       keyword: "",
       accountId: "",
       recurringRuleId: "",
-      quickActive: "week",
+      quickActive: "month",
       sort: this.filter.sort
       // 排序非筛选维度，清除时保留（对齐桌面 clearAll 不动 sort）
     };
@@ -6404,9 +6437,9 @@ var AccountingSettings = class {
         new import_obsidian16.Notice(`\u4FDD\u5B58\u5931\u8D25\uFF1A${e}`);
       }
     };
-    row.createEl("span", { text: "\u6253\u5F00 Obsidian \u65F6\u81EA\u52A8\u8FDB\u5165\u8BB0\u8D26", cls: "accounting-currency-online-label accounting-startup-toggle-label" });
+    row.createEl("span", { text: "\u5F00 Obsidian \u81EA\u52A8\u8FDB\u5165", cls: "accounting-currency-online-label accounting-startup-toggle-label" });
     const resetBtn = row.createEl("button", {
-      text: "\u21BB \u91CD\u65B0\u8FD0\u884C\u8D26\u672C\u5F15\u5BFC",
+      text: "\u21BB \u91CD\u8FD0\u884C\u5F15\u5BFC",
       cls: "accounting-btn accounting-btn-secondary accounting-reset-onboarding"
     });
     resetBtn.onclick = () => {
@@ -6520,14 +6553,13 @@ var AccountingSettings = class {
     const backupCardEl = panel.createDiv("accounting-ledger-card");
     const backupHeadEl = backupCardEl.createDiv("accounting-ledger-card-head");
     backupHeadEl.createEl("span", { text: "\u5907\u4EFD", cls: "accounting-ledger-card-title" });
+    appendHeaderHelp(backupHeadEl, {
+      detail: "\u5907\u4EFD\u5B58\u50A8\u5728\u8D26\u672C\u76EE\u5F55\u7684 backups/<label>-<timestamp> \u5B50\u76EE\u5F55\u3002\u6062\u590D\u524D\u4F1A\u81EA\u52A8\u521B\u5EFA pre-restore \u515C\u5E95\u5907\u4EFD\u3002"
+    });
     const backupBodyEl = backupCardEl.createDiv("accounting-ledger-list accounting-backup-card-body");
     const backupActionsEl = backupBodyEl.createDiv("accounting-ledger-card-actions accounting-backup-card-actions");
     const createBackupBtn = backupActionsEl.createEl("button", { text: "\u2913 \u7ACB\u5373\u5907\u4EFD", cls: "accounting-ledger-create" });
     const listBackupBtn = backupActionsEl.createEl("button", { text: "\u21A9 \u67E5\u770B\u5907\u4EFD", cls: "accounting-ledger-refresh" });
-    appendHelp(backupBodyEl, {
-      summary: "\u5907\u4EFD\u5B58\u4E8E\u8D26\u672C\u76EE\u5F55 backups/ \u5B50\u76EE\u5F55",
-      detail: "\u5907\u4EFD\u5B58\u50A8\u5728\u8D26\u672C\u76EE\u5F55\u7684 backups/<label>-<timestamp> \u5B50\u76EE\u5F55"
-    });
     createBackupBtn.onclick = async () => {
       try {
         const backupPath = await this.currentAdapter().backup("manual");
@@ -6545,6 +6577,9 @@ var AccountingSettings = class {
     const cardEl = panel.createDiv("accounting-ledger-card");
     const headEl = cardEl.createDiv("accounting-ledger-card-head");
     headEl.createEl("span", { text: "\u5E01\u79CD\u4E0E\u6C47\u7387", cls: "accounting-ledger-card-title" });
+    appendHeaderHelp(headEl, {
+      detail: "\u672C\u4F4D\u5E01\u7528\u4E8E\u51C0\u8D44\u4EA7\u4E0E\u62A5\u8868\u6298\u7B97\uFF0C\u9ED8\u8BA4 CNY\u3002\u6C47\u7387\u8868\u4E0E\u672C\u4F4D\u5E01\u5B58\u50A8\u5728\u8D26\u672C\u76EE\u5F55\uFF08rates.json / ledger.json\uFF09\uFF0C\u968F iCloud \u4E0E\u684C\u9762\u7AEF\u540C\u6B65\u3002"
+    });
     const bodyEl = cardEl.createDiv("accounting-ledger-list");
     const refresh = async () => {
       const adapter = this.currentAdapter();
@@ -6582,11 +6617,6 @@ var AccountingSettings = class {
         new import_obsidian16.Notice(`\u8BBE\u7F6E\u5931\u8D25\uFF1A${error}`);
       }
     };
-    appendHelp(baseRow, {
-      cls: "accounting-help-tip-flush",
-      summary: "\u7528\u4E8E\u51C0\u8D44\u4EA7\u4E0E\u62A5\u8868\u6298\u7B97",
-      detail: "\u51C0\u8D44\u4EA7\u4E0E\u62A5\u8868\u6309\u672C\u4F4D\u5E01\u6298\u7B97\u3002\u9ED8\u8BA4 CNY\u3002"
-    });
     bodyEl.createEl("div", { text: `\u5E01\u79CD\u4E0E\u6C47\u7387\u8868\uFF08\u2192 ${baseCurrency}\uFF09`, cls: "accounting-currency-section-title" });
     const rows = rateRowsFromTable(rates);
     const listEl = bodyEl.createDiv({ cls: "accounting-currency-rates" });
@@ -6706,11 +6736,6 @@ var AccountingSettings = class {
         new import_obsidian16.Notice(`\u4FDD\u5B58\u5931\u8D25\uFF1A${error}`, 5e3);
       }
     };
-    appendHelp(bodyEl, {
-      cls: "accounting-help-tip-before-divider",
-      summary: "\u6C47\u7387\u8868\u4E0E\u672C\u4F4D\u5E01\u968F iCloud \u540C\u6B65",
-      detail: "\u6C47\u7387\u8868\u4E0E\u672C\u4F4D\u5E01\u5B58\u50A8\u5728\u8D26\u672C\u76EE\u5F55\uFF08rates.json / ledger.json\uFF09\uFF0C\u968F iCloud \u4E0E\u684C\u9762\u7AEF\u540C\u6B65\u3002"
-    });
     const onlineEl = bodyEl.createDiv({ cls: "accounting-currency-online" });
     const renderOnline = (cfg) => {
       onlineEl.empty();
