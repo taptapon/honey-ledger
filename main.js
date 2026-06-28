@@ -1142,15 +1142,131 @@ function seedDefaultRates() {
     EUR: e(7.85),
     JPY: e(0.05),
     HKD: e(0.92),
-    GBP: e(9.15),
-    TWD: e(0.22),
-    KRW: e(0.01),
-    SGD: e(5.3),
-    AUD: e(4.75),
-    CAD: e(5.25),
-    CHF: e(8.2),
-    NZD: e(4.35)
+    GBP: e(9.15)
   };
+}
+var SAMPLE_LEDGER_NAME = "sample-ledger";
+var SAMPLE_LEDGER_ALIAS = "\u793A\u4F8B\u8D26\u672C";
+var SAMPLE_ANCHOR = "2026-01-01T00:00:00.000Z";
+function seedSampleLedger() {
+  const now = SAMPLE_ANCHOR;
+  const later = "2026-06-15T12:00:00.000Z";
+  const acc = (id, name, type, opening, currency = "CNY") => ({ id, name, type, openingBalance: opening, currency, active: true, createdAt: now, updatedAt: now });
+  const cashId = newAccountId();
+  const savingsId = newAccountId();
+  const ewalletId = newAccountId();
+  const creditId = newAccountId();
+  const personId = newAccountId();
+  const accounts = [
+    acc(cashId, "\u73B0\u91D1", "cash", 1e3),
+    acc(savingsId, "\u62DB\u884C\u50A8\u84C4", "savings", 5e4),
+    acc(ewalletId, "\u5FAE\u4FE1\u96F6\u94B1\u901A", "ewallet", 5e3),
+    acc(creditId, "\u62DB\u884C\u4FE1\u7528\u5361", "credit", 0, "CNY"),
+    acc(personId, "\u5F20\u4E09\uFF08\u5F80\u6765\uFF09", "person", 0)
+  ];
+  const cat = (flow, name) => ({ id: newCategoryId(), name, flow });
+  const categories = [
+    cat("expense", "\u9910\u996E"),
+    cat("expense", "\u8D2D\u7269"),
+    cat("expense", "\u4EA4\u901A"),
+    cat("expense", "\u5C45\u5BB6"),
+    cat("expense", "\u5A31\u4E50"),
+    cat("expense", "\u533B\u6559"),
+    cat("expense", "\u4EBA\u60C5"),
+    cat("expense", "\u96F6\u7528"),
+    cat("expense", "\u5176\u4ED6"),
+    cat("expense", ADJUST_CATEGORY),
+    cat("income", "\u5DE5\u8D44\u85AA\u6C34"),
+    cat("income", "\u6295\u8D44\u6536\u76CA"),
+    cat("income", "\u9000\u6B3E\u8FD4\u6B3E"),
+    cat("income", "\u5176\u4ED6"),
+    cat("income", ADJUST_CATEGORY)
+  ];
+  const rates = seedDefaultRates();
+  const tx = (id, type, fields) => ({
+    op: "upsert",
+    id,
+    type,
+    createdAt: now,
+    updatedAt: later,
+    ...fields
+  });
+  const events = [
+    // 1. 支出：现金买菜
+    tx(newTxId(), "expense", {
+      ts: "2026-01-05T08:30:00.000Z",
+      amount: round2(35.5),
+      currency: "CNY",
+      account: cashId,
+      category: "\u9910\u996E",
+      note: "\u83DC\u5E02\u573A\u4E70\u83DC"
+    }),
+    // 2. 收入：工资存入储蓄
+    tx(newTxId(), "income", {
+      ts: "2026-01-10T10:00:00.000Z",
+      amount: round2(15e3),
+      currency: "CNY",
+      account: savingsId,
+      category: "\u5DE5\u8D44\u85AA\u6C34",
+      note: "1\u6708\u5DE5\u8D44"
+    }),
+    // 3. 转账：储蓄转到微信
+    tx(newTxId(), "transfer", {
+      ts: "2026-01-15T14:00:00.000Z",
+      amount: round2(2e3),
+      currency: "CNY",
+      fromAccount: savingsId,
+      toAccount: ewalletId,
+      note: "\u8F6C\u96F6\u94B1\u5907\u7528"
+    }),
+    // 4. 信用卡消费
+    tx(newTxId(), "expense", {
+      ts: "2026-02-01T19:00:00.000Z",
+      amount: round2(299),
+      currency: "CNY",
+      account: creditId,
+      category: "\u8D2D\u7269",
+      note: "\u7F51\u8D2D\u8863\u670D"
+    }),
+    // 5. 还款：储蓄还信用卡
+    tx(newTxId(), "transfer", {
+      ts: "2026-02-10T10:00:00.000Z",
+      amount: round2(299),
+      currency: "CNY",
+      fromAccount: savingsId,
+      toAccount: creditId,
+      note: "\u8FD8\u4FE1\u7528\u5361"
+    }),
+    // 6. 借贷：借出给张三
+    tx(newTxId(), "loan", {
+      ts: "2026-03-01T12:00:00.000Z",
+      amount: round2(5e3),
+      currency: "CNY",
+      account: savingsId,
+      person: personId,
+      direction: "lend",
+      note: "\u501F\u7ED9\u5F20\u4E09"
+    }),
+    // 7. 收入：投资收益
+    tx(newTxId(), "income", {
+      ts: "2026-04-01T09:00:00.000Z",
+      amount: round2(320.5),
+      currency: "CNY",
+      account: ewalletId,
+      category: "\u6295\u8D44\u6536\u76CA",
+      note: "\u96F6\u94B1\u901A\u6536\u76CA"
+    }),
+    // 8. 支出：交通打车
+    tx(newTxId(), "expense", {
+      ts: "2026-05-10T20:00:00.000Z",
+      amount: round2(28),
+      currency: "CNY",
+      account: cashId,
+      category: "\u4EA4\u901A",
+      note: "\u6253\u8F66\u56DE\u5BB6"
+    })
+  ];
+  return { accounts, categories, rates, events };
 }
 function seedDefaults() {
   const now = nowISO();
@@ -1936,6 +2052,44 @@ var ObsidianDataAdapter = class {
       `${folder}/rates.json`,
       JSON.stringify(seed.rates, null, 2)
     );
+    if (alias && alias.trim()) {
+      await this.vault.adapter.write(
+        `${folder}/ledger.json`,
+        JSON.stringify({ alias: alias.trim() }, null, 2)
+      );
+    }
+  }
+  /**
+   * 新建示例账本：建目录 + backups/ + 写 seed 数据 + 写入示例交易事件。
+   * 与桌面端 createSampleLedger 行为对齐。
+   */
+  async createSampleLedger(name, alias) {
+    const folder = name.trim();
+    if (await this.vault.adapter.exists(folder)) {
+      throw new Error(`\u5DF2\u5B58\u5728\u540C\u540D\u76EE\u5F55\u300C${folder}\u300D`);
+    }
+    await this.vault.adapter.mkdir(folder);
+    await this.vault.adapter.mkdir(`${folder}/backups`);
+    await this.vault.adapter.write(`${folder}/transactions.jsonl`, "");
+    const seed = seedSampleLedger();
+    await this.vault.adapter.write(
+      `${folder}/accounts.json`,
+      JSON.stringify(seed.accounts, null, 2)
+    );
+    await this.vault.adapter.write(
+      `${folder}/categories.json`,
+      JSON.stringify(seed.categories, null, 2)
+    );
+    await this.vault.adapter.write(
+      `${folder}/rates.json`,
+      JSON.stringify(seed.rates, null, 2)
+    );
+    if (seed.events.length > 0) {
+      await this.vault.adapter.write(
+        `${folder}/transactions.jsonl`,
+        seed.events.map((e) => JSON.stringify(e)).join("\n") + "\n"
+      );
+    }
     if (alias && alias.trim()) {
       await this.vault.adapter.write(
         `${folder}/ledger.json`,
@@ -4653,6 +4807,7 @@ var AdjustBalanceModal = class extends import_obsidian8.Modal {
       cls: "accounting-adjust-current"
     });
     appendHelp(contentEl, {
+      cls: "accounting-help-tip-flush",
       summary: "\u63D0\u4EA4\u8BB0\u4E00\u6761\u5DEE\u989D\u6D41\u6C34\uFF0C\u53EF\u6539\u9009\u5206\u7C7B",
       detail: "\u63D0\u4EA4\u540E\u6309\u300C\u76EE\u6807\u4F59\u989D \u2212 \u5F53\u524D\u4F59\u989D\u300D\u8BB0\u4E00\u6761\u5DEE\u989D\u6D41\u6C34\uFF08\u6536\u5165\u6216\u652F\u51FA\uFF09\uFF1B\u53EF\u5728\u4E0B\u65B9\u6539\u9009\u5206\u7C7B\u3002"
     });
@@ -6208,7 +6363,7 @@ var AccountingSettings = class {
     const headEl = cardEl.createDiv("accounting-ledger-card-head");
     headEl.createEl("span", { text: "\u542F\u52A8\u8BBE\u7F6E", cls: "accounting-ledger-card-title" });
     const bodyEl = cardEl.createDiv("accounting-ledger-list");
-    const row = bodyEl.createDiv("accounting-currency-online-row accounting-startup-toggle");
+    const row = bodyEl.createDiv("accounting-settings-row accounting-startup-toggle");
     const cb = row.createEl("input", { cls: "accounting-checkbox" });
     cb.type = "checkbox";
     cb.checked = !!this.plugin.settings.autoOpenOnStartup;
@@ -6221,11 +6376,10 @@ var AccountingSettings = class {
         new import_obsidian16.Notice(`\u4FDD\u5B58\u5931\u8D25\uFF1A${e}`);
       }
     };
-    row.createEl("span", { text: "\u6253\u5F00 Obsidian \u65F6\u81EA\u52A8\u8FDB\u5165\u8BB0\u8D26", cls: "accounting-currency-online-label" });
-    const resetOnboardingRow = bodyEl.createDiv("accounting-currency-online-row accounting-reset-onboarding-row");
-    const resetBtn = resetOnboardingRow.createEl("button", {
+    row.createEl("span", { text: "\u6253\u5F00 Obsidian \u65F6\u81EA\u52A8\u8FDB\u5165\u8BB0\u8D26", cls: "accounting-currency-online-label accounting-startup-toggle-label" });
+    const resetBtn = row.createEl("button", {
       text: "\u21BB \u91CD\u65B0\u8FD0\u884C\u8D26\u672C\u5F15\u5BFC",
-      cls: "accounting-btn accounting-btn-secondary"
+      cls: "accounting-btn accounting-btn-secondary accounting-reset-onboarding"
     });
     resetBtn.onclick = () => {
       void this.handleResetOnboarding();
@@ -6318,14 +6472,14 @@ var AccountingSettings = class {
     const backupCardEl = panel.createDiv("accounting-ledger-card");
     const backupHeadEl = backupCardEl.createDiv("accounting-ledger-card-head");
     backupHeadEl.createEl("span", { text: "\u5907\u4EFD", cls: "accounting-ledger-card-title" });
-    const backupBodyEl = backupCardEl.createDiv("accounting-ledger-list");
+    const backupBodyEl = backupCardEl.createDiv("accounting-ledger-list accounting-backup-card-body");
+    const backupActionsEl = backupBodyEl.createDiv("accounting-ledger-card-actions accounting-backup-card-actions");
+    const createBackupBtn = backupActionsEl.createEl("button", { text: "\u2913 \u7ACB\u5373\u5907\u4EFD", cls: "accounting-ledger-create" });
+    const listBackupBtn = backupActionsEl.createEl("button", { text: "\u21A9 \u67E5\u770B\u5907\u4EFD", cls: "accounting-ledger-refresh" });
     appendHelp(backupBodyEl, {
       summary: "\u5907\u4EFD\u5B58\u4E8E\u8D26\u672C\u76EE\u5F55 backups/ \u5B50\u76EE\u5F55",
       detail: "\u5907\u4EFD\u5B58\u50A8\u5728\u8D26\u672C\u76EE\u5F55\u7684 backups/<label>-<timestamp> \u5B50\u76EE\u5F55"
     });
-    const backupActionsEl = backupBodyEl.createDiv("accounting-ledger-card-actions");
-    const createBackupBtn = backupActionsEl.createEl("button", { text: "\u2913 \u7ACB\u5373\u5907\u4EFD", cls: "accounting-ledger-create" });
-    const listBackupBtn = backupActionsEl.createEl("button", { text: "\u21A9 \u67E5\u770B\u5907\u4EFD", cls: "accounting-ledger-refresh" });
     createBackupBtn.onclick = async () => {
       try {
         const backupPath = await this.currentAdapter().backup("manual");
@@ -6381,6 +6535,7 @@ var AccountingSettings = class {
       }
     };
     appendHelp(baseRow, {
+      cls: "accounting-help-tip-flush",
       summary: "\u7528\u4E8E\u51C0\u8D44\u4EA7\u4E0E\u62A5\u8868\u6298\u7B97",
       detail: "\u51C0\u8D44\u4EA7\u4E0E\u62A5\u8868\u6309\u672C\u4F4D\u5E01\u6298\u7B97\u3002\u9ED8\u8BA4 CNY\u3002"
     });
@@ -6504,6 +6659,7 @@ var AccountingSettings = class {
       }
     };
     appendHelp(bodyEl, {
+      cls: "accounting-help-tip-before-divider",
       summary: "\u6C47\u7387\u8868\u4E0E\u672C\u4F4D\u5E01\u968F iCloud \u540C\u6B65",
       detail: "\u6C47\u7387\u8868\u4E0E\u672C\u4F4D\u5E01\u5B58\u50A8\u5728\u8D26\u672C\u76EE\u5F55\uFF08rates.json / ledger.json\uFF09\uFF0C\u968F iCloud \u4E0E\u684C\u9762\u7AEF\u540C\u6B65\u3002"
     });
@@ -7583,10 +7739,41 @@ var OnboardingModal = class extends import_obsidian17.Modal {
     this.currentStep = "main";
     const existing = await this.adapter.listLedgers();
     if (existing.length === 0) {
-      this.renderCreateForm();
+      this.renderEmptyState();
     } else {
       this.renderLedgerSelection(existing);
     }
+  }
+  /** 无账本时：提供示例账本创建和手动创建两个选项 */
+  renderEmptyState() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.currentStep = "main";
+    const titleEl = contentEl.createEl("h2", { text: "\u6B22\u8FCE" });
+    titleEl.addClass("accounting-modal-title");
+    contentEl.createEl("p", {
+      text: "\u8BE5\u4F4D\u7F6E\u8FD8\u6CA1\u6709\u8D26\u672C\u3002\u60A8\u53EF\u4EE5\u5148\u6253\u5F00\u793A\u4F8B\u8D26\u672C\u5B66\u4E60\uFF0C\u6216\u521B\u5EFA\u81EA\u5DF1\u7684\u8D26\u672C\u3002",
+      cls: "text-sm text-neutral-600 mb-4"
+    });
+    const sampleBtn = contentEl.createEl("button", {
+      text: "\u521B\u5EFA\u793A\u4F8B\u8D26\u672C\uFF08\u542B\u793A\u4F8B\u6570\u636E\uFF09",
+      cls: "accounting-btn accounting-btn-primary accounting-btn-block"
+    });
+    sampleBtn.onclick = async () => {
+      try {
+        await this.adapter.createSampleLedger(SAMPLE_LEDGER_NAME, SAMPLE_LEDGER_ALIAS);
+        this.result = { action: "selected", ledger: SAMPLE_LEDGER_NAME };
+        this.close();
+      } catch (e) {
+        new import_obsidian17.Notice(`\u521B\u5EFA\u793A\u4F8B\u8D26\u672C\u5931\u8D25\uFF1A${e}`);
+      }
+    };
+    contentEl.createEl("p", { text: "\u2014 \u6216 \u2014", cls: "text-center text-xs text-neutral-400 my-3" });
+    const createBtn = contentEl.createEl("button", {
+      text: "\u521B\u5EFA\u65B0\u8D26\u672C",
+      cls: "accounting-btn accounting-btn-secondary accounting-btn-block"
+    });
+    createBtn.onclick = () => this.renderCreateForm();
   }
   /** 渲染现有账本选择列表 */
   renderLedgerSelection(existing) {

@@ -41,6 +41,14 @@
   --ac-control-h-hero: 40px;
   --ac-radius-input: 6px;
   --ac-radius-btn: 8px;
+  --ac-card-pad-x: 12px;
+  --ac-card-pad-y: 12px;
+  --ac-card-content-x: 14px;
+  --ac-card-head-y: 8px;
+  --ac-gap-sm: 6px;
+  --ac-gap-md: 8px;
+  --ac-gap-lg: 12px;
+  --ac-card-action-gap: 16px;
   --ac-focus-ring: 0 0 0 3px rgba(16, 185, 129, 0.24);
   --ac-focus-ring: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 35%, transparent);
 }
@@ -277,10 +285,15 @@
 
 /* 「?」渐进式帮助：summary 常驻 + 点击 ? 展开 detail（详见 openspec ui-help-disclosure）。 */
 .accounting-help-tip {
-  margin-top: 2px;
+  padding: 4px var(--ac-card-content-x) 2px;
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
   line-height: 1.4;
+}
+/* 容器已自带水平内边距时（如 .accounting-currency-base、Modal contentEl）去掉 help-tip 自身水平 padding，避免双重缩进。 */
+.accounting-help-tip.accounting-help-tip-flush {
+  padding-left: 0;
+  padding-right: 0;
 }
 .accounting-help-tip-head {
   display: flex;
@@ -316,6 +329,10 @@
 .accounting-help-tip-detail {
   margin-top: 4px;
   word-break: break-all;
+}
+/* 说明文字后面紧跟分隔线/下一分区时，加大下间距，避免文字贴线。 */
+.accounting-help-tip-before-divider {
+  padding-bottom: var(--ac-card-pad-y);
 }
 
 .accounting-entry-control-group {
@@ -2037,8 +2054,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: var(--ac-gap-md);
+  padding: var(--ac-card-head-y) var(--ac-card-pad-x);
   background: var(--background-secondary);
   border-bottom: 1px solid var(--background-modifier-border);
 }
@@ -2086,8 +2103,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: var(--ac-gap-lg);
+  padding: var(--ac-card-pad-y) var(--ac-card-content-x);
   border-bottom: 1px solid var(--background-modifier-border);
   transition: background 0.15s;
 }
@@ -2119,7 +2136,7 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--ac-gap-md);
   font-size: var(--font-ui-small);
   font-weight: 600;
   color: var(--text-normal);
@@ -2162,7 +2179,7 @@
 
 .accounting-recurring-section h3 {
   margin: 0;
-  padding: 8px 12px 6px;
+  padding: var(--ac-card-head-y) var(--ac-card-pad-x) var(--ac-gap-sm);
   font-size: var(--font-ui-smaller);
   font-weight: 600;
   color: var(--text-muted);
@@ -2176,8 +2193,8 @@
 .accounting-collapsible-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: var(--ac-gap-sm);
+  padding: var(--ac-card-head-y) var(--ac-card-pad-x);
   font-size: var(--font-ui-smaller);
   font-weight: 600;
   color: var(--text-muted);
@@ -2210,7 +2227,7 @@ details[open] > .accounting-collapsible-head::before {
 .accounting-cat-page {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--ac-gap-lg);
 }
 
 .accounting-cat-flow-card {
@@ -2252,7 +2269,7 @@ details[open] > .accounting-collapsible-head::before {
 }
 
 .accounting-cat-group-empty {
-  padding: 10px 14px;
+  padding: 10px var(--ac-card-content-x);
   font-size: var(--font-ui-smaller);
   color: var(--text-faint);
 }
@@ -2274,7 +2291,7 @@ details[open] > .accounting-collapsible-head::before {
 
 /* 兼容旧分类分组空态类名；旧的全局已隐藏子分组不再渲染。 */
 .accounting-cat-sub {
-  padding: 8px 12px 2px;
+  padding: var(--ac-card-head-y) var(--ac-card-pad-x) 2px;
   font-size: var(--font-ui-smaller);
   font-weight: 600;
   color: var(--text-muted);
@@ -2293,8 +2310,8 @@ details[open] > .accounting-collapsible-head::before {
 .accounting-at-group-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: var(--ac-gap-md);
+  padding: var(--ac-card-head-y) var(--ac-card-pad-x);
   background: var(--background-secondary);
 }
 
@@ -2311,8 +2328,8 @@ details[open] > .accounting-collapsible-head::before {
 .accounting-at-type {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
+  gap: var(--ac-gap-lg);
+  padding: 10px var(--ac-card-content-x);
   border-bottom: 1px solid var(--background-modifier-border);
 }
 
@@ -2323,7 +2340,7 @@ details[open] > .accounting-collapsible-head::before {
 .accounting-at-type-info {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--ac-gap-sm);
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -2331,8 +2348,8 @@ details[open] > .accounting-collapsible-head::before {
 .accounting-at-add-group {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: var(--ac-gap-md);
+  padding: 10px var(--ac-card-pad-x);
   border-top: 1px solid var(--background-modifier-border);
   flex-wrap: wrap;
 }
@@ -2342,7 +2359,7 @@ details[open] > .accounting-collapsible-head::before {
 }
 
 .accounting-at-empty {
-  padding: 10px 14px;
+  padding: 10px var(--ac-card-content-x);
   font-size: var(--font-ui-smaller);
   color: var(--text-faint);
 }
@@ -2407,7 +2424,7 @@ details[open] > .accounting-collapsible-head::before {
 }
 
 .accounting-ledger-empty {
-  padding: 16px 12px;
+  padding: 16px var(--ac-card-pad-x);
   text-align: center;
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
@@ -2417,8 +2434,8 @@ details[open] > .accounting-collapsible-head::before {
 .accounting-backup-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin: 12px 0;
+  gap: var(--ac-gap-md);
+  margin: var(--ac-gap-lg) 0;
   max-height: 60vh;
   overflow-y: auto;
 }
@@ -2427,8 +2444,8 @@ details[open] > .accounting-collapsible-head::before {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
+  gap: var(--ac-gap-lg);
+  padding: 10px var(--ac-card-pad-x);
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
   background: var(--background-secondary);
@@ -2454,7 +2471,7 @@ details[open] > .accounting-collapsible-head::before {
 
 .accounting-backup-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--ac-gap-md);
   flex-shrink: 0;
 }
 
@@ -2481,17 +2498,34 @@ details[open] > .accounting-collapsible-head::before {
 /* 账本管理卡片头操作组（新建 + 刷新）与列表项操作组（切换/改名/删除） */
 .accounting-ledger-head-actions {
   display: flex;
-  gap: 6px;
+  gap: var(--ac-gap-sm);
   align-items: center;
 }
 
-/* 卡片 body 内的操作按钮组（备份管理：按钮放在 body 与说明同框，不放在 head）。
-   居中排列，与上方 .accounting-ledger-empty 居中说明对齐。 */
+/* 卡片 body 内的操作按钮组：默认上下留 12px、左右 12px。
+   放在卡片头的操作（如「新建规则」）由 head padding 控制；放在 body 内的操作（如备份/汇率表）用本类控制与边框/说明文字的间距。 */
 .accounting-ledger-card-actions {
   display: flex;
-  gap: 16px;
+  gap: var(--ac-card-action-gap);
   justify-content: center;
-  padding: 0 12px 14px;
+  padding: var(--ac-card-pad-y) var(--ac-card-pad-x);
+}
+
+.accounting-backup-card-body {
+  gap: 10px;
+}
+
+.accounting-backup-card-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--ac-gap-lg);
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--ac-card-pad-y) var(--ac-card-pad-x);
+}
+
+.accounting-backup-card-actions button {
+  width: 100%;
 }
 
 .accounting-ledger-create {
@@ -2555,7 +2589,7 @@ details[open] > .accounting-collapsible-head::before {
 
 .accounting-ledger-actions {
   display: flex;
-  gap: 6px;
+  gap: var(--ac-gap-sm);
   align-items: center;
   flex-wrap: wrap;
   flex-shrink: 0;
@@ -3031,8 +3065,8 @@ details[open] > .accounting-collapsible-head::before {
 .accounting-currency-base {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px 14px;
+  gap: var(--ac-gap-sm);
+  padding: var(--ac-card-pad-y) var(--ac-card-content-x);
   border-bottom: 1px solid var(--background-modifier-border);
 }
 
@@ -3044,7 +3078,7 @@ details[open] > .accounting-collapsible-head::before {
    这里用正常大小、正常颜色，与 card-head 形成视觉层次 */
 .accounting-currency-section-title {
   display: block;
-  padding: 12px 14px 6px;
+  padding: var(--ac-card-pad-y) var(--ac-card-content-x) var(--ac-gap-sm);
   font-size: var(--font-ui-small);
   font-weight: 600;
   color: var(--text-normal);
@@ -3053,8 +3087,8 @@ details[open] > .accounting-collapsible-head::before {
 .accounting-currency-rates {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 0 14px 12px;
+  gap: var(--ac-gap-md);
+  padding: 0 var(--ac-card-content-x) var(--ac-card-pad-y);
 }
 
 .accounting-currency-rate-row {
@@ -3139,33 +3173,39 @@ details[open] > .accounting-collapsible-head::before {
 
 /* 在线刷新区域：与上方内容分隔 */
 .accounting-currency-online {
-  padding: 12px 14px;
+  padding: var(--ac-card-pad-y) var(--ac-card-content-x);
   border-top: 1px solid var(--background-modifier-border);
 }
 
-.accounting-currency-online-row {
+.accounting-currency-online-row,
+.accounting-settings-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--ac-gap-md);
   flex-wrap: wrap;
 }
 
-.accounting-currency-online-row+.accounting-currency-online-row {
-  margin-top: 8px;
+.accounting-currency-online-row+.accounting-currency-online-row,
+.accounting-settings-row+.accounting-settings-row {
+  margin-top: var(--ac-gap-md);
 }
 
-/* 启动设置开关行：在卡片 body（.accounting-ledger-list，flex column、min-height 40px）内垂直居中——
-   margin-block:auto 吸收垂直富余空间实现上下居中；padding-left:12px 与卡片标题栏
-   （.accounting-ledger-card-head padding 8px 12px）左缩进对齐，避免勾选框贴左边缘。
-   仅作用本行，不影响币种在线刷新区同 class 行。 */
+/* 启动设置行：在卡片 body 内用卡片 body 外缘 token 控制上下/左右留白，
+   checkbox/文字/按钮同一行垂直居中；窄屏允许按钮换到下一行。 */
 .accounting-startup-toggle {
   margin-block: auto;
-  padding-left: 12px;
+  padding: var(--ac-card-pad-y) var(--ac-card-pad-x);
+  align-items: center;
 }
 
-/* 重新运行账本引导按钮行：与上方启动开关行左缩进对齐，避免按钮贴卡片左边缘。 */
-.accounting-reset-onboarding-row {
-  padding-left: 12px;
+.accounting-startup-toggle-label {
+  flex: 1 1 auto;
+}
+
+/* 设置页密集操作：独立主按钮复用 secondary 配色，但尺寸降到紧凑档，和设置页其他动作按钮一致。 */
+.accounting-reset-onboarding {
+  height: var(--ac-control-h-compact);
+  padding: 0 var(--ac-card-pad-x);
 }
 
 /* ============================================================================
