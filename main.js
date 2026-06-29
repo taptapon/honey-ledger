@@ -854,7 +854,9 @@ function filterAndSortTransactions(transactions, filters) {
   const list = transactions.filter((t) => {
     if (filters.types.length > 0 && !filters.types.includes(t.type)) return false;
     if (filters.account && ![t.account, t.fromAccount, t.toAccount, t.person].includes(filters.account)) return false;
-    if (filters.category && t.category !== filters.category) return false;
+    if (filters.uncategorized) {
+      if (t.category) return false;
+    } else if (filters.category && t.category !== filters.category) return false;
     if (filters.recurringRuleId && t.recurringRuleId !== filters.recurringRuleId) return false;
     if (filters.minAmount != null && t.amount < filters.minAmount) return false;
     if (filters.maxAmount != null && t.amount > filters.maxAmount) return false;
@@ -4084,7 +4086,6 @@ var TransactionDetailModal = class extends import_obsidian6.Modal {
     if (tx.note) {
       this.addRow(detailEl, "\u5907\u6CE8", tx.note);
     }
-    this.addRow(detailEl, "ID", tx.id, "\u7528\u4E8E\u8BC6\u522B\u552F\u4E00\u6D41\u6C34\u8BB0\u5F55");
     const btnRow = contentEl.createDiv({ cls: "accounting-detail-buttons" });
     btnRow.createEl("button", { text: "\u7F16\u8F91", cls: "accounting-btn-secondary" }).onclick = () => {
       if (this.isSettlementLoan()) {
@@ -4239,23 +4240,27 @@ var SORT_OPTIONS = [
 ];
 var PAGE_SIZE = 50;
 var TransactionListModal = class extends import_obsidian7.Modal {
-  constructor(app, adapter, presetAccountId, navCtx, slide, presetRecurringRuleId, drillDown) {
+  constructor(app, adapter, presetAccountId, navCtx, slide, presetRecurringRuleId, drillDown, categoryDrill) {
     super(app);
     this.adapter = adapter;
     this.navCtx = navCtx;
     this.slide = slide;
     this.drillDown = drillDown;
-    const hasPreset = !!presetAccountId || !!presetRecurringRuleId;
+    this.categoryDrill = categoryDrill;
+    const hasCategoryPreset = !!categoryDrill;
+    const hasPreset = !!presetAccountId || !!presetRecurringRuleId || hasCategoryPreset;
     this.filter = {
-      // preset 跳转（账户或周期账规则）：默认时间不限（全部历史）；否则默认近1月
+      // preset 跳转（账户、周期账规则、报表分类）：使用传入范围或默认全部历史；否则默认近1月
       // 结束日 = 当天，配合「整天包含」语义把今天完整包进来
-      start: hasPreset ? "1970-01-01" : monthsAgoDateInput(1),
-      end: todayDateInput(),
-      types: [],
+      start: categoryDrill?.start ?? (hasPreset ? "1970-01-01" : monthsAgoDateInput(1)),
+      end: categoryDrill?.end ?? todayDateInput(),
+      types: categoryDrill ? [categoryDrill.flow] : [],
       keyword: "",
       accountId: presetAccountId ?? "",
       recurringRuleId: presetRecurringRuleId ?? "",
-      quickActive: hasPreset ? "all" : "month",
+      category: categoryDrill?.uncategorized ? "" : categoryDrill?.category ?? "",
+      uncategorized: categoryDrill?.uncategorized ?? false,
+      quickActive: hasCategoryPreset ? null : hasPreset ? "all" : "month",
       sort: "time-desc"
     };
   }
@@ -4479,6 +4484,13 @@ var TransactionListModal = class extends import_obsidian7.Modal {
         cls: "accounting-recurring-stats"
       });
     }
+    if (this.filter.category || this.filter.uncategorized) {
+      const catName = this.filter.uncategorized ? "(\u672A\u5206\u7C7B)" : this.filter.category;
+      filterBox.createDiv({
+        text: `\u{1F3F7}\uFE0F \u5206\u7C7B\uFF1A${catName} \xB7 ${this.filteredTransactions.length} \u7B14`,
+        cls: "accounting-recurring-stats"
+      });
+    }
   }
   /** 排序栏：独立于筛选卡片（排序是 ordering 而非筛选维度），置于卡片下方、「排序」+下拉同一行；弱化样式。 */
   renderSortBar(container) {
@@ -4506,23 +4518,23 @@ var TransactionListModal = class extends import_obsidian7.Modal {
       this.render();
     };
   }
-  /** 多选操作栏：已选 N 条 · 全选当前（覆盖全部 filtered）· 取消选择 · 批量修改（同类型可用）。 */
+  /** 多选操作栏：全选（覆盖全部 filtered）· 取消 · 已选 N 条 · 批量修改/删除；操作组 margin-left:auto 固定靠右。 */
   renderBatchBar(container) {
     const bar = container.createDiv({ cls: "accounting-batch-bar" });
     const selected = this.selectedTxs();
     const typeSet = new Set(selected.map((t) => t.type));
     const canBatch = selected.length > 0 && typeSet.size === 1;
-    bar.createSpan({ text: `\u5DF2\u9009 ${selected.length} \u6761`, cls: "accounting-batch-count" });
-    const allBtn = bar.createEl("button", { text: "\u5168\u9009\u5F53\u524D", cls: "accounting-batch-sec" });
+    const allBtn = bar.createEl("button", { text: "\u5168\u9009", cls: "accounting-batch-sec" });
     allBtn.onclick = () => {
       this.selectedIds = new Set(this.filteredTransactions.map((t) => t.id));
       this.render();
     };
-    const clearBtn = bar.createEl("button", { text: "\u53D6\u6D88\u9009\u62E9", cls: "accounting-batch-sec" });
+    const clearBtn = bar.createEl("button", { text: "\u53D6\u6D88", cls: "accounting-batch-sec" });
     clearBtn.onclick = () => {
       this.selectedIds.clear();
       this.render();
     };
+    bar.createSpan({ text: `\u5DF2\u9009 ${selected.length} \u6761`, cls: "accounting-batch-count" });
     const batchBtn = bar.createEl("button", {
       text: "\u6279\u91CF\u4FEE\u6539",
       cls: `accounting-batch-go${canBatch ? "" : " accounting-batch-go-disabled"}`
@@ -4532,6 +4544,17 @@ var TransactionListModal = class extends import_obsidian7.Modal {
       batchBtn.setAttribute("title", typeSet.size > 1 ? "\u6279\u91CF\u4FEE\u6539\u4EC5\u652F\u6301\u540C\u7C7B\u578B\u8BB0\u5F55" : "\u8BF7\u5148\u9009\u62E9\u8BB0\u5F55");
     } else {
       batchBtn.onclick = () => this.openBatchModify();
+    }
+    const delDisabled = selected.length === 0;
+    const delBtn = bar.createEl("button", {
+      text: "\u6279\u91CF\u5220\u9664",
+      cls: delDisabled ? "accounting-batch-go accounting-batch-go-disabled" : "accounting-batch-go accounting-batch-go-danger"
+    });
+    if (delDisabled) {
+      delBtn.setAttribute("disabled", "true");
+      delBtn.setAttribute("title", "\u8BF7\u5148\u9009\u62E9\u8BB0\u5F55");
+    } else {
+      delBtn.onclick = () => this.openBatchDelete();
     }
   }
   /** 选中集合对应的 Transaction[]（按 filteredTransactions 顺序，保证稳定）。 */
@@ -4558,6 +4581,46 @@ var TransactionListModal = class extends import_obsidian7.Modal {
     this.selectedIds.clear();
     this.selectMode = false;
     await this.reloadAndRender();
+  }
+  /** 批量删除选中流水：展开结清对端、二次确认、写前备份 + 全有或全无并发检测 + 追加 delete 事件。 */
+  async openBatchDelete() {
+    const selected = this.selectedTxs();
+    if (selected.length === 0) return;
+    const ids = /* @__PURE__ */ new Set();
+    let partnerExtra = 0;
+    for (const t of selected) {
+      ids.add(t.id);
+      if (t.linkId) {
+        const partner = this.transactions.find((x) => x.linkId === t.linkId && x.id !== t.id);
+        if (partner && !ids.has(partner.id)) {
+          ids.add(partner.id);
+          partnerExtra++;
+        }
+      }
+    }
+    const total = ids.size;
+    const msg = partnerExtra > 0 ? `\u5C06\u5220\u9664\u9009\u4E2D\u7684 ${selected.length} \u7B14\u6D41\u6C34\uFF08\u542B\u7ED3\u6E05\u6D41\u6C34\uFF0C\u8FDE\u540C\u5BF9\u7AEF\u5171\u5220\u9664 ${total} \u7B14\uFF09\u3002\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\uFF0C\u786E\u5B9A\uFF1F` : `\u5C06\u5220\u9664\u9009\u4E2D\u7684 ${selected.length} \u7B14\u6D41\u6C34\u3002\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\uFF0C\u786E\u5B9A\uFF1F`;
+    if (!confirm(msg)) return;
+    try {
+      await this.adapter.backup("pre-batch-delete");
+      const fresh = await this.adapter.loadLog();
+      const latestUpdatedAt = latestUpdatedAtById(fresh);
+      for (const id of ids) {
+        if (hasUpdatedSince(latestUpdatedAt.get(id), this.updatedAtById.get(id) ?? "")) {
+          new import_obsidian7.Notice("\u6240\u9009\u8BB0\u5F55\u5DF2\u88AB\u53E6\u4E00\u7AEF\u66F4\u65B0\uFF0C\u5DF2\u5237\u65B0\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u5E76\u91CD\u8BD5");
+          await this.reloadAndRender();
+          return;
+        }
+      }
+      const now = nowISO();
+      const events = [...ids].map((id) => ({ op: "delete", targetId: id, updatedAt: now, source: "manual" }));
+      await this.adapter.appendEvents(events);
+      new import_obsidian7.Notice(`\u5DF2\u5220\u9664 ${events.length} \u6761`);
+      await this.onBatchDone();
+    } catch (e) {
+      const m = "\u6279\u91CF\u5220\u9664\u5931\u8D25\uFF1A" + (e instanceof Error ? e.message : String(e));
+      new import_obsidian7.Notice(m);
+    }
   }
   /** 排序下拉菜单：浮于 document.body（fixed，不受 .modal-content transform 影响），锚定按钮下方；点选项应用并重渲，点遮罩关闭。 */
   openSortMenu(anchor) {
@@ -4703,7 +4766,7 @@ var TransactionListModal = class extends import_obsidian7.Modal {
   /** 是否有任意筛选项生效（决定是否显示统一「清除」按钮；对齐桌面 hasFilter）。 */
   hasActiveFilter() {
     const f = this.filter;
-    return f.types.length > 0 || !!f.accountId || !!f.keyword || !!f.recurringRuleId || f.quickActive !== "month" || f.start !== monthsAgoDateInput(1) || f.end !== todayDateInput();
+    return f.types.length > 0 || !!f.accountId || !!f.keyword || !!f.recurringRuleId || !!f.category || f.uncategorized || f.quickActive !== "month" || f.start !== monthsAgoDateInput(1) || f.end !== todayDateInput();
   }
   /** 重置所有筛选项到默认（近1月 + 全部类型/账户 + 无关键词 + 无周期账；对齐桌面 clearAll）。 */
   resetFilter() {
@@ -4714,6 +4777,8 @@ var TransactionListModal = class extends import_obsidian7.Modal {
       keyword: "",
       accountId: "",
       recurringRuleId: "",
+      category: "",
+      uncategorized: false,
       quickActive: "month",
       sort: this.filter.sort
       // 排序非筛选维度，清除时保留（对齐桌面 clearAll 不动 sort）
@@ -4723,7 +4788,8 @@ var TransactionListModal = class extends import_obsidian7.Modal {
     this.filteredTransactions = filterAndSortTransactions(this.transactions, {
       types: this.filter.types,
       account: this.filter.accountId,
-      category: "",
+      category: this.filter.category,
+      uncategorized: this.filter.uncategorized ? true : void 0,
       recurringRuleId: this.filter.recurringRuleId,
       minAmount: null,
       maxAmount: null,
@@ -5816,30 +5882,29 @@ function trendStartYM() {
   const pad = (x) => String(x).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 }
-function rangeBounds(key) {
-  const today = todayDateInput();
-  let startDate;
+function rangeStartDateOnly(key) {
   switch (key) {
     case "thisMonth":
-      startDate = firstOfMonth();
-      break;
+      return firstOfMonth();
     case "last1m":
-      startDate = monthsAgoDateInput(1);
-      break;
+      return monthsAgoDateInput(1);
+    // 与流水筛选同源（裸 setMonth、不钳制月末）
     case "last3m":
-      startDate = monthsAgoDateInput(3);
-      break;
+      return monthsAgoDateInput(3);
     case "thisYear":
-      startDate = firstOfYear();
-      break;
+      return firstOfYear();
     case "last6y":
-      startDate = yearsAgoDateInput(6);
-      break;
+      return yearsAgoDateInput(6);
+    // 滚动 6 年（setFullYear 钳制闰年 2/29→2/28）
     case "all":
-      startDate = "1970-01-01";
-      break;
+      return "1970-01-01";
   }
-  return { start: startIso(startDate), end: endExclusiveIso(today) };
+}
+function rangeBounds(key) {
+  return { start: startIso(rangeStartDateOnly(key)), end: endExclusiveIso(todayDateInput()) };
+}
+function rangeDateBounds(key) {
+  return { start: rangeStartDateOnly(key), end: todayDateInput() };
 }
 var ReportModal = class extends import_obsidian14.Modal {
   constructor(app, adapter, navCtx, slide) {
@@ -5949,8 +6014,18 @@ var ReportModal = class extends import_obsidian14.Modal {
     }
     const fillCls = flow === "expense" ? "accounting-bar-fill-expense" : "accounting-bar-fill-income";
     const shown = expanded ? slices : slices.slice(0, TOP_N);
+    const { start, end } = rangeDateBounds(this.range);
     for (const s of shown) {
-      this.renderBar(section, s.category, s.amount, s.percent, fillCls);
+      const uncategorized = s.category === "(\u672A\u5206\u7C7B)";
+      this.renderBar(section, s.category, s.amount, s.percent, fillCls, () => {
+        this.navCtx.openList(void 0, void 0, true, {
+          category: uncategorized ? "" : s.category,
+          uncategorized,
+          flow,
+          start,
+          end
+        });
+      });
     }
     if (slices.length > TOP_N) {
       const restCount = slices.length - TOP_N;
@@ -5965,8 +6040,21 @@ var ReportModal = class extends import_obsidian14.Modal {
       };
     }
   }
-  renderBar(parent, label, amount, percent, fillCls) {
+  renderBar(parent, label, amount, percent, fillCls, onClick) {
     const row = parent.createDiv({ cls: "accounting-bar-row" });
+    if (onClick) {
+      row.addClass("accounting-bar-clickable");
+      row.setAttribute("title", "\u70B9\u51FB\u67E5\u770B\u6D41\u6C34\u660E\u7EC6");
+      row.setAttribute("role", "button");
+      row.setAttribute("tabindex", "0");
+      row.onclick = onClick;
+      row.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      });
+    }
     const info = row.createDiv({ cls: "accounting-bar-info" });
     info.createEl("span", { text: label, cls: "accounting-bar-label" });
     const amountEl = info.createEl("span", { cls: "accounting-bar-amount" });
@@ -6270,8 +6358,8 @@ var SettingsModal = class extends import_obsidian15.Modal {
 };
 
 // src/navActions.ts
-function openList(app, adapter, navCtx, presetAccountId, slide, presetRecurringRuleId, drillDown) {
-  new TransactionListModal(app, adapter, presetAccountId, navCtx, slide, presetRecurringRuleId, drillDown).open();
+function openList(app, adapter, navCtx, presetAccountId, slide, presetRecurringRuleId, drillDown, drill) {
+  new TransactionListModal(app, adapter, presetAccountId, navCtx, slide, presetRecurringRuleId, drillDown, drill).open();
 }
 async function openEntry(app, adapter, afterSubmit, navCtx, slide, onSwitchLedger, onRecurringSaved) {
   const meta = await adapter.readMeta();
@@ -7978,7 +8066,7 @@ var AccountingPlugin = class extends import_obsidian18.Plugin {
   /** 导航上下文：三个目标的打开回调，注入到各 Modal 使其底部导航条可用。public 供设置页「查看」跳转复用。 */
   navCtx(adapter) {
     return {
-      openList: (accountId, slide, drillDown) => openList(this.app, adapter, this.navCtx(adapter), accountId, slide, void 0, drillDown),
+      openList: (accountId, slide, drillDown, drill) => openList(this.app, adapter, this.navCtx(adapter), accountId, slide, void 0, drillDown, drill),
       openEntry: (slide) => {
         void openEntry(this.app, adapter, void 0, this.navCtx(adapter), slide, this.switchLedgerAndReopen, () => this.settingsTab.showRecurring());
       },

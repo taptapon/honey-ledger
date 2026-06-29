@@ -969,10 +969,9 @@
   top: 0;
   z-index: 5;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
-  row-gap: 6px;
   margin: 0 12px 8px;
   padding: 8px;
   border: 1px solid var(--background-modifier-border);
@@ -983,11 +982,16 @@
 }
 
 .accounting-batch-count {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-weight: 600;
   color: var(--text-normal);
 }
 
-/* 次要动作（全选当前 / 取消选择）：紧凑 secondary，与 .accounting-batch-toggle 体系一致。 */
+/* 次要动作（全选 / 取消）：紧凑 secondary，与 .accounting-batch-toggle 体系一致。 */
 .accounting-batch-sec {
   display: inline-flex;
   align-items: center;
@@ -1015,6 +1019,7 @@
   display: inline-flex;
   align-items: center;
   box-sizing: border-box;
+  flex-shrink: 0;
   height: var(--ac-control-h-compact);
   margin-left: auto;
   padding: 0 12px;
@@ -1040,6 +1045,19 @@
   border-color: var(--background-modifier-border);
   color: var(--text-faint);
   cursor: not-allowed;
+}
+
+/* 批量删除：复用 batch-go 紧凑尺寸，红底区分危险操作；不占 margin-left:auto（紧跟批量修改之后） */
+.accounting-batch-go.accounting-batch-go-danger {
+  margin-left: 0;
+  background: var(--color-red);
+  border-color: var(--color-red);
+}
+
+@media (hover: hover) {
+  .accounting-batch-go.accounting-batch-go-danger:hover {
+    filter: brightness(1.12);
+  }
 }
 
 .accounting-batch-hint {
@@ -2836,6 +2854,15 @@ details[open] > .accounting-collapsible-head::before {
 /* 分类横向条形：info 行（标签 + 金额·占比）+ track 条 */
 .accounting-bar-row {
   margin-bottom: 8px;
+}
+
+.accounting-bar-clickable {
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.accounting-bar-clickable:hover {
+  background: var(--background-modifier-hover);
 }
 
 .accounting-bar-info {
