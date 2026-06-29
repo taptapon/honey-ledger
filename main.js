@@ -1817,12 +1817,12 @@ function buildBatchUpsertEvents(input) {
 }
 
 // ../../packages/core/src/changelog.ts
-var RECENT_UPDATES = [
-  "\u591A\u5E01\u79CD\u8BB0\u8D26\uFF1A\u6BCF\u7B14\u4EA4\u6613\u5E26\u5E01\u79CD\u4E0E\u6C47\u7387\u5FEB\u7167\uFF0C\u8DE8\u5E01\u79CD\u8F6C\u8D26\u652F\u6301\u53CC\u91D1\u989D\uFF0C\u4F59\u989D\u4E0E\u62A5\u8868\u6309\u672C\u4F4D\u5E01\u6298\u7B97",
-  "\u5728\u7EBF\u6C47\u7387\u5237\u65B0\uFF1A\u4E00\u952E\u62C9\u53D6\u6700\u65B0\u6C47\u7387\u5199\u5165\u6C47\u7387\u8868\uFF0C\u501F\u8D37\u591A\u5E01\u79CD\u4E00\u5E76\u652F\u6301",
-  "\u8D26\u6237\u5408\u5E76\uFF1A\u8DE8\u7AEF\u7EDF\u4E00\u5408\u5E76\u903B\u8F91\uFF0C\u4E24\u7AEF\u5747\u53EF\u5408\u5E76\u8D26\u6237\u5E76\u4FDD\u7559\u5386\u53F2",
-  "\u793A\u4F8B\u8D26\u672C\u5F15\u5BFC\uFF1A\u9996\u6B21\u4F7F\u7528\u81EA\u5E26\u793A\u4F8B\u6570\u636E\uFF0C\u5FEB\u901F\u4E0A\u624B\u5404\u7C7B\u8BB0\u8D26\u573A\u666F",
-  "\u8D26\u6237\u5C5E\u6027\u7BA1\u7406\uFF1A\u8D26\u6237\u652F\u6301\u9690\u85CF / \u542F\u7528\u4E0E\u5C5E\u6027\u7F16\u8F91\uFF0C\u79FB\u52A8\u7AEF\u8865\u9F50\u8D26\u6237\u64CD\u4F5C\u83DC\u5355"
+var MOBILE_RECENT_UPDATES = [
+  "\u62A5\u8868\u5206\u7C7B\u4E0B\u94BB\uFF1A\u70B9\u5F00\u62A5\u8868\u5206\u7C7B\u76F4\u8FBE\u6D41\u6C34\u660E\u7EC6\uFF0C\u79FB\u52A8\u7AEF\u4E5F\u80FD\u9010\u7B14\u8FFD\u6EAF",
+  "\u6279\u91CF\u5220\u9664\u6D41\u6C34\uFF1A\u591A\u9009\u5220\u9664\uFF0C\u7ED3\u6E05\u4EA4\u6613\u8054\u52A8\u5220\u9664\u5BF9\u7AEF\uFF0C\u6E05\u7406\u66F4\u7701\u4E8B",
+  "\u591A\u5E01\u79CD\u8BB0\u8D26\uFF1A\u6BCF\u7B14\u5E26\u5E01\u79CD\u4E0E\u6C47\u7387\u5FEB\u7167\uFF0C\u8DE8\u5E01\u79CD\u8F6C\u8D26\u652F\u6301\u53CC\u91D1\u989D\uFF0C\u4F59\u989D\u62A5\u8868\u6309\u672C\u4F4D\u5E01\u6298\u7B97",
+  "\u8D26\u6237\u7BA1\u7406\u8865\u9F50\uFF1A\u8D26\u6237\u652F\u6301\u9690\u85CF / \u542F\u7528 / \u5C5E\u6027\u7F16\u8F91 / \u5408\u5E76\uFF0C\u79FB\u52A8\u7AEF\u64CD\u4F5C\u4E0D\u8F93\u684C\u9762",
+  "\u793A\u4F8B\u8D26\u672C\u5F15\u5BFC\uFF1A\u9996\u6B21\u4F7F\u7528\u81EA\u5E26\u793A\u4F8B\u6570\u636E\uFF0C\u5FEB\u901F\u4E0A\u624B\u5404\u7C7B\u8BB0\u8D26\u573A\u666F"
 ];
 
 // src/dataAdapter.ts
@@ -2301,25 +2301,6 @@ function appendHeaderHelp(parent, opts) {
     btn.setAttribute("aria-expanded", "true");
     activeHeaderHelp = { wrap, btn, detail };
     document.addEventListener("click", closeHeaderHelp);
-  };
-  return wrap;
-}
-function appendHelp(parent, opts) {
-  const wrap = parent.createDiv({ cls: `accounting-help-tip${opts.cls ? " " + opts.cls : ""}` });
-  const head = wrap.createDiv({ cls: "accounting-help-tip-head" });
-  if (opts.summary) {
-    head.createEl("span", { text: opts.summary, cls: "accounting-help-tip-summary" });
-  }
-  const btn = head.createEl("button", { text: "?", cls: "accounting-help-tip-btn" });
-  btn.type = "button";
-  btn.setAttribute("aria-label", "\u67E5\u770B\u8BF4\u660E");
-  btn.setAttribute("aria-expanded", "false");
-  const detail = wrap.createEl("div", { text: opts.detail, cls: "accounting-help-tip-detail" });
-  detail.hidden = true;
-  btn.onclick = () => {
-    detail.hidden = !detail.hidden;
-    btn.classList.toggle("is-open", !detail.hidden);
-    btn.setAttribute("aria-expanded", String(!detail.hidden));
   };
   return wrap;
 }
@@ -4907,18 +4888,18 @@ var AdjustBalanceModal = class extends import_obsidian8.Modal {
     this.modalEl.addClass("accounting-sub-modal");
     if (!import_obsidian8.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.addClass("accounting-adjust-modal");
-    contentEl.createEl("div", {
+    const titleRow = contentEl.createDiv({ cls: "accounting-adjust-title-row" });
+    titleRow.createEl("div", {
       text: `\u8C03\u6574\u300C${this.account.name}\u300D\u4F59\u989D`,
       cls: "accounting-adjust-title"
+    });
+    appendHeaderHelp(titleRow, {
+      detail: "\u63D0\u4EA4\u540E\u6309\u300C\u76EE\u6807\u4F59\u989D \u2212 \u5F53\u524D\u4F59\u989D\u300D\u8BB0\u4E00\u6761\u5DEE\u989D\u6D41\u6C34\uFF08\u6536\u5165\u6216\u652F\u51FA\uFF09\uFF1B\u53EF\u5728\u4E0B\u65B9\u6539\u9009\u5206\u7C7B\u3002",
+      ariaLabel: "\u67E5\u770B\u8C03\u6574\u4F59\u989D\u8BF4\u660E"
     });
     contentEl.createEl("div", {
       text: `\u5F53\u524D\u4F59\u989D\uFF1A${formatMoney(this.currentBalance, this.account.currency)}`,
       cls: "accounting-adjust-current"
-    });
-    appendHelp(contentEl, {
-      cls: "accounting-help-tip-flush",
-      summary: "\u63D0\u4EA4\u8BB0\u4E00\u6761\u5DEE\u989D\u6D41\u6C34\uFF0C\u53EF\u6539\u9009\u5206\u7C7B",
-      detail: "\u63D0\u4EA4\u540E\u6309\u300C\u76EE\u6807\u4F59\u989D \u2212 \u5F53\u524D\u4F59\u989D\u300D\u8BB0\u4E00\u6761\u5DEE\u989D\u6D41\u6C34\uFF08\u6536\u5165\u6216\u652F\u51FA\uFF09\uFF1B\u53EF\u5728\u4E0B\u65B9\u6539\u9009\u5206\u7C7B\u3002"
     });
     const targetRow = contentEl.createDiv({ cls: "accounting-adjust-row" });
     targetRow.createEl("label", { text: "\u76EE\u6807\u4F59\u989D", cls: "accounting-adjust-label" });
@@ -6541,7 +6522,7 @@ var AccountingSettings = class {
     const recentHeadEl = recentCardEl.createDiv("accounting-ledger-card-head");
     recentHeadEl.createEl("span", { text: "\u6700\u8FD1\u66F4\u65B0", cls: "accounting-ledger-card-title" });
     const recentBodyEl = recentCardEl.createDiv("accounting-ledger-list");
-    RECENT_UPDATES.forEach((text, i) => {
+    MOBILE_RECENT_UPDATES.forEach((text, i) => {
       const item = recentBodyEl.createDiv("accounting-about-row");
       item.createEl("span", { text: `${i + 1}.`, cls: "accounting-about-label" });
       item.createEl("span", { text, cls: "accounting-about-value" });
@@ -6621,7 +6602,16 @@ var AccountingSettings = class {
       }
     };
     createLedgerBtn.onclick = () => {
-      void this.openCreateLedgerModal(refreshLedgerList);
+      void this.openCreateLedgerModal(async (name, alias) => {
+        if (onSwitchLedger) {
+          onSwitchLedger(name);
+        } else {
+          this.plugin.settings.dataSubdir = name;
+          await this.plugin.saveSettings();
+          new import_obsidian16.Notice(`\u5DF2\u65B0\u5EFA\u5E76\u5207\u6362\u5230\u300C${alias || name}\u300D\uFF0C\u8BF7\u5173\u95ED\u5E76\u91CD\u65B0\u6253\u5F00\u8BB0\u8D26\u754C\u9762`);
+          await refreshLedgerList();
+        }
+      });
     };
     refreshLedgerBtn.onclick = async () => {
       await refreshLedgerList();
@@ -6870,17 +6860,15 @@ var AccountingSettings = class {
     };
     void adapter.readRateConfig().then(renderOnline).catch(() => renderOnline({}));
   }
-  /** 新建账本：自定义 Modal + 即时校验；确认后 createLedger + 自动切换 */
+  /** 新建账本：自定义 Modal + 即时校验；确认后 createLedger，切换动作交由 onDone 完成
+   *  （与「切换」同模式：关旧设置页 + 用新 dataSubdir 重开，整个记账上下文刷新到新账本）。 */
   async openCreateLedgerModal(onDone) {
     const adapter = this.currentAdapter();
     const existing = await adapter.listLedgers();
     const modal = new CreateLedgerModal(this.app, existing, async (name, alias) => {
       try {
         await adapter.createLedger(name, alias || void 0);
-        this.plugin.settings.dataSubdir = name;
-        await this.plugin.saveSettings();
-        new import_obsidian16.Notice(`\u5DF2\u65B0\u5EFA\u5E76\u5207\u6362\u5230\u300C${alias || name}\u300D\uFF0C\u8BF7\u5173\u95ED\u5E76\u91CD\u65B0\u6253\u5F00\u8BB0\u8D26\u754C\u9762`);
-        await onDone();
+        await onDone(name, alias);
       } catch (error) {
         new import_obsidian16.Notice(`\u65B0\u5EFA\u8D26\u672C\u5931\u8D25\uFF1A${error}`);
       }
