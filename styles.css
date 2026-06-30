@@ -1631,6 +1631,10 @@
   display: flex;
   flex-direction: column;
   max-width: 420px;
+  /* 高表单（账户属性/新建账户，含信用卡字段时）可内部滚动，配合 keyboardAvoidance 的
+     scrollIntoView 把获焦字段滚入可视区，避免被软键盘遮挡。短表单（调整余额）内容不超限，不触发滚动。 */
+  max-height: 80vh;
+  overflow-y: auto;
 }
 
 .accounting-adjust-title-row {

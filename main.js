@@ -4221,13 +4221,14 @@ var SORT_OPTIONS = [
 ];
 var PAGE_SIZE = 50;
 var TransactionListModal = class extends import_obsidian7.Modal {
-  constructor(app, adapter, presetAccountId, navCtx, slide, presetRecurringRuleId, drillDown, categoryDrill) {
+  constructor(app, adapter, presetAccountId, navCtx, slide, presetRecurringRuleId, drillDown, categoryDrill, onDataChanged) {
     super(app);
     this.adapter = adapter;
     this.navCtx = navCtx;
     this.slide = slide;
     this.drillDown = drillDown;
     this.categoryDrill = categoryDrill;
+    this.onDataChanged = onDataChanged;
     const hasCategoryPreset = !!categoryDrill;
     const hasPreset = !!presetAccountId || !!presetRecurringRuleId || hasCategoryPreset;
     this.filter = {
@@ -4793,6 +4794,7 @@ var TransactionListModal = class extends import_obsidian7.Modal {
       this.accountTypeSettings = storedTypes ? normalizeAccountTypeSettings(storedTypes) : defaultAccountTypeSettings();
       this.applyFilter();
       this.render();
+      this.onDataChanged?.();
     } catch (err) {
       console.error("\u91CD\u65B0\u52A0\u8F7D\u6D41\u6C34\u5931\u8D25:", err);
     }
@@ -5087,8 +5089,8 @@ var AccountPropertiesModal = class extends import_obsidian9.Modal {
     } catch {
     }
     this.modalEl.addClass("accounting-sub-modal");
-    this.modalEl.addClass("accounting-adjust-modal");
     if (!import_obsidian9.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    contentEl.addClass("accounting-adjust-modal");
     contentEl.createEl("div", { text: `\u8D26\u6237\u5C5E\u6027 \xB7 ${this.account.name}`, cls: "accounting-adjust-title" });
     const nameRow = this.row("\u540D\u79F0");
     this.nameEl = this.input(nameRow, "text");
@@ -5378,7 +5380,7 @@ var AccountActionModal = class extends import_obsidian11.Modal {
     txItem.title = "\u67E5\u770B\u8BE5\u8D26\u6237\u6D41\u6C34";
     txItem.onclick = () => {
       this.close();
-      this.navCtx.openList(this.account.id, void 0, true);
+      this.navCtx.openList(this.account.id, void 0, true, void 0, this.onSaved);
     };
     const propItem = list.createEl("button", { cls: "accounting-action-item" });
     propItem.createEl("span", { text: "\u67E5\u770B\u5C5E\u6027", cls: "accounting-action-item-text" });
@@ -5475,8 +5477,8 @@ var AccountCreateModal = class extends import_obsidian12.Modal {
     } catch {
     }
     this.modalEl.addClass("accounting-sub-modal");
-    this.modalEl.addClass("accounting-adjust-modal");
     if (!import_obsidian12.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    contentEl.addClass("accounting-adjust-modal");
     contentEl.createEl("div", { text: "\u65B0\u5EFA\u8D26\u6237", cls: "accounting-adjust-title" });
     const nameRow = this.row("\u540D\u79F0");
     this.nameEl = this.input(nameRow, "text");
@@ -6005,7 +6007,7 @@ var ReportModal = class extends import_obsidian14.Modal {
           flow,
           start,
           end
-        });
+        }, () => this.refresh());
       });
     }
     if (slices.length > TOP_N) {
@@ -6339,8 +6341,8 @@ var SettingsModal = class extends import_obsidian15.Modal {
 };
 
 // src/navActions.ts
-function openList(app, adapter, navCtx, presetAccountId, slide, presetRecurringRuleId, drillDown, drill) {
-  new TransactionListModal(app, adapter, presetAccountId, navCtx, slide, presetRecurringRuleId, drillDown, drill).open();
+function openList(app, adapter, navCtx, presetAccountId, slide, presetRecurringRuleId, drillDown, drill, onDataChanged) {
+  new TransactionListModal(app, adapter, presetAccountId, navCtx, slide, presetRecurringRuleId, drillDown, drill, onDataChanged).open();
 }
 async function openEntry(app, adapter, afterSubmit, navCtx, slide, onSwitchLedger, onRecurringSaved) {
   const meta = await adapter.readMeta();
@@ -8054,7 +8056,7 @@ var AccountingPlugin = class extends import_obsidian18.Plugin {
   /** 导航上下文：三个目标的打开回调，注入到各 Modal 使其底部导航条可用。public 供设置页「查看」跳转复用。 */
   navCtx(adapter) {
     return {
-      openList: (accountId, slide, drillDown, drill) => openList(this.app, adapter, this.navCtx(adapter), accountId, slide, void 0, drillDown, drill),
+      openList: (accountId, slide, drillDown, drill, onDataChanged) => openList(this.app, adapter, this.navCtx(adapter), accountId, slide, void 0, drillDown, drill, onDataChanged),
       openEntry: (slide) => {
         void openEntry(this.app, adapter, void 0, this.navCtx(adapter), slide, this.switchLedgerAndReopen, () => this.settingsTab.showRecurring());
       },
