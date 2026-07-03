@@ -3967,6 +3967,9 @@ var LedgerSwitchModal = class extends import_obsidian4.Modal {
       return;
     }
     const card = contentEl.createDiv({ cls: "accounting-ledger-card" });
+    if (!this.ledgers.some((l) => l.name === this.current)) {
+      card.createEl("p", { text: "\u5F53\u524D\u672A\u9009\u62E9\u8D26\u672C\uFF0C\u8BF7\u9009\u62E9\u4E00\u4E2A", cls: "accounting-ledger-empty" });
+    }
     const list = card.createDiv({ cls: "accounting-ledger-list" });
     for (const { name, alias } of this.ledgers) {
       const isCurrent = name === this.current;
@@ -4288,6 +4291,7 @@ var TransactionListModal = class extends import_obsidian6.Modal {
   filteredTransactions = [];
   filter;
   recurringRules = [];
+  accountById = /* @__PURE__ */ new Map();
   opened = false;
   closing = false;
   renderedCount = 0;
@@ -4318,6 +4322,7 @@ var TransactionListModal = class extends import_obsidian6.Modal {
       this.transactions = foldEvents(events);
       const meta = await this.adapter.readMeta();
       this.accounts = meta.accounts;
+      this.accountById = new Map(this.accounts.map((a) => [a.id, a]));
       this.categories = meta.categories;
       this.recurringRules = await this.adapter.readRecurringRules();
       const storedTypes = await this.adapter.readAccountTypeSettings();
@@ -4464,13 +4469,15 @@ var TransactionListModal = class extends import_obsidian6.Modal {
       placeholder: "\u5907\u6CE8/\u6807\u7B7E\u641C\u7D22...",
       cls: "accounting-search-input"
     });
+    const commitSearch = () => {
+      this.filter.keyword = keywordInput.value;
+      this.applyFilter();
+      this.render();
+    };
     keywordInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        this.filter.keyword = e.target.value;
-        this.applyFilter();
-        this.render();
-      }
+      if (e.key === "Enter") commitSearch();
     });
+    keywordInput.addEventListener("blur", commitSearch);
     const keywordClear = searchWrap.createEl("button", {
       text: "\xD7",
       cls: `accounting-search-clear${this.filter.keyword ? "" : " accounting-search-clear-hidden"}`
@@ -4821,12 +4828,7 @@ var TransactionListModal = class extends import_obsidian6.Modal {
       const events = await this.adapter.loadLog();
       this.updatedAtById = latestUpdatedAtById(events);
       this.transactions = foldEvents(events);
-      const meta = await this.adapter.readMeta();
-      this.accounts = meta.accounts;
-      this.categories = meta.categories;
-      this.recurringRules = await this.adapter.readRecurringRules();
-      const storedTypes = await this.adapter.readAccountTypeSettings();
-      this.accountTypeSettings = storedTypes ? normalizeAccountTypeSettings(storedTypes) : defaultAccountTypeSettings();
+      this.accountById = new Map(this.accounts.map((a) => [a.id, a]));
       this.applyFilter();
       this.render();
       this.onDataChanged?.();
@@ -4851,7 +4853,7 @@ var TransactionListModal = class extends import_obsidian6.Modal {
   formatDetail(tx) {
     const accountName = (id) => {
       if (!id) return "";
-      const acc = this.accounts.find((a) => a.id === id);
+      const acc = this.accountById.get(id);
       return acc ? acc.name : id;
     };
     switch (tx.type) {
@@ -5934,6 +5936,7 @@ var ReportModal = class extends import_obsidian13.Modal {
   opened = false;
   closing = false;
   transactions = [];
+  loadFailed = false;
   range = "thisMonth";
   /** 支出/收入分类是否展开全部（默认折叠到 TOP_N，点「展开其他」逐项显示，不再合并为「其他」） */
   expandedExpense = false;
@@ -5949,17 +5952,30 @@ var ReportModal = class extends import_obsidian13.Modal {
     this.modalEl.addClass("accounting-fullscreen");
     const sc = slideClass(this.slide);
     if (sc) this.contentEl.addClass(sc);
-    await this.refresh();
+    await this.reloadData();
   }
-  async refresh() {
+  /**
+   * 重新从磁盘读取日志并渲染。仅在外部可能改动数据时调用——
+   * 分类下钻到流水列表编辑/删除后回调本页时数据已变，必须重读；时间段/展开切换不会改数据，用 render()。
+   */
+  async reloadData() {
+    try {
+      const events = await this.adapter.loadLog();
+      this.transactions = foldEvents(events);
+      this.loadFailed = false;
+    } catch {
+      this.transactions = [];
+      this.loadFailed = true;
+    }
+    this.render();
+  }
+  /** 用已缓存的 transactions 重渲染（时间段/展开切换用，不读磁盘）。 */
+  render() {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("accounting-report-modal");
     this.renderNav();
-    try {
-      const events = await this.adapter.loadLog();
-      this.transactions = foldEvents(events);
-    } catch {
+    if (this.loadFailed) {
       contentEl.createEl("div", {
         text: "\u8BFB\u53D6\u6570\u636E\u5931\u8D25\uFF1A\u8BF7\u5728\u684C\u9762\u7AEF\u521D\u59CB\u5316\u8D26\u672C\uFF0C\u6216\u68C0\u67E5\u63D2\u4EF6\u8BBE\u7F6E\u7684\u300C\u6570\u636E\u5B50\u76EE\u5F55\u300D\u3002",
         cls: "accounting-empty"
@@ -6004,7 +6020,7 @@ var ReportModal = class extends import_obsidian13.Modal {
       });
       btn.onclick = () => {
         this.range = opt.key;
-        this.refresh();
+        this.render();
       };
     }
   }
@@ -6042,7 +6058,7 @@ var ReportModal = class extends import_obsidian13.Modal {
           flow,
           start,
           end
-        }, () => this.refresh());
+        }, () => this.reloadData());
       });
     }
     if (slices.length > TOP_N) {
@@ -6054,7 +6070,7 @@ var ReportModal = class extends import_obsidian13.Modal {
       toggle.onclick = () => {
         if (flow === "expense") this.expandedExpense = !this.expandedExpense;
         else this.expandedIncome = !this.expandedIncome;
-        this.refresh();
+        this.render();
       };
     }
   }
@@ -8027,13 +8043,23 @@ var AccountingPlugin = class extends import_obsidian17.Plugin {
     });
     this.addRibbonIcon("coins", "\u5B8F\u5229\u8BB0\u8D26", () => this.openEntry());
     this.app.workspace.onLayoutReady(() => {
-      void this.autoMigrateLedgerDirs().finally(() => {
+      void (async () => {
+        try {
+          await this.autoMigrateLedgerDirs();
+        } catch (error) {
+          console.error("\u81EA\u52A8\u8FC1\u79FB\u8D26\u672C\u5931\u8D25:", error);
+        }
+        try {
+          await this.selfHealActiveLedger();
+        } catch (error) {
+          console.error("\u81EA\u6108\u5F53\u524D\u8D26\u672C\u5931\u8D25:", error);
+        }
         if (!this.settings.onboardingCompleted) {
           this.showOnboardingModal();
         } else if (this.settings.autoOpenOnStartup) {
           void this.openEntry();
         }
-      });
+      })();
     });
   }
   adapter() {
@@ -8111,6 +8137,22 @@ var AccountingPlugin = class extends import_obsidian17.Plugin {
     } catch (error) {
       console.error("\u81EA\u52A8\u8FC1\u79FB\u8D26\u672C\u5931\u8D25:", error);
     }
+  }
+  /** 自愈当前账本：若 dataSubdir 不在可用账本列表中（目录丢失 / transactions.jsonl 缺失 / 桌面端改名 / iCloud 未同步），
+   *  且存在其它可用账本，则切到第一个并落盘，避免「有可用账本却没选中」的悬空状态。
+   *  全量纠正并给 Notice 透明告知；正常状态下零影响。 */
+  async selfHealActiveLedger() {
+    const adapter = this.adapter();
+    const ledgers = await adapter.listLedgers();
+    if (ledgers.length === 0) return;
+    const cur = this.settings.dataSubdir;
+    if (cur && ledgers.includes(cur)) return;
+    const target = ledgers[0];
+    const alias = await adapter.readLedgerAlias(target);
+    this.settings.dataSubdir = target;
+    await this.saveSettings();
+    this.settingsTab = new AccountingSettings(this.app, this, new ObsidianDataAdapter(this.app.vault, this.settings.dataSubdir, this));
+    new import_obsidian17.Notice(`\u5F53\u524D\u8D26\u672C\u4E0D\u53EF\u7528\uFF0C\u5DF2\u5207\u6362\u5230\u300C${alias}\u300D`);
   }
   /** 导航上下文：三个目标的打开回调，注入到各 Modal 使其底部导航条可用。public 供设置页「查看」跳转复用。 */
   navCtx(adapter) {
