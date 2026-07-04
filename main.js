@@ -420,6 +420,21 @@ function amountValueOr(expr, fallback = 0) {
 }
 
 // ../../packages/core/src/fx.ts
+var COMMON_CURRENCIES = [
+  "CNY",
+  "USD",
+  "EUR",
+  "JPY",
+  "HKD",
+  "GBP",
+  "TWD",
+  "KRW",
+  "SGD",
+  "AUD",
+  "CAD",
+  "CHF",
+  "NZD"
+];
 var ISO4217_CURRENCIES = /* @__PURE__ */ new Set([
   "AED",
   "AFN",
@@ -604,6 +619,191 @@ function currencyOptions(rates, accounts, base) {
   }
   return Array.from(set).sort();
 }
+var CURRENCY_CN = {
+  AED: "\u963F\u8054\u914B\u8FEA\u62C9\u59C6",
+  AFN: "\u963F\u5BCC\u6C57\u5C3C",
+  ALL: "\u963F\u5C14\u5DF4\u5C3C\u4E9A\u5217\u514B",
+  AMD: "\u4E9A\u7F8E\u5C3C\u4E9A\u5FB7\u62C9\u59C6",
+  ANG: "\u8377\u5C5E\u5B89\u7684\u5217\u65AF\u76FE",
+  AOA: "\u5B89\u54E5\u62C9\u5BBD\u624E",
+  ARS: "\u963F\u6839\u5EF7\u6BD4\u7D22",
+  AUD: "\u6FB3\u5143",
+  AWG: "\u963F\u9C81\u5DF4\u5F17\u7F57\u6797",
+  AZN: "\u963F\u585E\u62DC\u7586\u9A6C\u7EB3\u7279",
+  BAM: "\u6CE2\u9ED1\u9A6C\u514B",
+  BBD: "\u5DF4\u5DF4\u591A\u65AF\u5143",
+  BDT: "\u5B5F\u52A0\u62C9\u5854\u5361",
+  BGN: "\u4FDD\u52A0\u5229\u4E9A\u5217\u5F17",
+  BHD: "\u5DF4\u6797\u7B2C\u7EB3\u5C14",
+  BIF: "\u5E03\u9686\u8FEA\u6CD5\u90CE",
+  BMD: "\u767E\u6155\u5927\u5143",
+  BND: "\u6587\u83B1\u5143",
+  BOB: "\u73BB\u5229\u7EF4\u4E9A\u8BFA",
+  BRL: "\u5DF4\u897F\u96F7\u4E9A\u5C14",
+  BSD: "\u5DF4\u54C8\u9A6C\u5143",
+  BTN: "\u4E0D\u4E39\u52AA\u5C14\u7279\u9C81\u59C6",
+  BWP: "\u535A\u8328\u74E6\u7EB3\u666E\u62C9",
+  BYN: "\u767D\u4FC4\u7F57\u65AF\u5362\u5E03",
+  BZD: "\u4F2F\u5229\u5179\u5143",
+  CAD: "\u52A0\u5143",
+  CDF: "\u521A\u679C\u6CD5\u90CE",
+  CHF: "\u745E\u58EB\u6CD5\u90CE",
+  CLP: "\u667A\u5229\u6BD4\u7D22",
+  CNY: "\u4EBA\u6C11\u5E01",
+  COP: "\u54E5\u4F26\u6BD4\u4E9A\u6BD4\u7D22",
+  CRC: "\u54E5\u65AF\u8FBE\u9ECE\u52A0\u79D1\u6717",
+  CUP: "\u53E4\u5DF4\u6BD4\u7D22",
+  CVE: "\u4F5B\u5F97\u89D2\u57C3\u65AF\u5E93\u591A",
+  CZK: "\u6377\u514B\u514B\u6717",
+  DJF: "\u5409\u5E03\u63D0\u6CD5\u90CE",
+  DKK: "\u4E39\u9EA6\u514B\u6717",
+  DOP: "\u591A\u7C73\u5C3C\u52A0\u6BD4\u7D22",
+  DZD: "\u963F\u5C14\u53CA\u5229\u4E9A\u7B2C\u7EB3\u5C14",
+  EGP: "\u57C3\u53CA\u9551",
+  ERN: "\u5384\u7ACB\u7279\u91CC\u4E9A\u7EB3\u514B\u6CD5",
+  ETB: "\u57C3\u585E\u4FC4\u6BD4\u4E9A\u6BD4\u5C14",
+  EUR: "\u6B27\u5143",
+  FJD: "\u6590\u6D4E\u5143",
+  FKP: "\u798F\u514B\u5170\u7FA4\u5C9B\u9551",
+  GBP: "\u82F1\u9551",
+  GEL: "\u683C\u9C81\u5409\u4E9A\u62C9\u91CC",
+  GHS: "\u52A0\u7EB3\u585E\u5730",
+  GIP: "\u76F4\u5E03\u7F57\u9640\u9551",
+  GMD: "\u5188\u6BD4\u4E9A\u8FBE\u62C9\u897F",
+  GNF: "\u51E0\u5185\u4E9A\u6CD5\u90CE",
+  GTQ: "\u5371\u5730\u9A6C\u62C9\u683C\u67E5\u5C14",
+  GYD: "\u572D\u4E9A\u90A3\u5143",
+  HKD: "\u6E2F\u5143",
+  HNL: "\u6D2A\u90FD\u62C9\u65AF\u4F26\u76AE\u62C9",
+  HRK: "\u514B\u7F57\u5730\u4E9A\u5E93\u7EB3",
+  HTG: "\u6D77\u5730\u53E4\u5FB7",
+  HUF: "\u5308\u7259\u5229\u798F\u6797",
+  IDR: "\u5370\u5C3C\u76FE",
+  ILS: "\u4EE5\u8272\u5217\u65B0\u8C22\u514B\u5C14",
+  INR: "\u5370\u5EA6\u5362\u6BD4",
+  IQD: "\u4F0A\u62C9\u514B\u7B2C\u7EB3\u5C14",
+  IRR: "\u4F0A\u6717\u91CC\u4E9A\u5C14",
+  ISK: "\u51B0\u5C9B\u514B\u6717",
+  JMD: "\u7259\u4E70\u52A0\u5143",
+  JOD: "\u7EA6\u65E6\u7B2C\u7EB3\u5C14",
+  JPY: "\u65E5\u5143",
+  KES: "\u80AF\u5C3C\u4E9A\u5148\u4EE4",
+  KGS: "\u5409\u5C14\u5409\u65AF\u65AF\u5766\u7D22\u59C6",
+  KHR: "\u67EC\u57D4\u5BE8\u745E\u5C14",
+  KMF: "\u79D1\u6469\u7F57\u6CD5\u90CE",
+  KPW: "\u671D\u9C9C\u5706",
+  KRW: "\u97E9\u5143",
+  KWD: "\u79D1\u5A01\u7279\u7B2C\u7EB3\u5C14",
+  KYD: "\u5F00\u66FC\u7FA4\u5C9B\u5143",
+  KZT: "\u54C8\u8428\u514B\u65AF\u5766\u575A\u6208",
+  LAK: "\u8001\u631D\u57FA\u666E",
+  LBP: "\u9ECE\u5DF4\u5AE9\u9551",
+  LKR: "\u65AF\u91CC\u5170\u5361\u5362\u6BD4",
+  LRD: "\u5229\u6BD4\u91CC\u4E9A\u5143",
+  LSL: "\u83B1\u7D22\u6258\u6D1B\u8482",
+  LYD: "\u5229\u6BD4\u4E9A\u7B2C\u7EB3\u5C14",
+  MAD: "\u6469\u6D1B\u54E5\u8FEA\u62C9\u59C6",
+  MDL: "\u6469\u5C14\u591A\u74E6\u5217\u4F0A",
+  MGA: "\u9A6C\u8FBE\u52A0\u65AF\u52A0\u963F\u91CC\u4E9A\u91CC",
+  MKD: "\u5317\u9A6C\u5176\u987F\u7B2C\u7EB3\u5C14",
+  MMK: "\u7F05\u7538\u5143",
+  MNT: "\u8499\u53E4\u56FE\u683C\u91CC\u514B",
+  MOP: "\u6FB3\u95E8\u5143",
+  MRU: "\u6BDB\u91CC\u5854\u5C3C\u4E9A\u4E4C\u5409\u4E9A",
+  MUR: "\u6BDB\u91CC\u6C42\u65AF\u5362\u6BD4",
+  MVR: "\u9A6C\u5C14\u4EE3\u592B\u62C9\u83F2\u4E9A",
+  MWK: "\u9A6C\u62C9\u7EF4\u514B\u74E6\u67E5",
+  MXN: "\u58A8\u897F\u54E5\u6BD4\u7D22",
+  MYR: "\u9A6C\u6765\u897F\u4E9A\u6797\u5409\u7279",
+  MZN: "\u83AB\u6851\u6BD4\u514B\u6885\u8482\u5361\u5C14",
+  NAD: "\u7EB3\u7C73\u6BD4\u4E9A\u5143",
+  NGN: "\u5C3C\u65E5\u5229\u4E9A\u5948\u62C9",
+  NIO: "\u5C3C\u52A0\u62C9\u74DC\u79D1\u591A\u5DF4",
+  NOK: "\u632A\u5A01\u514B\u6717",
+  NPR: "\u5C3C\u6CCA\u5C14\u5362\u6BD4",
+  NZD: "\u65B0\u897F\u5170\u5143",
+  OMR: "\u963F\u66FC\u91CC\u4E9A\u5C14",
+  PAB: "\u5DF4\u62FF\u9A6C\u5DF4\u6CE2\u4E9A",
+  PEN: "\u79D8\u9C81\u7D22\u5C14",
+  PGK: "\u5DF4\u5E03\u4E9A\u65B0\u51E0\u5185\u4E9A\u57FA\u90A3",
+  PHP: "\u83F2\u5F8B\u5BBE\u6BD4\u7D22",
+  PKR: "\u5DF4\u57FA\u65AF\u5766\u5362\u6BD4",
+  PLN: "\u6CE2\u5170\u5179\u7F57\u63D0",
+  PYG: "\u5DF4\u62C9\u572D\u74DC\u62C9\u5C3C",
+  QAR: "\u5361\u5854\u5C14\u91CC\u4E9A\u5C14",
+  RON: "\u7F57\u9A6C\u5C3C\u4E9A\u5217\u4F0A",
+  RSD: "\u585E\u5C14\u7EF4\u4E9A\u7B2C\u7EB3\u5C14",
+  RUB: "\u4FC4\u7F57\u65AF\u5362\u5E03",
+  RWF: "\u5362\u65FA\u8FBE\u6CD5\u90CE",
+  SAR: "\u6C99\u7279\u91CC\u4E9A\u5C14",
+  SBD: "\u6240\u7F57\u95E8\u7FA4\u5C9B\u5143",
+  SCR: "\u585E\u820C\u5C14\u5362\u6BD4",
+  SDG: "\u82CF\u4E39\u9551",
+  SEK: "\u745E\u5178\u514B\u6717",
+  SGD: "\u65B0\u52A0\u5761\u5143",
+  SHP: "\u5723\u8D6B\u52D2\u62FF\u9551",
+  SLE: "\u585E\u62C9\u5229\u6602\u5229\u6602",
+  SOS: "\u7D22\u9A6C\u91CC\u5148\u4EE4",
+  SRD: "\u82CF\u91CC\u5357\u5143",
+  SSP: "\u5357\u82CF\u4E39\u9551",
+  STN: "\u5723\u591A\u7F8E\u591A\u5E03\u62C9",
+  SYP: "\u53D9\u5229\u4E9A\u9551",
+  SZL: "\u65AF\u5A01\u58EB\u5170\u91CC\u5170\u5409\u5C3C",
+  THB: "\u6CF0\u94E2",
+  TJS: "\u5854\u5409\u514B\u65AF\u5766\u7D22\u83AB\u5C3C",
+  TMT: "\u571F\u5E93\u66FC\u65AF\u5766\u9A6C\u7EB3\u7279",
+  TND: "\u7A81\u5C3C\u65AF\u7B2C\u7EB3\u5C14",
+  TOP: "\u6C64\u52A0\u6F58\u52A0",
+  TRY: "\u571F\u8033\u5176\u91CC\u62C9",
+  TTD: "\u7279\u7ACB\u5C3C\u8FBE\u548C\u591A\u5DF4\u54E5\u5143",
+  TWD: "\u65B0\u53F0\u5E01",
+  TZS: "\u5766\u6851\u5C3C\u4E9A\u5148\u4EE4",
+  UAH: "\u4E4C\u514B\u5170\u683C\u91CC\u592B\u7EB3",
+  UGX: "\u4E4C\u5E72\u8FBE\u5148\u4EE4",
+  USD: "\u7F8E\u5143",
+  UYU: "\u4E4C\u62C9\u572D\u6BD4\u7D22",
+  UZS: "\u4E4C\u5179\u522B\u514B\u65AF\u5766\u82CF\u59C6",
+  VED: "\u59D4\u5185\u745E\u62C9\u73BB\u5229\u74E6\u5C14",
+  VES: "\u59D4\u5185\u745E\u62C9\u4E3B\u6743\u73BB\u5229\u74E6\u5C14",
+  VND: "\u8D8A\u5357\u76FE",
+  VUV: "\u74E6\u52AA\u963F\u56FE\u74E6\u56FE",
+  WST: "\u8428\u6469\u4E9A\u5854\u62C9",
+  XAF: "\u4E2D\u975E\u6CD5\u90CE",
+  XCD: "\u4E1C\u52A0\u52D2\u6BD4\u5143",
+  XOF: "\u897F\u975E\u6CD5\u90CE",
+  XPF: "\u592A\u5E73\u6D0B\u6CD5\u90CE",
+  YER: "\u4E5F\u95E8\u91CC\u4E9A\u5C14",
+  ZAR: "\u5357\u975E\u5170\u7279",
+  ZMW: "\u8D5E\u6BD4\u4E9A\u514B\u74E6\u67E5",
+  ZWL: "\u6D25\u5DF4\u5E03\u97E6\u5143"
+};
+var CURRENCY_CATALOG = Array.from(ISO4217_CURRENCIES).sort().map((code) => ({ code, cn: CURRENCY_CN[code] ?? code }));
+var CN_BY_CODE = new Map(CURRENCY_CATALOG.map((c) => [c.code, c.cn]));
+function currencyCn(code) {
+  return CN_BY_CODE.get(code.toUpperCase()) ?? code;
+}
+var COMMON_ORDER = new Map(COMMON_CURRENCIES.map((code, i) => [code, i]));
+function filterCurrencies(query) {
+  const q = query.trim().toLowerCase();
+  const list = q ? CURRENCY_CATALOG.filter((c) => c.code.toLowerCase().includes(q) || c.cn.toLowerCase().includes(q)) : CURRENCY_CATALOG;
+  return list.slice().sort((a, b) => {
+    const ai = COMMON_ORDER.get(a.code);
+    const bi = COMMON_ORDER.get(b.code);
+    if (ai !== void 0 && bi !== void 0) return ai - bi;
+    if (ai !== void 0) return -1;
+    if (bi !== void 0) return 1;
+    return a.code.localeCompare(b.code);
+  });
+}
+function orderedCurrencyCatalog() {
+  const commonSet = new Set(COMMON_CURRENCIES);
+  const common = COMMON_CURRENCIES.filter((code) => ISO4217_CURRENCIES.has(code)).map((code) => ({ code, cn: currencyCn(code) }));
+  const rest = CURRENCY_CATALOG.filter((c) => !commonSet.has(c.code));
+  return [
+    { label: "\u5E38\u7528", items: common },
+    { label: `\u5168\u90E8 (${CURRENCY_CATALOG.length})`, items: rest }
+  ];
+}
 function todayDateStr() {
   return (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
 }
@@ -703,6 +903,35 @@ function mergeRatesByVisible(local, fetched, visible) {
     }
   }
   return { merged, updated };
+}
+function rebaseRateTable(local, oldBase, newBase, fetched, asOfFallback) {
+  const ob = oldBase.trim().toUpperCase();
+  const nb = newBase.trim().toUpperCase();
+  if (ob === nb) return { ...local };
+  const nbEntry = local[nb];
+  const oldBaseToNew = fetched[ob]?.rate ?? (nbEntry?.rate ? round2(1 / nbEntry.rate) : 1);
+  const out = {};
+  const codes = new Set(Object.keys(local).map((c) => c.toUpperCase()));
+  codes.add(ob);
+  codes.delete(nb);
+  for (const c of codes) {
+    if (c === ob) {
+      out[c] = fetched[ob] ?? { rate: round2(oldBaseToNew), asOf: asOfFallback };
+      continue;
+    }
+    const fresh = fetched[c];
+    if (fresh) {
+      out[c] = fresh;
+      continue;
+    }
+    const old = local[c];
+    if (old) {
+      out[c] = { rate: round2(old.rate * oldBaseToNew), asOf: old.asOf };
+    } else {
+      out[c] = { rate: 1, asOf: asOfFallback };
+    }
+  }
+  return out;
 }
 
 // ../../packages/core/src/noteAmount.ts
@@ -5739,6 +5968,7 @@ var BalanceModal = class extends import_obsidian12.Modal {
     const rates = await this.adapter.readRates();
     const balances = computeBalances(snap.transactions, snap.accounts);
     const nw = computeNetWorth(snap.transactions, snap.accounts, { rates, base: this.baseCurrency });
+    const baseBalances = convertBalancesToBase(balances, snap.accounts, rates, this.baseCurrency);
     const totalRec = nw.receivables.reduce((s, r) => s + r.amount, 0);
     const totalPay = nw.payables.reduce((s, p) => s + p.amount, 0);
     const negative = nw.netWorth < 0;
@@ -5757,11 +5987,11 @@ var BalanceModal = class extends import_obsidian12.Modal {
     sum.createEl("span", { text: `\u5E94\u6536 ${formatMoney(totalRec, this.baseCurrency)} / \u5E94\u4ED8 ${formatMoney(totalPay, this.baseCurrency)}` });
     const active = snap.accounts.filter((a) => a.active);
     const hidden = snap.accounts.filter((a) => !a.active);
-    this.renderGroups(contentEl, active, balances, snap);
+    this.renderGroups(contentEl, active, balances, baseBalances, snap);
     if (hidden.length > 0) {
       const h = contentEl.createEl("details", { cls: "accounting-hidden" });
       h.createEl("summary", { text: `\u9690\u85CF\u8D26\u6237\uFF08\u4ECD\u8BA1\u5165\u51C0\u8D44\u4EA7\uFF09`, cls: "accounting-collapsible-head" });
-      this.renderGroups(h, hidden, balances, snap);
+      this.renderGroups(h, hidden, balances, baseBalances, snap);
     }
     const createAccountEl = contentEl.createDiv({ cls: "accounting-create-account-row" });
     const createBtn = createAccountEl.createEl("button", {
@@ -5783,7 +6013,7 @@ var BalanceModal = class extends import_obsidian12.Modal {
   renderNav() {
     renderNavBar(this.modalEl, "balance", this.navCtx, () => this.close());
   }
-  renderGroups(parent, accounts, balances, snap) {
+  renderGroups(parent, accounts, balances, baseBalances, snap) {
     const typeToGroupId = /* @__PURE__ */ new Map();
     for (const t of this.accountTypeSettings.types) typeToGroupId.set(t.type, t.groupId);
     const byGroup = /* @__PURE__ */ new Map();
@@ -5798,10 +6028,10 @@ var BalanceModal = class extends import_obsidian12.Modal {
       if (items.length === 0) continue;
       const group = parent.createDiv({ cls: "accounting-group" });
       const head = group.createDiv({ cls: "accounting-group-head" });
-      const groupTotal = items.reduce((s, a) => s + (balances.get(a.id) ?? 0), 0);
+      const groupTotal = items.reduce((s, a) => s + (baseBalances.get(a.id) ?? 0), 0);
       const hasLiability = g.types.some((t) => kindOfType(t.type) === "liability");
       head.createEl("span", { text: `${g.label} \xB7 ${hasLiability ? "\u8D1F\u503A" : "\u8D44\u4EA7"}` });
-      head.createEl("span", { text: formatMoney(groupTotal) });
+      head.createEl("span", { text: formatMoney(groupTotal, this.baseCurrency) });
       for (const a of items) {
         const row = group.createDiv({ cls: "accounting-row" });
         const name = row.createEl("span", { text: a.name, cls: "accounting-row-name" });
@@ -5941,6 +6171,8 @@ var ReportModal = class extends import_obsidian13.Modal {
   /** 支出/收入分类是否展开全部（默认折叠到 TOP_N，点「展开其他」逐项显示，不再合并为「其他」） */
   expandedExpense = false;
   expandedIncome = false;
+  /** 本位币（聚合折算目标 + 金额符号；reloadData 时从 ledger.json 读取，默认 CNY） */
+  baseCurrency = "CNY";
   /** 在挂载到 DOM 前就预设全屏类与禁用 Obsidian 默认 modal-pop 动画，避免「先上跳再滑入」。 */
   open() {
     presetModalChrome(this.modalEl, this.containerEl);
@@ -5966,6 +6198,11 @@ var ReportModal = class extends import_obsidian13.Modal {
     } catch {
       this.transactions = [];
       this.loadFailed = true;
+    }
+    try {
+      this.baseCurrency = await this.adapter.readBaseCurrency();
+    } catch {
+      this.baseCurrency = "CNY";
     }
     this.render();
   }
@@ -5998,11 +6235,11 @@ var ReportModal = class extends import_obsidian13.Modal {
   renderReport(container) {
     const { start, end } = rangeBounds(this.range);
     this.renderRangeSelector(container);
-    const totals = periodTotals(this.transactions, start, end);
+    const totals = periodTotals(this.transactions, start, end, { base: this.baseCurrency });
     this.renderTotals(container, totals);
-    const incomeSlices = categoryBreakdown(this.transactions, { flow: "income", start, end });
+    const incomeSlices = categoryBreakdown(this.transactions, { flow: "income", start, end, base: this.baseCurrency });
     this.renderCategoryBars(container, "\u6536\u5165\u5206\u7C7B", incomeSlices, "income", this.expandedIncome);
-    const expenseSlices = categoryBreakdown(this.transactions, { flow: "expense", start, end });
+    const expenseSlices = categoryBreakdown(this.transactions, { flow: "expense", start, end, base: this.baseCurrency });
     this.renderCategoryBars(container, "\u652F\u51FA\u5206\u7C7B", expenseSlices, "expense", this.expandedExpense);
     const { points: trendPoints, gran: trendGran } = this.computeTrend();
     this.renderTrend(container, trendPoints, trendGran);
@@ -6026,10 +6263,10 @@ var ReportModal = class extends import_obsidian13.Modal {
   }
   renderTotals(container, totals) {
     const cards = container.createDiv({ cls: "accounting-stat-cards" });
-    this.statCard(cards, "\u6536\u5165", formatMoneyInt(totals.income), "accounting-stat-income");
-    this.statCard(cards, "\u652F\u51FA", formatMoneyInt(totals.expense), "accounting-stat-expense");
+    this.statCard(cards, "\u6536\u5165", formatMoneyInt(totals.income, this.baseCurrency), "accounting-stat-income");
+    this.statCard(cards, "\u652F\u51FA", formatMoneyInt(totals.expense, this.baseCurrency), "accounting-stat-expense");
     const surplusCls = totals.surplus < 0 ? "accounting-stat-expense" : "accounting-stat-income";
-    this.statCard(cards, "\u7ED3\u4F59", formatMoneyInt(totals.surplus), surplusCls);
+    this.statCard(cards, "\u7ED3\u4F59", formatMoneyInt(totals.surplus, this.baseCurrency), surplusCls);
   }
   statCard(parent, label, value, valueCls) {
     const card = parent.createDiv({ cls: "accounting-stat-card" });
@@ -6041,7 +6278,7 @@ var ReportModal = class extends import_obsidian13.Modal {
     const head = section.createDiv({ cls: "accounting-group-head" });
     head.createEl("span", { text: title });
     const total = slices.reduce((s, x) => s + x.amount, 0);
-    head.createEl("span", { text: formatMoney(total) });
+    head.createEl("span", { text: formatMoney(total, this.baseCurrency) });
     if (slices.length === 0) {
       section.createEl("div", { text: "\u65E0\u6570\u636E", cls: "accounting-empty-mini" });
       return;
@@ -6092,7 +6329,7 @@ var ReportModal = class extends import_obsidian13.Modal {
     const info = row.createDiv({ cls: "accounting-bar-info" });
     info.createEl("span", { text: label, cls: "accounting-bar-label" });
     const amountEl = info.createEl("span", { cls: "accounting-bar-amount" });
-    amountEl.createSpan({ text: formatMoney(amount) });
+    amountEl.createSpan({ text: formatMoney(amount, this.baseCurrency) });
     if (percent > 0) {
       amountEl.createSpan({ text: ` ${(percent * 100).toFixed(0)}%`, cls: "accounting-bar-percent" });
     }
@@ -6113,7 +6350,7 @@ var ReportModal = class extends import_obsidian13.Modal {
     const cm = now.getMonth() + 1;
     const pad = (x) => String(x).padStart(2, "0");
     if (this.range === "last6y") {
-      return { points: yearlyTrend(this.transactions, cy - 5, 6), gran: "year" };
+      return { points: yearlyTrend(this.transactions, cy - 5, 6, { base: this.baseCurrency }), gran: "year" };
     }
     const startDate = this.rangeStartDate();
     const startYear = Number(startDate.slice(0, 4));
@@ -6121,12 +6358,12 @@ var ReportModal = class extends import_obsidian13.Modal {
     const spanMonths = (cy - startYear) * 12 + (cm - startMonth) + 1;
     if (spanMonths >= 24) {
       const yearCount = Math.max(cy - startYear + 1, 1);
-      return { points: yearlyTrend(this.transactions, startYear, yearCount), gran: "year" };
+      return { points: yearlyTrend(this.transactions, startYear, yearCount, { base: this.baseCurrency }), gran: "year" };
     }
     if (spanMonths < 6) {
-      return { points: monthlyTrend(this.transactions, trendStartYM(), TREND_MONTHS), gran: "month" };
+      return { points: monthlyTrend(this.transactions, trendStartYM(), TREND_MONTHS, { base: this.baseCurrency }), gran: "month" };
     }
-    return { points: monthlyTrend(this.transactions, `${startYear}-${pad(startMonth)}`, spanMonths), gran: "month" };
+    return { points: monthlyTrend(this.transactions, `${startYear}-${pad(startMonth)}`, spanMonths, { base: this.baseCurrency }), gran: "month" };
   }
   /** range 起点 date-only（趋势窗口用）；全部 range 取最早有数据月（其余与三数字卡 rangeBounds 同源）。 */
   rangeStartDate() {
@@ -6194,7 +6431,7 @@ var ReportModal = class extends import_obsidian13.Modal {
   appendTrendInfoCell(parent, label, amount, cls) {
     const cell = parent.createDiv({ cls: `accounting-trend-info-cell accounting-trend-info-${cls}` });
     cell.createEl("span", { text: label, cls: "accounting-trend-info-cell-label" });
-    cell.createEl("span", { text: formatMoney(amount), cls: "accounting-trend-info-cell-value" });
+    cell.createEl("span", { text: formatMoney(amount, this.baseCurrency), cls: "accounting-trend-info-cell-value" });
   }
   /**
    * SVG 绘制趋势：结余柱（正=蓝向上、负=红向下，柱端标金额）+ 收入虚线 + 支出实线。
@@ -6248,7 +6485,7 @@ var ReportModal = class extends import_obsidian13.Modal {
           t.setAttribute("y", String(baselineY - h - 3));
           t.setAttribute("text-anchor", "middle");
           t.setAttribute("class", "accounting-trend-value");
-          t.textContent = formatMoneyInt(p.surplus);
+          t.textContent = formatMoneyInt(p.surplus, this.baseCurrency);
           svg.appendChild(t);
         }
       } else {
@@ -6265,7 +6502,7 @@ var ReportModal = class extends import_obsidian13.Modal {
         t.setAttribute("y", String(baselineY + h + 11));
         t.setAttribute("text-anchor", "middle");
         t.setAttribute("class", "accounting-trend-value accounting-trend-value-neg");
-        t.textContent = formatMoneyInt(p.surplus);
+        t.textContent = formatMoneyInt(p.surplus, this.baseCurrency);
         svg.appendChild(t);
       }
       const lbl = el("text");
@@ -6447,6 +6684,155 @@ async function openEntryRecurring(app, adapter, mode, onDone) {
 
 // src/settings.ts
 var FEEDBACK_EMAIL = "honeyledger@163.com";
+function createCurrencyPicker(parent, opts) {
+  const wrap = parent.createDiv({ cls: "accounting-currency-picker" });
+  const input = wrap.createEl("input", { cls: "accounting-ledger-input accounting-currency-picker-input" });
+  input.type = "text";
+  input.placeholder = opts.placeholder ?? "\u641C\u7D22\u5E01\u79CD\u6216\u4E2D\u6587\u540D";
+  input.value = opts.value ? `${currencyCn(opts.value)} ${opts.value}` : "";
+  input.setAttribute("autocomplete", "off");
+  const dropdown = createDiv({ cls: "accounting-currency-picker-dropdown" });
+  document.body.appendChild(dropdown);
+  dropdown.style.display = "none";
+  const excludeSet = new Set((opts.exclude ?? []).map((c) => c.toUpperCase()));
+  const currentUpper = (opts.value ?? "").toUpperCase();
+  let open = false;
+  let flat = [];
+  let hi = 0;
+  function sections(text) {
+    const t = text.trim();
+    if (t) {
+      const items = filterCurrencies(t).filter((c) => !excludeSet.has(c.code));
+      return [{ label: `\u641C\u7D22\u7ED3\u679C (${items.length})`, items }];
+    }
+    return orderedCurrencyCatalog().map((g) => ({ label: g.label, items: g.items.filter((c) => !excludeSet.has(c.code)) })).filter((g) => g.items.length > 0);
+  }
+  function paint() {
+    dropdown.querySelectorAll("[data-idx]").forEach((el) => {
+      const he = el;
+      he.classList.toggle("is-active", Number(he.dataset.idx) === hi);
+    });
+    const active = dropdown.querySelector(`[data-idx="${hi}"]`);
+    active?.scrollIntoView({ block: "nearest" });
+  }
+  function render() {
+    dropdown.empty();
+    const gs = sections(input.value);
+    flat = gs.flatMap((g) => g.items);
+    if (flat.length === 0) {
+      dropdown.createEl("div", { text: "\u65E0\u5339\u914D\u5E01\u79CD", cls: "accounting-currency-picker-empty" });
+      return;
+    }
+    for (const g of gs) {
+      dropdown.createEl("div", { text: g.label, cls: "accounting-currency-picker-group" });
+      for (const c of g.items) {
+        const idx = flat.indexOf(c);
+        const item = dropdown.createDiv({ cls: "accounting-currency-picker-item" });
+        item.dataset.idx = String(idx);
+        item.createEl("span", { text: c.cn, cls: "accounting-currency-picker-cn" });
+        item.createEl("span", { text: c.code, cls: "accounting-currency-picker-code" });
+        if (c.code === currentUpper) item.createEl("span", { text: "\u2713", cls: "accounting-currency-picker-check" });
+        item.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          pick(c.code);
+        });
+        item.addEventListener("mouseenter", () => {
+          hi = idx;
+          paint();
+        });
+      }
+    }
+    paint();
+  }
+  function position() {
+    const r = input.getBoundingClientRect();
+    dropdown.style.left = `${r.left}px`;
+    dropdown.style.top = `${r.bottom + 4}px`;
+    dropdown.style.width = `${r.width}px`;
+  }
+  const displayValue = () => opts.value ? `${currencyCn(opts.value)} ${opts.value}` : "";
+  function openPanel() {
+    if (open) return;
+    open = true;
+    hi = 0;
+    input.value = "";
+    render();
+    position();
+    dropdown.style.display = "block";
+  }
+  function close() {
+    if (!open) return;
+    open = false;
+    dropdown.style.display = "none";
+    input.value = displayValue();
+  }
+  function pick(code) {
+    input.value = `${currencyCn(code)} ${code}`;
+    close();
+    opts.onPick(code);
+  }
+  input.addEventListener("focus", openPanel);
+  input.addEventListener("input", () => {
+    if (!open) openPanel();
+    else {
+      render();
+      position();
+    }
+    hi = 0;
+    paint();
+  });
+  input.addEventListener("keydown", (e) => {
+    if (!open) {
+      if (e.key === "ArrowDown" || e.key === "Enter") {
+        e.preventDefault();
+        openPanel();
+      }
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      hi = Math.min(hi + 1, flat.length - 1);
+      paint();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      hi = Math.max(hi - 1, 0);
+      paint();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const c = flat[hi];
+      if (c) pick(c.code);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+      opts.onDismiss?.();
+    }
+  });
+  const onFollow = () => {
+    if (open) position();
+  };
+  const onDoc = (e) => {
+    if (!input.isConnected) {
+      destroy();
+      return;
+    }
+    const t = e.target;
+    if (!wrap.contains(t) && !dropdown.contains(t)) {
+      close();
+      opts.onDismiss?.();
+    }
+  };
+  document.addEventListener("mousedown", onDoc);
+  window.addEventListener("scroll", onFollow, true);
+  window.addEventListener("resize", onFollow);
+  function destroy() {
+    document.removeEventListener("mousedown", onDoc);
+    window.removeEventListener("scroll", onFollow, true);
+    window.removeEventListener("resize", onFollow);
+    dropdown.remove();
+    wrap.remove();
+  }
+  return { input, destroy };
+}
 var AccountingSettings = class {
   constructor(app, plugin, adapter) {
     this.app = app;
@@ -6723,24 +7109,39 @@ var AccountingSettings = class {
   }
   renderCurrencyBody(bodyEl, adapter, baseCurrency, rates, accountCurrencies, refresh) {
     bodyEl.empty();
-    const baseOptions = Array.from(/* @__PURE__ */ new Set([baseCurrency, ...Object.keys(rates), ...accountCurrencies])).sort();
     const baseRow = bodyEl.createDiv({ cls: "accounting-currency-base" });
     baseRow.createEl("span", { text: "\u672C\u4F4D\u5E01", cls: "accounting-ledger-card-title" });
-    const baseSel = baseRow.createEl("select", { cls: "accounting-ledger-input accounting-currency-base-sel" });
-    for (const c of baseOptions) {
-      const o = baseSel.createEl("option", { text: c });
-      o.value = c;
-      if (c === baseCurrency) o.selected = true;
-    }
-    baseSel.onchange = async () => {
-      try {
-        await adapter.writeBaseCurrency(baseSel.value);
-        new import_obsidian15.Notice(`\u672C\u4F4D\u5E01\u5DF2\u8BBE\u4E3A ${baseSel.value}`);
-        await refresh();
-      } catch (error) {
-        new import_obsidian15.Notice(`\u8BBE\u7F6E\u5931\u8D25\uFF1A${error}`);
+    const baseHolder = baseRow.createDiv({ cls: "accounting-currency-base-sel" });
+    createCurrencyPicker(baseHolder, {
+      value: baseCurrency,
+      onPick: async (cur) => {
+        const oldBase = baseCurrency;
+        if (cur === oldBase) return;
+        try {
+          const immediate = rebaseRateTable(rates, oldBase, cur, {}, nowISO());
+          await adapter.writeBaseCurrency(cur);
+          await adapter.writeRates(immediate);
+          new import_obsidian15.Notice(`\u672C\u4F4D\u5E01\u5DF2\u8BBE\u4E3A ${cur}\uFF0C\u6B63\u5728\u540E\u53F0\u5237\u65B0\u6C47\u7387\u2026`);
+          await refresh();
+          void (async () => {
+            try {
+              const url = `https://api.frankfurter.app/latest?from=${cur.toUpperCase()}`;
+              const resp = await (0, import_obsidian15.requestUrl)({ url, method: "GET" });
+              const fetched = parseRateResponse(resp.json, cur, nowISO());
+              if (!fetched) return;
+              await adapter.writeRates(rebaseRateTable(rates, oldBase, cur, fetched, nowISO()));
+              const cfg = await adapter.readRateConfig().catch(() => ({}));
+              await adapter.writeRateConfig({ ...cfg, lastSuccess: nowISO() });
+              new import_obsidian15.Notice(`\u5DF2\u6309 ${cur} \u65B0\u57FA\u51C6\u5237\u65B0\u6C47\u7387`);
+              await refresh();
+            } catch {
+            }
+          })();
+        } catch (error) {
+          new import_obsidian15.Notice(`\u8BBE\u7F6E\u5931\u8D25\uFF1A${error}`);
+        }
       }
-    };
+    });
     bodyEl.createEl("div", { text: `\u5E01\u79CD\u4E0E\u6C47\u7387\u8868\uFF08\u2192 ${baseCurrency}\uFF09`, cls: "accounting-currency-section-title" });
     const rows = rateRowsFromTable(rates);
     const listEl = bodyEl.createDiv({ cls: "accounting-currency-rates" });
@@ -6757,76 +7158,73 @@ var AccountingSettings = class {
         listEl.createEl("p", { text: "\u6682\u65E0\u5E01\u79CD", cls: "accounting-ledger-empty" });
       }
       for (const [i, r] of rows.entries()) {
-        const isNew = !!r.isNew;
         const row = listEl.createDiv({ cls: "accounting-currency-rate-row" });
-        if (isNew) {
-          const curIn = row.createEl("input", { cls: "accounting-ledger-input accounting-currency-cur" });
-          curIn.type = "text";
-          curIn.value = r.currency;
-          curIn.placeholder = "\u5E01\u79CD";
-          curIn.addEventListener("input", () => {
-            r.currency = curIn.value.toUpperCase();
-            setDirty(true);
-          });
-          row.createEl("span", { text: "1 =" });
-          const rateIn = row.createEl("input", { cls: "accounting-ledger-input accounting-currency-rate" });
-          rateIn.type = "text";
-          rateIn.inputMode = "decimal";
-          rateIn.value = r.rate;
-          rateIn.placeholder = "rate";
-          rateIn.addEventListener("input", () => {
-            r.rate = rateIn.value;
-            setDirty(true);
-          });
-          const dateIn = row.createEl("input", { cls: "accounting-ledger-input accounting-currency-date" });
-          dateIn.type = "date";
-          dateIn.value = r.asOf;
-          dateIn.addEventListener("input", () => {
-            r.asOf = dateIn.value;
-            setDirty(true);
-          });
-          row.createEl("span", { text: "\u5220\u9664", cls: "accounting-currency-btn-spacer" });
-        } else {
-          row.createEl("span", { text: r.currency, cls: "accounting-currency-cur-readonly" });
-          row.createEl("span", { text: "1 =" });
-          const rateIn = row.createEl("input", { cls: "accounting-ledger-input accounting-currency-rate" });
-          rateIn.type = "text";
-          rateIn.inputMode = "decimal";
-          rateIn.value = r.rate;
-          rateIn.placeholder = "rate";
-          rateIn.addEventListener("input", () => {
-            r.rate = rateIn.value;
-            setDirty(true);
-          });
-          const dateIn = row.createEl("input", { cls: "accounting-ledger-input accounting-currency-date" });
-          dateIn.type = "date";
-          dateIn.value = r.asOf;
-          dateIn.addEventListener("input", () => {
-            r.asOf = dateIn.value;
-            setDirty(true);
-          });
-          const delBtn = row.createEl("button", { text: "\u5220\u9664", cls: "accounting-ledger-delete" });
-          delBtn.onclick = () => {
-            rows.splice(i, 1);
-            setDirty(true);
-            renderList();
-          };
-        }
+        row.createEl("span", { text: r.currency, cls: "accounting-currency-cur-readonly" });
+        row.createEl("span", { text: "1 =" });
+        const rateIn = row.createEl("input", { cls: "accounting-ledger-input accounting-currency-rate" });
+        rateIn.type = "text";
+        rateIn.inputMode = "decimal";
+        rateIn.value = r.rate;
+        rateIn.placeholder = "rate";
+        rateIn.addEventListener("input", () => {
+          r.rate = rateIn.value;
+          setDirty(true);
+        });
+        const dateIn = row.createEl("input", { cls: "accounting-ledger-input accounting-currency-date" });
+        dateIn.type = "date";
+        dateIn.value = r.asOf;
+        dateIn.addEventListener("input", () => {
+          r.asOf = dateIn.value;
+          setDirty(true);
+        });
+        if (r.isNew) rateIn.focus();
+        const delBtn = row.createEl("button", { text: "\u5220\u9664", cls: "accounting-ledger-delete" });
+        delBtn.onclick = () => {
+          rows.splice(i, 1);
+          setDirty(true);
+          renderList();
+        };
       }
     };
     renderList();
     const actions = bodyEl.createDiv({ cls: "accounting-ledger-card-actions" });
+    let addHolder = null;
+    let addPicker = null;
+    const closeAddPicker = () => {
+      addPicker?.destroy();
+      addPicker = null;
+      addHolder?.remove();
+      addHolder = null;
+    };
     const addBtn = actions.createEl("button", { text: "\uFF0B \u6DFB\u52A0\u5E01\u79CD", cls: "accounting-ledger-create" });
     addBtn.onclick = () => {
-      rows.push({ id: crypto.randomUUID(), currency: "", rate: "", asOf: todayDateStr(), isNew: true });
-      setDirty(true);
-      renderList();
+      if (addHolder) {
+        closeAddPicker();
+        return;
+      }
+      addHolder = createDiv({ cls: "accounting-currency-add-holder" });
+      actions.before(addHolder);
+      const used = rows.map((r) => r.currency.trim().toUpperCase()).filter(Boolean);
+      addPicker = createCurrencyPicker(addHolder, {
+        exclude: [...used, baseCurrency],
+        placeholder: "\u641C\u7D22\u8981\u6DFB\u52A0\u7684\u5E01\u79CD",
+        onPick: (code) => {
+          rows.push({ id: crypto.randomUUID(), currency: code, rate: "", asOf: todayDateStr(), isNew: true });
+          setDirty(true);
+          closeAddPicker();
+          renderList();
+        },
+        // 未选定而点击外部 → 收起整个加币种框（移动端不残留空搜索行）
+        onDismiss: closeAddPicker
+      });
+      addPicker.input.focus();
     };
     const saveBtn = actions.createEl("button", { text: "\u5DF2\u4FDD\u5B58", cls: "accounting-currency-save" });
     saveBtn.disabled = true;
     const cancelBtn = actions.createEl("button", { text: "\u53D6\u6D88", cls: "accounting-currency-cancel" });
     cancelBtn.style.display = "none";
     cancelBtn.onclick = () => {
+      closeAddPicker();
       void refresh();
     };
     saveBtn.onclick = async () => {
@@ -7083,7 +7481,7 @@ var AccountingSettings = class {
       titleEl.createEl("span", { text: "\u5DF2\u6682\u505C", cls: "accounting-ledger-badge accounting-ledger-badge-muted" });
     }
     const detailEl = infoEl.createDiv("accounting-ledger-folder");
-    detailEl.createEl("span", { text: `${this.periodText(rule)} \xB7 \xA5${this.formatMoney(rule.amount)}` });
+    detailEl.createEl("span", { text: `${this.periodText(rule)} \xB7 ${formatMoney(rule.amount, rule.currency || "CNY")}` });
     if (rule.account) {
       const accountInfo = await this.getAccountName(adapter, rule.account);
       if (accountInfo) detailEl.createEl("span", { text: `\xB7 ${accountInfo}` });
@@ -7170,9 +7568,6 @@ var AccountingSettings = class {
       return `\u6BCF\u5E74 ${rule.monthOfYear} \u6708 ${rule.dayOfYear} \u65E5`;
     }
     return "";
-  }
-  formatMoney(amount) {
-    return amount.toFixed(2);
   }
   async getAccountName(adapter, accountId) {
     try {

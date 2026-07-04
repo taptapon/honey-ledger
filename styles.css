@@ -3135,6 +3135,73 @@ details[open] > .accounting-collapsible-head::before {
   margin-left: auto;
 }
 
+/* 币种选择 combobox（本位币 / 加币种）：常用置顶 + 全量 ISO 4217 搜索 */
+.accounting-currency-picker {
+  display: block;
+}
+.accounting-currency-picker-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.accounting-currency-add-holder {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0 var(--ac-card-content-x) var(--ac-gap-sm);
+}
+/* 浮层挂 body（fixed），避开设置 Modal 的 overflow 裁切 */
+.accounting-currency-picker-dropdown {
+  position: fixed;
+  z-index: 1000;
+  max-height: 18rem;
+  overflow-y: auto;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-btn);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  padding: 4px 0;
+}
+.accounting-currency-picker-empty {
+  padding: 6px 12px;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+.accounting-currency-picker-group {
+  position: sticky;
+  top: 0;
+  background: var(--background-secondary);
+  padding: 3px 12px;
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.accounting-currency-picker-item {
+  display: flex;
+  align-items: center;
+  padding: 5px 12px;
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+.accounting-currency-picker-item.is-active {
+  background: var(--background-modifier-hover);
+}
+.accounting-currency-picker-cn {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.accounting-currency-picker-code {
+  flex: 0 0 auto;
+  margin-left: 8px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+.accounting-currency-picker-check {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  color: var(--text-accent);
+  font-size: var(--font-ui-smaller);
+}
+
 /* 币种 body 内子节标题：区别于卡片头标题（卡片头=大写+间距+muted色），
    这里用正常大小、正常颜色，与 card-head 形成视觉层次 */
 .accounting-currency-section-title {
