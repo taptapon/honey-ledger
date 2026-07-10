@@ -3044,13 +3044,13 @@ var en = {
   "onboarding.back": "Back",
   "onboarding.createSubmit": "Create",
   // KR6/task5: main.ts — command/ribbon name + default ledger alias + migrate/self-heal notices
-  "cmd.open": "Accounting",
+  "cmd.open": "Honey Ledger",
   "ledger.defaultAlias": "Personal ledger",
   "notice.migratedN": "Auto-migrated {{n}} ledger(s) to hidden folders",
   "notice.migrateFailed": "{{n}} ledger(s) failed to migrate (may be in use); restart Obsidian and retry: {{list}}",
   "notice.selfHealed": 'Current ledger unavailable; switched to "{{alias}}"',
   // KR7/task1: settings — General/About/Ledger panels + handlers + RenameAliasModal
-  "settings.startup.on": "Enabled: auto-opens Accounting next time you launch Obsidian",
+  "settings.startup.on": "Enabled: auto-opens Honey Ledger next time you launch Obsidian",
   "settings.startup.off": "Disabled: takes effect next time you open Obsidian",
   "settings.startup.toggleLabel": " Auto-enter on Obsidian launch",
   "settings.startup.rerunOnboarding": "\u21BB Rerun onboarding",
