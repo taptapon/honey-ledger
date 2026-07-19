@@ -121,6 +121,33 @@
   font-size: var(--font-ui-smaller);
 }
 
+/* 顶部账本胶囊：绝对定位于 .modal（与右上角 .modal-close-button 同父级坐标系），镜像其 top，
+   保证任意刘海/安全区下都与 ✕ 同一水平线。记账/流水/账户/统计四页共用（由 mountLedgerPill 挂到 modalEl）。
+   挂 modalEl 而非 contentEl——contentEl 各页 render() 会 empty()，胶囊在 modalEl 上不受影响。 */
+.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-entry-ledger {
+  position: absolute;
+  top: max(env(safe-area-inset-top), 24px); /* 与 .modal-close-button 移动端 top 完全一致 */
+  left: 12px;
+  margin-bottom: 0; /* 覆盖流内默认 20px */
+  z-index: 2;
+}
+.modal.accounting-fullscreen.accounting-desktop .accounting-entry-ledger {
+  position: absolute;
+  top: var(--size-4-2, 10px); /* 对齐桌面窄面板 ✕ 视觉位置 */
+  left: var(--size-4-2, 10px);
+  margin-bottom: 0;
+  z-index: 2;
+}
+
+/* 胶囊占顶部一行：内容下移避让（移动端 ~40px 覆盖胶囊高度；桌面窄面板稍小）。
+   特异性 (0,3,0) 高于 .accounting-fullscreen .modal-content 的 padding:5px (0,2,0)，可靠覆盖 padding-top。 */
+.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-has-ledger-pill {
+  padding-top: 40px;
+}
+.modal.accounting-fullscreen.accounting-desktop .accounting-has-ledger-pill {
+  padding-top: 30px;
+}
+
 /* 记一笔顶部账本切换浮层（复用设置页 .accounting-ledger-* 列表样式） */
 .modal.accounting-ledger-switch-modal {
   width: min(360px, 92vw);
