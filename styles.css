@@ -121,6 +121,33 @@
   font-size: var(--font-ui-smaller);
 }
 
+/* 顶部账本胶囊：绝对定位于 .modal（与右上角 .modal-close-button 同父级坐标系），镜像其 top，
+   保证任意刘海/安全区下都与 ✕ 同一水平线。记账/流水/账户/统计四页共用（由 mountLedgerPill 挂到 modalEl）。
+   挂 modalEl 而非 contentEl——contentEl 各页 render() 会 empty()，胶囊在 modalEl 上不受影响。 */
+.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-entry-ledger {
+  position: absolute;
+  top: max(env(safe-area-inset-top), 24px); /* 与 .modal-close-button 移动端 top 完全一致 */
+  left: 12px;
+  margin-bottom: 0; /* 覆盖流内默认 20px */
+  z-index: 2;
+}
+.modal.accounting-fullscreen.accounting-desktop .accounting-entry-ledger {
+  position: absolute;
+  top: var(--size-4-2, 10px); /* 对齐桌面窄面板 ✕ 视觉位置 */
+  left: var(--size-4-2, 10px);
+  margin-bottom: 0;
+  z-index: 2;
+}
+
+/* 胶囊占顶部一行：内容下移避让（移动端 ~40px 覆盖胶囊高度；桌面窄面板稍小）。
+   特异性 (0,3,0) 高于 .accounting-fullscreen .modal-content 的 padding:5px (0,2,0)，可靠覆盖 padding-top。 */
+.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-has-ledger-pill {
+  padding-top: 40px;
+}
+.modal.accounting-fullscreen.accounting-desktop .accounting-has-ledger-pill {
+  padding-top: 30px;
+}
+
 /* 记一笔顶部账本切换浮层（复用设置页 .accounting-ledger-* 列表样式） */
 .modal.accounting-ledger-switch-modal {
   width: min(360px, 92vw);
@@ -798,10 +825,11 @@
   gap: 4px;
 }
 
-.accounting-date-range-wrap input[type="date"] {
+.accounting-date-range-wrap .accounting-datefield {
   width: 120px;
   max-width: 120px;
   min-width: 0;
+  height: var(--ac-control-h-compact);
   padding: 0 2px;
   border: 1px solid var(--background-modifier-border);
   border-radius: 4px;
@@ -809,6 +837,9 @@
   background: var(--background-primary);
   text-align: center;
   flex-shrink: 0;
+}
+.accounting-date-range-wrap .accounting-datefield-label {
+  justify-content: center;
 }
 
 /* 类型按钮等宽：配合「激活不改文字」，消除跳动。 */
@@ -1130,6 +1161,69 @@
   appearance: none;
 }
 
+/* 「可见格式化标签 + 文字透明原生 input」日期控件（见 dateField.ts）：原生 date/datetime-local 的显示
+   文字由系统 locale 渲染（iOS 中文区「月日」），Web 改不了；故把 input 文字设透明（仍可点按唤起系统
+   选择器、仍存 ISO），上覆浮层 span 显示我们的格式（en → YYYY/MM/DD[ HH:mm]）。容器继承原 input 的
+   class 复用边框/布局。 */
+.accounting-datefield {
+  position: relative;
+  display: inline-block;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+/* 原生 input：文字透明（隐藏系统 locale 的日期文字）、bg/边框透明（透出容器底色与边框），仍占据容器
+   全区并直接捕获点按 → 唤起系统选择器。用后代选择器抬特异性到 (0,2,0)，压过 Obsidian app.css 的
+   input[type] (0,1,1)——否则后者会给 input 套不透明背景，盖住下层标签。 */
+.accounting-datefield .accounting-datefield-native {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* 贴合容器胶囊形状：继承 border-radius + corner-shape，让 iOS 系统焦点框沿字段轮廓亮起
+     （点按高亮效果），而不是显成错位的方框。appearance:none 仍拆原生底/文字，只留焦点框。 */
+  border-radius: inherit;
+  corner-shape: inherit;
+  border: none;
+  background: transparent;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  /* 去原生外壳与点击高亮：iOS WKWebView 下 date/datetime-local 默认带胶囊外观 + 灰色 tap-highlight，
+     点按唤起选择器瞬间会闪一下原形。appearance:none 拆壳、tap-highlight 透明止闪。 */
+  -webkit-appearance: none;
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+  padding: 0;
+  margin: 0;
+  box-sizing: border-box;
+  cursor: pointer;
+  z-index: 1;
+}
+/* 焦点时也不显绿环（此 input 仅作透明触控层，焦点环没意义且会显胶囊轮廓）。特异性 (0,3,1) 压过
+   全局 :focus-visible 的 (0,2,1)。 */
+.accounting-datefield .accounting-datefield-native:focus,
+.accounting-datefield .accounting-datefield-native:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.accounting-datefield .accounting-datefield-native::-webkit-calendar-picker-indicator {
+  display: none;
+}
+/* 浮层标签：显示我们格式化的日期，置于 input 之上（z-index:2）确保可见；pointer-events:none 使点按
+   穿透到下层原生 input 唤起选择器。padding:inherit 让标签文字对齐原 input 文字位置。 */
+.accounting-datefield-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  overflow: hidden;
+  pointer-events: none;
+  padding: inherit;
+  box-sizing: border-box;
+  z-index: 2;
+}
+
 /* 排序下拉菜单：浮于 document.body（fixed），遮罩透明仅捕获外部点击关闭。
    纯 DOM/rgba（不依赖 color-mix / 动画，避开 WKWebView 渲染坑）。 */
 .accounting-sort-overlay {
@@ -1182,7 +1276,7 @@
     justify-content: flex-start;
   }
 
-  .accounting-filter-row input[type="date"] {
+  .accounting-filter-row .accounting-datefield {
     width: auto;
     flex: 1 1 0;
   }
@@ -2778,28 +2872,28 @@ details[open] > .accounting-collapsible-head::before {
   overflow-x: hidden;
 }
 
-/* 统计页「时间段」：label 与 6 个快捷按钮同一行、整组水平居中，且落在绿块水平中线（垂直居中）。
+/* 统计页「时间段」：label 与 6 个快捷按钮默认同一行、整组水平居中（垂直居中于绿块）；英文/窄屏放不下时允许换行，不硬塞单行。
    移动端全屏默认把 .accounting-filter-row 堆叠成单列（grid-template-columns:1fr），这里针对报表页解除堆叠——
-   改 flex 单行居中。原先内容靠上是因为：该行是 :last-child 仍带 6px margin-bottom，叠加 filter-box 的 2/6 padding，
+   改 flex 居中。原先内容靠上是因为：该行是 :last-child 仍带 6px margin-bottom，叠加 filter-box 的 2/6 padding，
    行下方留 12px、上方仅 2px。故同时把行 margin-bottom 清零 + 区块纵向 padding 改对称，让按钮落在区块中线上。
-   按钮缩横向 padding 保证 6 个 + label 在窄屏一行放得下。选择器特异性 (0,5,0) 高于移动端全屏堆叠规则 (0,4,0)，确定覆盖。 */
+   按钮缩横向 padding 尽量省宽；窄屏仍放不下时由 flex-wrap 自动换行（英文文案比中文长，强制 nowrap 会横向溢出）。选择器特异性 (0,5,0) 高于移动端全屏堆叠规则 (0,4,0)，确定覆盖。 */
 .modal.accounting-fullscreen:not(.accounting-desktop) .accounting-report-modal .accounting-filter-box {
   padding: 6px 12px;
 }
 
 .modal.accounting-fullscreen:not(.accounting-desktop) .accounting-report-modal .accounting-filter-row {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   column-gap: 6px;
-  row-gap: 0;
+  row-gap: 6px;
   margin-bottom: 0;
 }
 
 .modal.accounting-fullscreen:not(.accounting-desktop) .accounting-report-modal .accounting-filter-controls {
   flex: 0 1 auto;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   justify-content: center;
 }
 
@@ -3135,6 +3229,73 @@ details[open] > .accounting-collapsible-head::before {
   margin-left: auto;
 }
 
+/* 币种选择 combobox（本位币 / 加币种）：常用置顶 + 全量 ISO 4217 搜索 */
+.accounting-currency-picker {
+  display: block;
+}
+.accounting-currency-picker-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.accounting-currency-add-holder {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0 var(--ac-card-content-x) var(--ac-gap-sm);
+}
+/* 浮层挂 body（fixed），避开设置 Modal 的 overflow 裁切 */
+.accounting-currency-picker-dropdown {
+  position: fixed;
+  z-index: 1000;
+  max-height: 18rem;
+  overflow-y: auto;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-btn);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  padding: 4px 0;
+}
+.accounting-currency-picker-empty {
+  padding: 6px 12px;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+.accounting-currency-picker-group {
+  position: sticky;
+  top: 0;
+  background: var(--background-secondary);
+  padding: 3px 12px;
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.accounting-currency-picker-item {
+  display: flex;
+  align-items: center;
+  padding: 5px 12px;
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+.accounting-currency-picker-item.is-active {
+  background: var(--background-modifier-hover);
+}
+.accounting-currency-picker-cn {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.accounting-currency-picker-code {
+  flex: 0 0 auto;
+  margin-left: 8px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+.accounting-currency-picker-check {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  color: var(--text-accent);
+  font-size: var(--font-ui-smaller);
+}
+
 /* 币种 body 内子节标题：区别于卡片头标题（卡片头=大写+间距+muted色），
    这里用正常大小、正常颜色，与 card-head 形成视觉层次 */
 .accounting-currency-section-title {
@@ -3265,6 +3426,17 @@ details[open] > .accounting-collapsible-head::before {
 }
 
 .accounting-startup-toggle-label {
+  flex: 1 1 auto;
+}
+
+/* 语言切换行：与同卡片「启动开关」行同款自留白 + label 占宽，select 触发器靠右对齐；
+   两行视觉一致（accounting-ledger-list 卡片 body 无横向 padding，行需自留白）。 */
+.accounting-language-row {
+  padding: var(--ac-card-pad-y) var(--ac-card-pad-x);
+  align-items: center;
+}
+
+.accounting-language-label {
   flex: 1 1 auto;
 }
 
