@@ -4557,27 +4557,22 @@ function renderNavBar(container, current, ctx, closeSelf) {
   container.querySelectorAll(".accounting-nav-bar").forEach((el) => el.remove());
   const bar = container.createDiv({ cls: "accounting-nav-bar" });
   const items = [
-    // 切换一律「先开新页、后关旧页」：新容器先挂载盖住底层，再 detach 旧页，避免中间窗口露出 Obsidian 笔记视图。
-    // openEntry 是 async（open 前 await readMeta），关旧页须推迟到新页 onOpen（onOpened 回调），故关旧页不在外面调。
-    // 其余页 open 同步挂载容器，先 open 后 close 同 task 内完成即可。
+    // 切换一律「先开新页、后关旧页」：关旧页统一推迟到新页 onOpen（onOpened 回调），此时新容器已全屏化（遮罩铺满），
+    // 旧页在下层 detach 不露底层。移动端 Modal.open 非同步挂载，若 open 后立即 closeSelf 会在新页挂载前露底。
     { label: t("nav.entry"), page: "entry", run: (s) => {
       ctx.openEntry(s, closeSelf);
     } },
     { label: t("nav.list"), page: "list", run: (s) => {
-      ctx.openList(void 0, s);
-      closeSelf();
+      ctx.openList(void 0, s, void 0, void 0, void 0, closeSelf);
     } },
     { label: t("nav.accounts"), page: "balance", run: (s) => {
-      ctx.openBalance(s);
-      closeSelf();
+      ctx.openBalance(s, closeSelf);
     } },
     { label: t("nav.dashboard"), page: "report", run: (s) => {
-      ctx.openReport(s);
-      closeSelf();
+      ctx.openReport(s, closeSelf);
     } },
     { label: t("nav.settings"), page: "settings", run: (s) => {
-      ctx.openSettings(s);
-      closeSelf();
+      ctx.openSettings(s, closeSelf);
     } }
   ];
   for (const it of items) {
@@ -4933,9 +4928,9 @@ var EntryModal = class extends import_obsidian5.Modal {
   }
   async onOpen() {
     this.opened = true;
-    this.onOpened?.();
     prepareModalContainer(this.containerEl);
     this.modalEl.addClass("accounting-fullscreen");
+    this.onOpened?.();
     if (this.recurringMode !== "none") this.modalEl.addClass("accounting-drilldown");
     const storedTypes = await this.adapter.readAccountTypeSettings();
     this.accountTypeSettings = storedTypes ? normalizeAccountTypeSettings(storedTypes) : defaultAccountTypeSettings();
@@ -5936,7 +5931,7 @@ var SORT_OPTIONS = [
 ];
 var PAGE_SIZE = 50;
 var TransactionListModal = class extends import_obsidian7.Modal {
-  constructor(app, adapter, presetAccountId, navCtx, slide, presetRecurringRuleId, drillDown, categoryDrill, onDataChanged, onSwitchLedger) {
+  constructor(app, adapter, presetAccountId, navCtx, slide, presetRecurringRuleId, drillDown, categoryDrill, onDataChanged, onSwitchLedger, onOpened) {
     super(app);
     this.adapter = adapter;
     this.navCtx = navCtx;
@@ -5945,6 +5940,7 @@ var TransactionListModal = class extends import_obsidian7.Modal {
     this.categoryDrill = categoryDrill;
     this.onDataChanged = onDataChanged;
     this.onSwitchLedger = onSwitchLedger;
+    this.onOpened = onOpened;
     const hasCategoryPreset = !!categoryDrill;
     const hasPreset = !!presetAccountId || !!presetRecurringRuleId || hasCategoryPreset;
     this.filter = {
@@ -5990,6 +5986,7 @@ var TransactionListModal = class extends import_obsidian7.Modal {
     prepareModalContainer(this.containerEl);
     this.modalEl.addClass("accounting-fullscreen");
     if (this.drillDown) this.modalEl.addClass("accounting-drilldown");
+    this.onOpened?.();
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("accounting-transaction-modal");
@@ -5998,8 +5995,7 @@ var TransactionListModal = class extends import_obsidian7.Modal {
     if (!this.drillDown && this.onSwitchLedger) {
       const ledgerAlias = await this.adapter.readActiveLedgerAlias();
       mountLedgerPill(this.modalEl, this.app, this.adapter, ledgerAlias, (name) => {
-        this.close();
-        this.onSwitchLedger?.(name);
+        this.onSwitchLedger?.(name, () => this.close());
       });
       contentEl.addClass("accounting-has-ledger-pill");
     }
@@ -7354,12 +7350,13 @@ var AccountCreateModal = class extends import_obsidian12.Modal {
 
 // src/balanceModal.ts
 var BalanceModal = class extends import_obsidian13.Modal {
-  constructor(app, adapter, navCtx, slide, onSwitchLedger) {
+  constructor(app, adapter, navCtx, slide, onSwitchLedger, onOpened) {
     super(app);
     this.adapter = adapter;
     this.navCtx = navCtx;
     this.slide = slide;
     this.onSwitchLedger = onSwitchLedger;
+    this.onOpened = onOpened;
   }
   opened = false;
   closing = false;
@@ -7375,13 +7372,13 @@ var BalanceModal = class extends import_obsidian13.Modal {
     this.opened = true;
     prepareModalContainer(this.containerEl);
     this.modalEl.addClass("accounting-fullscreen");
+    this.onOpened?.();
     const sc = slideClass(this.slide);
     if (sc) this.contentEl.addClass(sc);
     if (this.onSwitchLedger) {
       const ledgerAlias = await this.adapter.readActiveLedgerAlias();
       mountLedgerPill(this.modalEl, this.app, this.adapter, ledgerAlias, (name) => {
-        this.close();
-        this.onSwitchLedger?.(name);
+        this.onSwitchLedger?.(name, () => this.close());
       });
       this.contentEl.addClass("accounting-has-ledger-pill");
     }
@@ -7619,12 +7616,13 @@ function rangeDateBounds(key) {
   return { start: rangeStartDateOnly(key), end: todayDateInput() };
 }
 var ReportModal = class extends import_obsidian14.Modal {
-  constructor(app, adapter, navCtx, slide, onSwitchLedger) {
+  constructor(app, adapter, navCtx, slide, onSwitchLedger, onOpened) {
     super(app);
     this.adapter = adapter;
     this.navCtx = navCtx;
     this.slide = slide;
     this.onSwitchLedger = onSwitchLedger;
+    this.onOpened = onOpened;
   }
   opened = false;
   closing = false;
@@ -7645,13 +7643,13 @@ var ReportModal = class extends import_obsidian14.Modal {
     this.opened = true;
     prepareModalContainer(this.containerEl);
     this.modalEl.addClass("accounting-fullscreen");
+    this.onOpened?.();
     const sc = slideClass(this.slide);
     if (sc) this.contentEl.addClass(sc);
     if (this.onSwitchLedger) {
       const ledgerAlias = await this.adapter.readActiveLedgerAlias();
       mountLedgerPill(this.modalEl, this.app, this.adapter, ledgerAlias, (name) => {
-        this.close();
-        this.onSwitchLedger?.(name);
+        this.onSwitchLedger?.(name, () => this.close());
       });
       this.contentEl.addClass("accounting-has-ledger-pill");
     }
@@ -8048,12 +8046,13 @@ var ReportModal = class extends import_obsidian14.Modal {
 // src/settingsModal.ts
 var import_obsidian15 = require("obsidian");
 var SettingsModal = class extends import_obsidian15.Modal {
-  constructor(app, settingsTab, navCtx, slide, onSwitchLedger) {
+  constructor(app, settingsTab, navCtx, slide, onSwitchLedger, onOpened) {
     super(app);
     this.settingsTab = settingsTab;
     this.navCtx = navCtx;
     this.slide = slide;
     this.onSwitchLedger = onSwitchLedger;
+    this.onOpened = onOpened;
   }
   opened = false;
   closing = false;
@@ -8069,13 +8068,13 @@ var SettingsModal = class extends import_obsidian15.Modal {
     });
     prepareModalContainer(this.containerEl);
     this.modalEl.addClass("accounting-fullscreen");
+    this.onOpened?.();
     const sc = slideClass(this.slide);
     if (sc) this.contentEl.addClass(sc);
     this.contentEl.addClass("accounting-settings-modal");
     renderNavBar(this.modalEl, "settings", this.navCtx, () => this.close());
     const onSwitch = this.onSwitchLedger ? (newSubdir) => {
-      this.close();
-      this.onSwitchLedger(newSubdir);
+      this.onSwitchLedger(newSubdir, () => this.close());
     } : void 0;
     this.settingsTab.renderInto(this.contentEl, onSwitch);
   }
@@ -8100,8 +8099,8 @@ var SettingsModal = class extends import_obsidian15.Modal {
 };
 
 // src/navActions.ts
-function openList(app, adapter, navCtx, presetAccountId, slide, presetRecurringRuleId, drillDown, drill, onDataChanged, onSwitchLedger) {
-  new TransactionListModal(app, adapter, presetAccountId, navCtx, slide, presetRecurringRuleId, drillDown, drill, onDataChanged, onSwitchLedger).open();
+function openList(app, adapter, navCtx, presetAccountId, slide, presetRecurringRuleId, drillDown, drill, onDataChanged, onSwitchLedger, onOpened) {
+  new TransactionListModal(app, adapter, presetAccountId, navCtx, slide, presetRecurringRuleId, drillDown, drill, onDataChanged, onSwitchLedger, onOpened).open();
 }
 async function openEntry(app, adapter, afterSubmit, navCtx, slide, onSwitchLedger, onRecurringSaved, onOpened) {
   const meta = await adapter.readMeta();
@@ -8124,14 +8123,14 @@ async function openEntry(app, adapter, afterSubmit, navCtx, slide, onSwitchLedge
     onOpened
   ).open();
 }
-function openBalance(app, adapter, navCtx, slide, onSwitchLedger) {
-  new BalanceModal(app, adapter, navCtx, slide, onSwitchLedger).open();
+function openBalance(app, adapter, navCtx, slide, onSwitchLedger, onOpened) {
+  new BalanceModal(app, adapter, navCtx, slide, onSwitchLedger, onOpened).open();
 }
-function openReport(app, adapter, navCtx, slide, onSwitchLedger) {
-  new ReportModal(app, adapter, navCtx, slide, onSwitchLedger).open();
+function openReport(app, adapter, navCtx, slide, onSwitchLedger, onOpened) {
+  new ReportModal(app, adapter, navCtx, slide, onSwitchLedger, onOpened).open();
 }
-function openSettings(app, settingsTab, navCtx, slide, onSwitchLedger) {
-  const modal = new SettingsModal(app, settingsTab, navCtx, slide, onSwitchLedger);
+function openSettings(app, settingsTab, navCtx, slide, onSwitchLedger, onOpened) {
+  const modal = new SettingsModal(app, settingsTab, navCtx, slide, onSwitchLedger, onOpened);
   modal.open();
   return modal;
 }
@@ -10045,13 +10044,13 @@ var AccountingPlugin = class extends import_obsidian18.Plugin {
   /** 导航上下文：三个目标的打开回调，注入到各 Modal 使其底部导航条可用。public 供设置页「查看」跳转复用。 */
   navCtx(adapter) {
     return {
-      openList: (accountId, slide, drillDown, drill, onDataChanged) => openList(this.app, adapter, this.navCtx(adapter), accountId, slide, void 0, drillDown, drill, onDataChanged, this.switchLedgerAndReopenList),
+      openList: (accountId, slide, drillDown, drill, onDataChanged, onOpened) => openList(this.app, adapter, this.navCtx(adapter), accountId, slide, void 0, drillDown, drill, onDataChanged, this.switchLedgerAndReopenList, onOpened),
       openEntry: (slide, onOpened) => {
         void openEntry(this.app, adapter, void 0, this.navCtx(adapter), slide, this.switchLedgerAndReopen, () => this.settingsTab.showRecurring(), onOpened);
       },
-      openBalance: (slide) => openBalance(this.app, adapter, this.navCtx(adapter), slide, this.switchLedgerAndReopenBalance),
-      openReport: (slide) => openReport(this.app, adapter, this.navCtx(adapter), slide, this.switchLedgerAndReopenReport),
-      openSettings: (slide) => openSettings(this.app, this.settingsTab, this.navCtx(adapter), slide, this.switchLedgerAndReopenSettings)
+      openBalance: (slide, onOpened) => openBalance(this.app, adapter, this.navCtx(adapter), slide, this.switchLedgerAndReopenBalance, onOpened),
+      openReport: (slide, onOpened) => openReport(this.app, adapter, this.navCtx(adapter), slide, this.switchLedgerAndReopenReport, onOpened),
+      openSettings: (slide, onOpened) => openSettings(this.app, this.settingsTab, this.navCtx(adapter), slide, this.switchLedgerAndReopenSettings, onOpened)
     };
   }
   async openEntry(onOpened) {
@@ -10107,35 +10106,38 @@ var AccountingPlugin = class extends import_obsidian18.Plugin {
     this.switchLedger(newSubdir);
     void this.openEntry(onOpened);
   };
-  /** 流水页顶部切换账本：用新 dataSubdir 重开流水页（新 adapter、新 navCtx）。 */
-  switchLedgerAndReopenList = (newSubdir) => {
+  /** 流水页顶部切换账本：用新 dataSubdir 重开流水页（新 adapter、新 navCtx）。onOpened 由胶囊路径传入：
+   *  关旧页推迟到新页 onOpen（与导航条切换同模式），避免底层闪现。 */
+  switchLedgerAndReopenList = (newSubdir, onOpened) => {
     this.switchLedger(newSubdir);
     const adapter = this.adapter();
-    openList(this.app, adapter, this.navCtx(adapter), void 0, void 0, void 0, void 0, void 0, void 0, this.switchLedgerAndReopenList);
+    openList(this.app, adapter, this.navCtx(adapter), void 0, void 0, void 0, void 0, void 0, void 0, this.switchLedgerAndReopenList, onOpened);
   };
-  /** 余额页顶部切换账本：用新 dataSubdir 重开余额页（新 adapter、新 navCtx）。 */
-  switchLedgerAndReopenBalance = (newSubdir) => {
+  /** 余额页顶部切换账本：用新 dataSubdir 重开余额页（新 adapter、新 navCtx）。onOpened 由胶囊路径传入：
+   *  关旧页推迟到新页 onOpen（与导航条切换同模式），避免底层闪现。 */
+  switchLedgerAndReopenBalance = (newSubdir, onOpened) => {
     this.switchLedger(newSubdir);
     const adapter = this.adapter();
-    openBalance(this.app, adapter, this.navCtx(adapter), void 0, this.switchLedgerAndReopenBalance);
+    openBalance(this.app, adapter, this.navCtx(adapter), void 0, this.switchLedgerAndReopenBalance, onOpened);
   };
-  /** 统计页顶部切换账本：用新 dataSubdir 重开统计页（新 adapter、新 navCtx）。 */
-  switchLedgerAndReopenReport = (newSubdir) => {
+  /** 统计页顶部切换账本：用新 dataSubdir 重开统计页（新 adapter、新 navCtx）。onOpened 由胶囊路径传入：
+   *  关旧页推迟到新页 onOpen（与导航条切换同模式），避免底层闪现。 */
+  switchLedgerAndReopenReport = (newSubdir, onOpened) => {
     this.switchLedger(newSubdir);
     const adapter = this.adapter();
-    openReport(this.app, adapter, this.navCtx(adapter), void 0, this.switchLedgerAndReopenReport);
+    openReport(this.app, adapter, this.navCtx(adapter), void 0, this.switchLedgerAndReopenReport, onOpened);
   };
   /** 设置页切换账本：用新 dataSubdir 重开设置页（新 adapter、新 navCtx），整个记账界面上下文立即刷新到新账本。
-   *  关旧设置页由 SettingsModal 在切换回调里先 this.close() 负责（与记账页 LedgerSwitchModal→close 同模式）。 */
-  switchLedgerAndReopenSettings = (newSubdir) => {
+   *  关旧设置页推迟到新设置页 onOpen（onOpened 由胶囊路径传入），避免底层闪现。 */
+  switchLedgerAndReopenSettings = (newSubdir, onOpened) => {
     this.switchLedger(newSubdir);
-    this.openSettings();
+    this.openSettings(onOpened);
   };
   /** 打开设置页（全屏 Modal）：每次用最新 dataSubdir 重建 adapter，导航条与切换账本回调均绑定到该新 adapter。
    *  返回实例，供引导背景页按需 close。 */
-  openSettings() {
+  openSettings(onOpened) {
     const adapter = this.adapter();
-    return openSettings(this.app, this.settingsTab, this.navCtx(adapter), void 0, this.switchLedgerAndReopenSettings);
+    return openSettings(this.app, this.settingsTab, this.navCtx(adapter), void 0, this.switchLedgerAndReopenSettings, onOpened);
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());

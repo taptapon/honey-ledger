@@ -1876,6 +1876,17 @@
   transition: none !important;
 }
 
+/* 移动端全屏页：钉住 .modal 的 transform/opacity（与 .accounting-sub-modal 同手法）。
+   Obsidian 移动端开/关动画是 JS 逐帧给 .modal 设 inline transform（translateY 位移）/opacity，
+   普通 animation:none 压不住（inline 普通 > class），须用 !important 反压。
+   否则导航切换时新页 .modal 处于 JS 动画最初几帧（位移/半透明），而旧页已 detach，露出底层 Obsidian 视图——
+   表现为偶发闪现（取决于关旧页那一帧是否落在新页动画窗口内）。
+   桌面端（.accounting-desktop）保留 Obsidian 原生行为不动；滑入由 .modal-content 的 accounting-slide-* 承担，不受影响。 */
+.modal.accounting-fullscreen:not(.accounting-desktop) {
+  transform: none !important;
+  opacity: 1 !important;
+}
+
 .modal.accounting-fullscreen .modal-content {
   height: 100% !important;
   max-height: 100% !important;
