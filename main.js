@@ -4932,12 +4932,6 @@ var EntryModal = class extends import_obsidian5.Modal {
     this.modalEl.addClass("accounting-fullscreen");
     this.onOpened?.();
     if (this.recurringMode !== "none") this.modalEl.addClass("accounting-drilldown");
-    const storedTypes = await this.adapter.readAccountTypeSettings();
-    this.accountTypeSettings = storedTypes ? normalizeAccountTypeSettings(storedTypes) : defaultAccountTypeSettings();
-    this.transactions = foldEvents(await this.adapter.loadLog());
-    this.baseCurrency = await this.adapter.readBaseCurrency();
-    this.rates = await this.adapter.readRates();
-    const ledgerAlias = await this.adapter.readActiveLedgerAlias();
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("accounting-entry-modal");
@@ -4945,11 +4939,17 @@ var EntryModal = class extends import_obsidian5.Modal {
     if (sc) contentEl.addClass(sc);
     renderNavOrBack(this.modalEl, "entry", this.navCtx, () => this.close(), this.recurringMode !== "none");
     if (this.onSwitchLedger) {
+      const ledgerAlias = await this.adapter.readActiveLedgerAlias();
       mountLedgerPill(this.modalEl, this.app, this.adapter, ledgerAlias, (name) => {
         this.onSwitchLedger?.(name, () => this.close());
       });
       contentEl.addClass("accounting-has-ledger-pill");
     }
+    const storedTypes = await this.adapter.readAccountTypeSettings();
+    this.accountTypeSettings = storedTypes ? normalizeAccountTypeSettings(storedTypes) : defaultAccountTypeSettings();
+    this.transactions = foldEvents(await this.adapter.loadLog());
+    this.baseCurrency = await this.adapter.readBaseCurrency();
+    this.rates = await this.adapter.readRates();
     const typeWrap = contentEl.createDiv({ cls: "accounting-entry-type" });
     this.typeRow = typeWrap.createDiv({ cls: "accounting-entry-type-row" });
     this.renderTypeButtons();
