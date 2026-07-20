@@ -4557,25 +4557,27 @@ function renderNavBar(container, current, ctx, closeSelf) {
   container.querySelectorAll(".accounting-nav-bar").forEach((el) => el.remove());
   const bar = container.createDiv({ cls: "accounting-nav-bar" });
   const items = [
+    // 切换一律「先开新页、后关旧页」：新容器先挂载盖住底层，再 detach 旧页，避免中间窗口露出 Obsidian 笔记视图。
+    // openEntry 是 async（open 前 await readMeta），关旧页须推迟到新页 onOpen（onOpened 回调），故关旧页不在外面调。
+    // 其余页 open 同步挂载容器，先 open 后 close 同 task 内完成即可。
     { label: t("nav.entry"), page: "entry", run: (s) => {
-      closeSelf();
-      ctx.openEntry(s);
+      ctx.openEntry(s, closeSelf);
     } },
     { label: t("nav.list"), page: "list", run: (s) => {
-      closeSelf();
       ctx.openList(void 0, s);
+      closeSelf();
     } },
     { label: t("nav.accounts"), page: "balance", run: (s) => {
-      closeSelf();
       ctx.openBalance(s);
+      closeSelf();
     } },
     { label: t("nav.dashboard"), page: "report", run: (s) => {
-      closeSelf();
       ctx.openReport(s);
+      closeSelf();
     } },
     { label: t("nav.settings"), page: "settings", run: (s) => {
-      closeSelf();
       ctx.openSettings(s);
+      closeSelf();
     } }
   ];
   for (const it of items) {
@@ -4817,7 +4819,7 @@ function flashAmountError(el) {
   }, 160);
 }
 var EntryModal = class extends import_obsidian5.Modal {
-  constructor(app, adapter, accounts, categories, onSubmitted, initialTx, isCopy = true, navCtx, slide, onSwitchLedger, recurring, onRecurringSaved) {
+  constructor(app, adapter, accounts, categories, onSubmitted, initialTx, isCopy = true, navCtx, slide, onSwitchLedger, recurring, onRecurringSaved, onOpened) {
     super(app);
     this.adapter = adapter;
     this.accounts = accounts;
@@ -4828,6 +4830,7 @@ var EntryModal = class extends import_obsidian5.Modal {
     this.onSwitchLedger = onSwitchLedger;
     this.recurring = recurring;
     this.onRecurringSaved = onRecurringSaved;
+    this.onOpened = onOpened;
     this.isCopy = isCopy;
     this.originalTxId = initialTx?.id;
     this.state = initialTx ? this.txToState(initialTx) : {
@@ -4930,6 +4933,7 @@ var EntryModal = class extends import_obsidian5.Modal {
   }
   async onOpen() {
     this.opened = true;
+    this.onOpened?.();
     prepareModalContainer(this.containerEl);
     this.modalEl.addClass("accounting-fullscreen");
     if (this.recurringMode !== "none") this.modalEl.addClass("accounting-drilldown");
@@ -4947,8 +4951,7 @@ var EntryModal = class extends import_obsidian5.Modal {
     renderNavOrBack(this.modalEl, "entry", this.navCtx, () => this.close(), this.recurringMode !== "none");
     if (this.onSwitchLedger) {
       mountLedgerPill(this.modalEl, this.app, this.adapter, ledgerAlias, (name) => {
-        this.close();
-        this.onSwitchLedger?.(name);
+        this.onSwitchLedger?.(name, () => this.close());
       });
       contentEl.addClass("accounting-has-ledger-pill");
     }
@@ -8100,7 +8103,7 @@ var SettingsModal = class extends import_obsidian15.Modal {
 function openList(app, adapter, navCtx, presetAccountId, slide, presetRecurringRuleId, drillDown, drill, onDataChanged, onSwitchLedger) {
   new TransactionListModal(app, adapter, presetAccountId, navCtx, slide, presetRecurringRuleId, drillDown, drill, onDataChanged, onSwitchLedger).open();
 }
-async function openEntry(app, adapter, afterSubmit, navCtx, slide, onSwitchLedger, onRecurringSaved) {
+async function openEntry(app, adapter, afterSubmit, navCtx, slide, onSwitchLedger, onRecurringSaved, onOpened) {
   const meta = await adapter.readMeta();
   new EntryModal(
     app,
@@ -8117,7 +8120,8 @@ async function openEntry(app, adapter, afterSubmit, navCtx, slide, onSwitchLedge
     slide,
     onSwitchLedger,
     void 0,
-    onRecurringSaved
+    onRecurringSaved,
+    onOpened
   ).open();
 }
 function openBalance(app, adapter, navCtx, slide, onSwitchLedger) {
@@ -10042,17 +10046,17 @@ var AccountingPlugin = class extends import_obsidian18.Plugin {
   navCtx(adapter) {
     return {
       openList: (accountId, slide, drillDown, drill, onDataChanged) => openList(this.app, adapter, this.navCtx(adapter), accountId, slide, void 0, drillDown, drill, onDataChanged, this.switchLedgerAndReopenList),
-      openEntry: (slide) => {
-        void openEntry(this.app, adapter, void 0, this.navCtx(adapter), slide, this.switchLedgerAndReopen, () => this.settingsTab.showRecurring());
+      openEntry: (slide, onOpened) => {
+        void openEntry(this.app, adapter, void 0, this.navCtx(adapter), slide, this.switchLedgerAndReopen, () => this.settingsTab.showRecurring(), onOpened);
       },
       openBalance: (slide) => openBalance(this.app, adapter, this.navCtx(adapter), slide, this.switchLedgerAndReopenBalance),
       openReport: (slide) => openReport(this.app, adapter, this.navCtx(adapter), slide, this.switchLedgerAndReopenReport),
       openSettings: (slide) => openSettings(this.app, this.settingsTab, this.navCtx(adapter), slide, this.switchLedgerAndReopenSettings)
     };
   }
-  async openEntry() {
+  async openEntry(onOpened) {
     const adapter = this.adapter();
-    await openEntry(this.app, adapter, void 0, this.navCtx(adapter), void 0, this.switchLedgerAndReopen, () => this.settingsTab.showRecurring());
+    await openEntry(this.app, adapter, void 0, this.navCtx(adapter), void 0, this.switchLedgerAndReopen, () => this.settingsTab.showRecurring(), onOpened);
     void this.tryAutoRefreshRates(adapter);
     await this.runStartupBackfill(adapter);
   }
@@ -10097,10 +10101,11 @@ var AccountingPlugin = class extends import_obsidian18.Plugin {
     this.settings.dataSubdir = newSubdir;
     void this.saveSettings();
   }
-  /** 记一笔顶部切换账本：用新 dataSubdir 重开记一笔（新 adapter、新 navCtx）。 */
-  switchLedgerAndReopen = (newSubdir) => {
+  /** 记一笔顶部切换账本：用新 dataSubdir 重开记一笔（新 adapter、新 navCtx）。onOpened 由胶囊路径传入：
+   *  关旧页推迟到新页 onOpen（openEntry 异步 await readMeta），避免底层闪现（与导航条切换同模式）。 */
+  switchLedgerAndReopen = (newSubdir, onOpened) => {
     this.switchLedger(newSubdir);
-    void this.openEntry();
+    void this.openEntry(onOpened);
   };
   /** 流水页顶部切换账本：用新 dataSubdir 重开流水页（新 adapter、新 navCtx）。 */
   switchLedgerAndReopenList = (newSubdir) => {
