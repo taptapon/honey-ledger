@@ -143,6 +143,12 @@ function resolveTypeGroups(settings) {
   }
   return settings.groups.map((g) => ({ id: g.id, label: g.label, types: byGroup.get(g.id) ?? [] })).filter((g) => g.types.length > 0);
 }
+function displayTypeLabel(type, storedLabel, translate) {
+  return storedLabel === DEFAULT_TYPE_LABEL[type] ? translate(`accountType.${type}`) : storedLabel;
+}
+function displayGroupLabel(id, storedLabel, translate) {
+  return DEFAULT_GROUP_LABEL[id] != null && storedLabel === DEFAULT_GROUP_LABEL[id] ? translate(`accountGroup.${id}`) : storedLabel;
+}
 
 // ../../packages/core/src/id.ts
 function newTxId() {
@@ -211,6 +217,13 @@ function datetimeLocalToISO(input) {
   if (Number.isNaN(d.getTime())) return nowLocalISO();
   return dateToLocalISO(d);
 }
+function datetimeLocalToISOStrict(input) {
+  const trimmed = input.trim();
+  if (trimmed === "") return null;
+  const d = new Date(trimmed);
+  if (Number.isNaN(d.getTime())) return null;
+  return dateToLocalISO(d);
+}
 function nowDatetimeLocal() {
   return isoToDatetimeLocal(nowISO());
 }
@@ -244,6 +257,66 @@ function monthsAgoDateInput(n) {
   d.setMonth(d.getMonth() - n);
   const p = (n2) => String(n2).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function firstOfMonth() {
+  const d = /* @__PURE__ */ new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-01`;
+}
+function firstOfYear() {
+  return `${(/* @__PURE__ */ new Date()).getFullYear()}-01-01`;
+}
+function yearsAgoDateInput(n) {
+  const d = /* @__PURE__ */ new Date();
+  d.setFullYear(d.getFullYear() - n);
+  const p = (n2) => String(n2).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function earliestDataDate(transactions) {
+  const now = /* @__PURE__ */ new Date();
+  let ey = now.getFullYear();
+  let em = now.getMonth() + 1;
+  for (const t2 of transactions) {
+    const ym = isoToMonthStr(t2.ts);
+    if (!ym) continue;
+    const y = Number(ym.slice(0, 4));
+    const m = Number(ym.slice(5, 7));
+    if (y < ey || y === ey && m < em) {
+      ey = y;
+      em = m;
+    }
+  }
+  const p = (n) => String(n).padStart(2, "0");
+  return `${ey}-${p(em)}-01`;
+}
+function rangeStartDate(key, earliestData) {
+  switch (key) {
+    case "thisMonth":
+      return firstOfMonth();
+    case "last1m":
+      return monthsAgoDateInput(1);
+    case "last3m":
+      return monthsAgoDateInput(3);
+    case "thisYear":
+      return firstOfYear();
+    case "last6y":
+      return yearsAgoDateInput(6);
+    case "all":
+      return earliestData ?? "1970-01-01";
+  }
+}
+function dateOnlyToLocalISOStart(dateOnly) {
+  const parts = dateOnly.split("-").map(Number);
+  return localDateStartISO(parts[0] ?? 0, parts[1] ?? 1, parts[2] ?? 1);
+}
+function rangeBounds(key, earliestData) {
+  const start = dateOnlyToLocalISOStart(rangeStartDate(key, earliestData));
+  const tp = todayDateInput().split("-").map(Number);
+  const end = localDateStartISO(tp[0] ?? 0, tp[1] ?? 1, (tp[2] ?? 1) + 1);
+  return { start, end };
+}
+function rangeDateBounds(key, earliestData) {
+  return { start: rangeStartDate(key, earliestData), end: todayDateInput() };
 }
 
 // ../../packages/core/src/money.ts
@@ -1139,6 +1212,9 @@ function filterAndSortTransactions(transactions, filters) {
 }
 
 // ../../packages/core/src/balance.ts
+function loanCashIn(direction) {
+  return direction === "borrow" || direction === "collect";
+}
 function computeBalances(transactions, accounts) {
   const balances = /* @__PURE__ */ new Map();
   for (const a of accounts) balances.set(a.id, round2(a.openingBalance));
@@ -1158,7 +1234,7 @@ function computeBalances(transactions, accounts) {
       case "loan": {
         const yours = t2.account;
         const person = t2.person;
-        const selfInc = t2.direction === "borrow" || t2.direction === "collect";
+        const selfInc = loanCashIn(t2.direction);
         const amt = t2.amount;
         if (yours) balances.set(yours, round2(get(yours) + (selfInc ? amt : -amt)));
         if (person) balances.set(person, round2(get(person) + (selfInc ? -amt : amt)));
@@ -1322,6 +1398,34 @@ function yearlyTrend(transactions, startYear, yearsCount, opts) {
   }
   return buckets;
 }
+var RANGE_TREND_MONTHS = 6;
+function rangeTrend(transactions, key, opts) {
+  const base = opts?.base;
+  const trendOpts = base != null ? { base } : void 0;
+  const now = /* @__PURE__ */ new Date();
+  const cy = now.getFullYear();
+  const cm = now.getMonth() + 1;
+  const pad = (x) => String(x).padStart(2, "0");
+  if (key === "last6y") {
+    return { points: yearlyTrend(transactions, cy - 5, RANGE_TREND_MONTHS, trendOpts), gran: "year" };
+  }
+  const startDate = key === "all" ? opts?.earliestData ?? firstOfMonth() : rangeStartDate(key, opts?.earliestData);
+  const startYear = Number(startDate.slice(0, 4));
+  const startMonth = Number(startDate.slice(5, 7));
+  const spanMonths = (cy - startYear) * 12 + (cm - startMonth) + 1;
+  if (spanMonths >= 24) {
+    const yearCount = Math.max(cy - startYear + 1, 1);
+    return { points: yearlyTrend(transactions, startYear, yearCount, trendOpts), gran: "year" };
+  }
+  if (spanMonths < 6) {
+    const d = /* @__PURE__ */ new Date();
+    d.setMonth(d.getMonth() - (RANGE_TREND_MONTHS - 1));
+    const startYM2 = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+    return { points: monthlyTrend(transactions, startYM2, RANGE_TREND_MONTHS, trendOpts), gran: "month" };
+  }
+  const startYM = `${startYear}-${pad(startMonth)}`;
+  return { points: monthlyTrend(transactions, startYM, spanMonths, trendOpts), gran: "month" };
+}
 
 // ../../packages/core/src/loanSettle.ts
 var SETTLEMENT_CATEGORIES = {
@@ -1349,6 +1453,12 @@ function deriveSettlementDiff(outstanding, paid, direction, names = SETTLEMENT_C
     return diff > 0 ? { kind: "writeoff", type: "expense", amount: diff, category: names.badDebt } : { kind: "writeoff", type: "income", amount: round2(-diff), category: names.interest };
   }
   return diff > 0 ? { kind: "writeoff", type: "income", amount: diff, category: names.gift } : { kind: "writeoff", type: "expense", amount: round2(-diff), category: names.fee };
+}
+function validateCollectRepayDirection(outstanding, direction) {
+  if (outstanding === 0) return "noOutstanding";
+  if (direction === "collect" && outstanding < 0) return "shouldRepay";
+  if (direction === "repay" && outstanding > 0) return "shouldCollect";
+  return null;
 }
 
 // ../../packages/core/src/settlement.ts
@@ -1969,6 +2079,21 @@ function resolveAdjustCategory(selected, categories, flow, adjustCategoryName = 
   const visible = categories.some((c) => c.flow === flow && c.active !== false && c.name === selected);
   return visible ? selected : adjustCategoryName;
 }
+function mergeEnsureCategories(categories, items) {
+  let next = [...categories];
+  let changed = false;
+  for (const { flow, name } of items) {
+    const existing = next.find((c) => c.flow === flow && c.name === name);
+    if (!existing) {
+      next = [...next, { id: newCategoryId(), flow, name }];
+      changed = true;
+    } else if (existing.active === false) {
+      next = next.map((c) => c.id === existing.id ? { ...c, active: true } : c);
+      changed = true;
+    }
+  }
+  return { next, changed };
+}
 
 // ../../packages/core/src/accountOps.ts
 function numOr(s) {
@@ -2029,6 +2154,76 @@ function planMergeAccount(input) {
   }
   const nextAccounts = accounts.filter((a) => a.id !== fromId);
   return { events: newEvents, accounts: nextAccounts, rewritten, deleted };
+}
+
+// ../../packages/core/src/accountTypeOps.ts
+var groupSeq = 0;
+function newGroupId() {
+  return `g-custom-${Date.now().toString(36)}-${(groupSeq++).toString(36)}`;
+}
+function setGroupLabel(s, id, label) {
+  return { ...s, groups: s.groups.map((g) => g.id === id ? { ...g, label } : g) };
+}
+function addGroup(s, label) {
+  return { ...s, groups: [...s.groups, { id: newGroupId(), label }] };
+}
+function removeGroup(s, id) {
+  if (s.groups.length <= 1) return s;
+  const remaining = s.groups.filter((g) => g.id !== id);
+  const fallback = remaining[0].id;
+  return {
+    groups: remaining,
+    types: s.types.map((t2) => t2.groupId === id ? { ...t2, groupId: fallback } : t2)
+  };
+}
+function moveGroup(s, id, dir) {
+  const i = s.groups.findIndex((g) => g.id === id);
+  if (i < 0) return s;
+  const j = i + dir;
+  if (j < 0 || j >= s.groups.length) return s;
+  const groups = s.groups.slice();
+  const tmp = groups[i];
+  groups[i] = groups[j];
+  groups[j] = tmp;
+  return { ...s, groups };
+}
+function setTypeLabel(s, type, label) {
+  return { ...s, types: s.types.map((t2) => t2.type === type ? { ...t2, label } : t2) };
+}
+function setTypeActive(s, type, active) {
+  return { ...s, types: s.types.map((t2) => t2.type === type ? { ...t2, active } : t2) };
+}
+function setTypeGroup(s, type, groupId) {
+  if (!s.groups.some((g) => g.id === groupId)) return s;
+  const cfg = s.types.find((t2) => t2.type === type);
+  if (!cfg || cfg.groupId === groupId) return s;
+  const moved = { ...cfg, groupId };
+  const without = s.types.filter((t2) => t2.type !== type);
+  let lastIdx = -1;
+  without.forEach((t2, i) => {
+    if (t2.groupId === groupId) lastIdx = i;
+  });
+  without.splice(lastIdx + 1, 0, moved);
+  return { ...s, types: without };
+}
+function moveType(s, type, dir) {
+  const idx = s.types.findIndex((t2) => t2.type === type);
+  if (idx < 0) return s;
+  const cfg = s.types[idx];
+  const groupIdxs = [];
+  s.types.forEach((t2, i) => {
+    if (t2.groupId === cfg.groupId) groupIdxs.push(i);
+  });
+  const pos = groupIdxs.indexOf(idx);
+  const targetPos = pos + dir;
+  if (pos < 0 || targetPos < 0 || targetPos >= groupIdxs.length) return s;
+  const a = groupIdxs[pos];
+  const b = groupIdxs[targetPos];
+  const types = s.types.slice();
+  const tmp = types[a];
+  types[a] = types[b];
+  types[b] = tmp;
+  return { ...s, types };
 }
 
 // ../../packages/core/src/batchOps.ts
@@ -3851,76 +4046,6 @@ var ObsidianDataAdapter = class _ObsidianDataAdapter {
   }
 };
 
-// src/accountTypeEdit.ts
-var groupSeq = 0;
-function newGroupId() {
-  return `g-custom-${Date.now().toString(36)}-${(groupSeq++).toString(36)}`;
-}
-function setGroupLabel(s, id, label) {
-  return { ...s, groups: s.groups.map((g) => g.id === id ? { ...g, label } : g) };
-}
-function addGroup(s, label) {
-  return { ...s, groups: [...s.groups, { id: newGroupId(), label }] };
-}
-function removeGroup(s, id) {
-  if (s.groups.length <= 1) return s;
-  const remaining = s.groups.filter((g) => g.id !== id);
-  const fallback = remaining[0].id;
-  return {
-    groups: remaining,
-    types: s.types.map((t2) => t2.groupId === id ? { ...t2, groupId: fallback } : t2)
-  };
-}
-function moveGroup(s, id, dir) {
-  const i = s.groups.findIndex((g) => g.id === id);
-  if (i < 0) return s;
-  const j = i + dir;
-  if (j < 0 || j >= s.groups.length) return s;
-  const groups = s.groups.slice();
-  const tmp = groups[i];
-  groups[i] = groups[j];
-  groups[j] = tmp;
-  return { ...s, groups };
-}
-function setTypeLabel(s, type, label) {
-  return { ...s, types: s.types.map((t2) => t2.type === type ? { ...t2, label } : t2) };
-}
-function setTypeActive(s, type, active) {
-  return { ...s, types: s.types.map((t2) => t2.type === type ? { ...t2, active } : t2) };
-}
-function setTypeGroup(s, type, groupId) {
-  if (!s.groups.some((g) => g.id === groupId)) return s;
-  const cfg = s.types.find((t2) => t2.type === type);
-  if (!cfg || cfg.groupId === groupId) return s;
-  const moved = { ...cfg, groupId };
-  const without = s.types.filter((t2) => t2.type !== type);
-  let lastIdx = -1;
-  without.forEach((t2, i) => {
-    if (t2.groupId === groupId) lastIdx = i;
-  });
-  without.splice(lastIdx + 1, 0, moved);
-  return { ...s, types: without };
-}
-function moveType(s, type, dir) {
-  const idx = s.types.findIndex((t2) => t2.type === type);
-  if (idx < 0) return s;
-  const cfg = s.types[idx];
-  const groupIdxs = [];
-  s.types.forEach((t2, i) => {
-    if (t2.groupId === cfg.groupId) groupIdxs.push(i);
-  });
-  const pos = groupIdxs.indexOf(idx);
-  const targetPos = pos + dir;
-  if (pos < 0 || targetPos < 0 || targetPos >= groupIdxs.length) return s;
-  const a = groupIdxs[pos];
-  const b = groupIdxs[targetPos];
-  const types = s.types.slice();
-  const tmp = types[a];
-  types[a] = types[b];
-  types[b] = tmp;
-  return { ...s, types };
-}
-
 // src/helpDisclosure.ts
 var activeHeaderHelp = null;
 var headerHelpIdSeq = 0;
@@ -4003,11 +4128,11 @@ var import_obsidian7 = require("obsidian");
 
 // src/accountGrouping.ts
 var byName = (a, b) => a.name.localeCompare(b.name, "zh");
-function displayTypeLabel(type, storedLabel) {
-  return storedLabel === DEFAULT_TYPE_LABEL[type] ? t(`accountType.${type}`) : storedLabel;
+function displayTypeLabel2(type, storedLabel) {
+  return displayTypeLabel(type, storedLabel, (key) => t(key));
 }
-function displayGroupLabel(id, storedLabel) {
-  return DEFAULT_GROUP_LABEL[id] != null && storedLabel === DEFAULT_GROUP_LABEL[id] ? t(`accountGroup.${id}`) : storedLabel;
+function displayGroupLabel2(id, storedLabel) {
+  return displayGroupLabel(id, storedLabel, (key) => t(key));
 }
 function fillAccountOptions(sel, accounts, value, includeHidden, settings, typeFilter) {
   const typeToGroup = new Map(settings.types.map((at) => [at.type, at.groupId]));
@@ -4018,7 +4143,7 @@ function fillAccountOptions(sel, accounts, value, includeHidden, settings, typeF
   if (selectedAcc && !selectedAcc.active && !includeHidden) {
     hidden.push(selectedAcc);
   }
-  const groups = resolveTypeGroups(settings).map((g) => ({ label: displayGroupLabel(g.id, g.label), items: active.filter((a) => typeToGroup.get(a.type) === g.id) })).filter((g) => g.items.length > 0);
+  const groups = resolveTypeGroups(settings).map((g) => ({ label: displayGroupLabel2(g.id, g.label), items: active.filter((a) => typeToGroup.get(a.type) === g.id) })).filter((g) => g.items.length > 0);
   if (hidden.length > 0) groups.push({ label: t("account.hiddenGroup"), items: hidden });
   for (const g of groups) {
     const og = sel.createEl("optgroup", { attr: { label: g.label } });
@@ -4379,7 +4504,7 @@ var BatchModifyModal = class extends import_obsidian2.Modal {
     if (s.person) patch.person = s.person;
     if (s.direction) patch.direction = s.direction;
     if (s.ts) {
-      const iso = datetimeLocalToISO(s.ts);
+      const iso = datetimeLocalToISOStrict(s.ts);
       if (!iso) {
         this.showError(t("batch.err.tsFormat"));
         return null;
@@ -4608,18 +4733,7 @@ var import_obsidian5 = require("obsidian");
 
 // src/settlement.ts
 async function ensureCategories(adapter, accounts, categories, items) {
-  let next = [...categories];
-  let changed = false;
-  for (const { flow, name } of items) {
-    const existing = next.find((c) => c.flow === flow && c.name === name);
-    if (!existing) {
-      next = [...next, { id: newCategoryId(), flow, name }];
-      changed = true;
-    } else if (existing.active === false) {
-      next = next.map((c) => c.id === existing.id ? { ...c, active: true } : c);
-      changed = true;
-    }
-  }
+  const { next, changed } = mergeEnsureCategories(categories, items);
   if (!changed) return categories;
   await adapter.writeMeta({ accounts, categories: next });
   return next;
@@ -5479,9 +5593,14 @@ var EntryModal = class extends import_obsidian5.Modal {
     else el.hide();
   }
   settleSignError(direction, outstanding) {
-    if (outstanding === 0) return t("entry.err.noOutstanding");
-    if (direction === "collect") return t("entry.err.shouldRepay");
-    return t("entry.err.shouldCollect");
+    switch (validateCollectRepayDirection(outstanding, direction)) {
+      case "shouldRepay":
+        return t("entry.err.shouldRepay");
+      case "shouldCollect":
+        return t("entry.err.shouldCollect");
+      default:
+        return t("entry.err.noOutstanding");
+    }
   }
   /** 结清对写入：方向/符号校验 → saveSettlement（派生前 ensureCategories + core 共享构造）。 */
   async submitSettlement(amount, direction) {
@@ -5637,6 +5756,12 @@ var EntryModal = class extends import_obsidian5.Modal {
       if (!s.person) return this.showError(t("entry.err.personOrCreate"));
       if ((s.direction === "collect" || s.direction === "repay") && s.settle) {
         return this.submitSettlement(amount, s.direction);
+      }
+      if (s.direction === "collect" || s.direction === "repay") {
+        const outstanding = this.outstandingOf(s.person);
+        if (validateCollectRepayDirection(outstanding, s.direction)) {
+          return this.showError(this.settleSignError(s.direction, outstanding));
+        }
       }
       base.account = s.account;
       base.person = s.person;
@@ -6524,9 +6649,7 @@ var TransactionListModal = class extends import_obsidian7.Modal {
     return labels[type];
   }
   formatTime(iso) {
-    const d = new Date(iso);
-    const pad = (x) => String(x).padStart(2, "0");
-    return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    return formatLocalTimestamp(iso, getLocale());
   }
   formatDetail(tx) {
     const accountName = (id) => {
@@ -6552,8 +6675,7 @@ var TransactionListModal = class extends import_obsidian7.Modal {
   amountClass(tx) {
     if (tx.type === "expense" || tx.type === "transfer") return "accounting-amount-negative";
     if (tx.type === "income") return "accounting-amount-positive";
-    const cashIn = tx.direction === "borrow" || tx.direction === "collect";
-    return cashIn ? "accounting-amount-positive" : "accounting-amount-negative";
+    return loanCashIn(tx.direction) ? "accounting-amount-positive" : "accounting-amount-negative";
   }
   /** 直接移除弹窗，绕过 Obsidian 默认关闭动画（与 Entry/Detail 一致），保证导航切换即时无动画。 */
   close() {
@@ -6869,7 +6991,7 @@ var AccountPropertiesModal = class extends import_obsidian9.Modal {
   select(parent) {
     const el = parent.createEl("select", { cls: "accounting-adjust-input" });
     for (const at of this.accountTypeSettings.types) {
-      el.createEl("option", { text: displayTypeLabel(at.type, at.label), value: at.type });
+      el.createEl("option", { text: displayTypeLabel2(at.type, at.label), value: at.type });
     }
     return el;
   }
@@ -7249,7 +7371,7 @@ var AccountCreateModal = class extends import_obsidian12.Modal {
   select(parent) {
     const el = parent.createEl("select", { cls: "accounting-adjust-input" });
     for (const at of this.accountTypeSettings.types) {
-      el.createEl("option", { text: displayTypeLabel(at.type, at.label), value: at.type });
+      el.createEl("option", { text: displayTypeLabel2(at.type, at.label), value: at.type });
     }
     return el;
   }
@@ -7489,7 +7611,7 @@ var BalanceModal = class extends import_obsidian13.Modal {
       const head = group.createDiv({ cls: "accounting-group-head" });
       const groupTotal = items.reduce((s, a) => s + (baseBalances.get(a.id) ?? 0), 0);
       const hasLiability = g.types.some((at) => kindOfType(at.type) === "liability");
-      head.createEl("span", { text: `${displayGroupLabel(g.id, g.label)} \xB7 ${hasLiability ? t("balance.kindLiability") : t("balance.kindAsset")}` });
+      head.createEl("span", { text: `${displayGroupLabel2(g.id, g.label)} \xB7 ${hasLiability ? t("balance.kindLiability") : t("balance.kindAsset")}` });
       head.createEl("span", { text: formatMoney(groupTotal, this.baseCurrency) });
       for (const a of items) {
         const row = group.createDiv({ cls: "accounting-row" });
@@ -7562,59 +7684,6 @@ var RANGE_OPTIONS = [
   { key: "all", i18nKey: "report.range.all" }
 ];
 var TOP_N = 5;
-var TREND_MONTHS = 6;
-function startIso(dateStr) {
-  const parts = dateStr.split("-").map(Number);
-  return localDateStartISO(parts[0] ?? 0, parts[1] ?? 1, parts[2] ?? 1);
-}
-function endExclusiveIso(dateStr) {
-  const parts = dateStr.split("-").map(Number);
-  return localDateStartISO(parts[0] ?? 0, parts[1] ?? 1, (parts[2] ?? 1) + 1);
-}
-function firstOfMonth() {
-  const d = /* @__PURE__ */ new Date();
-  const pad = (x) => String(x).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-01`;
-}
-function firstOfYear() {
-  return `${(/* @__PURE__ */ new Date()).getFullYear()}-01-01`;
-}
-function yearsAgoDateInput(n) {
-  const d = /* @__PURE__ */ new Date();
-  d.setFullYear(d.getFullYear() - n);
-  const pad = (x) => String(x).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-function trendStartYM() {
-  const d = /* @__PURE__ */ new Date();
-  d.setMonth(d.getMonth() - (TREND_MONTHS - 1));
-  const pad = (x) => String(x).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
-}
-function rangeStartDateOnly(key) {
-  switch (key) {
-    case "thisMonth":
-      return firstOfMonth();
-    case "last1m":
-      return monthsAgoDateInput(1);
-    // 与流水筛选同源（裸 setMonth、不钳制月末）
-    case "last3m":
-      return monthsAgoDateInput(3);
-    case "thisYear":
-      return firstOfYear();
-    case "last6y":
-      return yearsAgoDateInput(6);
-    // 滚动 6 年（setFullYear 钳制闰年 2/29→2/28）
-    case "all":
-      return "1970-01-01";
-  }
-}
-function rangeBounds(key) {
-  return { start: startIso(rangeStartDateOnly(key)), end: endExclusiveIso(todayDateInput()) };
-}
-function rangeDateBounds(key) {
-  return { start: rangeStartDateOnly(key), end: todayDateInput() };
-}
 var ReportModal = class extends import_obsidian14.Modal {
   constructor(app, adapter, navCtx, slide, onSwitchLedger, onOpened) {
     super(app);
@@ -7702,15 +7771,16 @@ var ReportModal = class extends import_obsidian14.Modal {
     renderNavBar(this.modalEl, "report", this.navCtx, () => this.close());
   }
   renderReport(container) {
-    const { start, end } = rangeBounds(this.range);
+    const earliest = earliestDataDate(this.transactions);
+    const { start, end } = rangeBounds(this.range, earliest);
     this.renderRangeSelector(container);
     const totals = periodTotals(this.transactions, start, end, { base: this.baseCurrency });
     this.renderTotals(container, totals);
     const incomeSlices = categoryBreakdown(this.transactions, { flow: "income", start, end, base: this.baseCurrency });
-    this.renderCategoryBars(container, t("report.incomeCategory"), incomeSlices, "income", this.expandedIncome);
+    this.renderCategoryBars(container, t("report.incomeCategory"), incomeSlices, "income", this.expandedIncome, earliest);
     const expenseSlices = categoryBreakdown(this.transactions, { flow: "expense", start, end, base: this.baseCurrency });
-    this.renderCategoryBars(container, t("report.expenseCategory"), expenseSlices, "expense", this.expandedExpense);
-    const { points: trendPoints, gran: trendGran } = this.computeTrend();
+    this.renderCategoryBars(container, t("report.expenseCategory"), expenseSlices, "expense", this.expandedExpense, earliest);
+    const { points: trendPoints, gran: trendGran } = rangeTrend(this.transactions, this.range, { base: this.baseCurrency, earliestData: earliest });
     this.renderTrend(container, trendPoints, trendGran);
   }
   renderRangeSelector(container) {
@@ -7742,7 +7812,7 @@ var ReportModal = class extends import_obsidian14.Modal {
     card.createEl("div", { text: label, cls: "accounting-stat-card-label" });
     card.createEl("div", { text: value, cls: `accounting-stat-card-value ${valueCls}` });
   }
-  renderCategoryBars(container, title, slices, flow, expanded) {
+  renderCategoryBars(container, title, slices, flow, expanded, earliest) {
     const section = container.createDiv({ cls: "accounting-section" });
     const head = section.createDiv({ cls: "accounting-group-head" });
     head.createEl("span", { text: title });
@@ -7754,7 +7824,7 @@ var ReportModal = class extends import_obsidian14.Modal {
     }
     const fillCls = flow === "expense" ? "accounting-bar-fill-expense" : "accounting-bar-fill-income";
     const shown = expanded ? slices : slices.slice(0, TOP_N);
-    const { start, end } = rangeDateBounds(this.range);
+    const { start, end } = rangeDateBounds(this.range, earliest);
     for (const s of shown) {
       const uncategorized = s.category === "";
       this.renderBar(section, uncategorized ? t("txList.uncategorized") : s.category, s.amount, s.percent, fillCls, () => {
@@ -7806,68 +7876,6 @@ var ReportModal = class extends import_obsidian14.Modal {
     const fill = track.createDiv({ cls: `accounting-bar-fill ${fillCls}` });
     const widthPct = percent > 0 ? Math.max(percent * 100, 2) : 0;
     fill.style.width = `${widthPct.toFixed(2)}%`;
-  }
-  /**
-   * 按 range 时间跨度自适应决定趋势粒度与窗口（跨度 = startDate 所在月~当前月的含首尾月数）：
-   *  - 跨度 < 6 月   → 近 6 月保底（按月；短时段列数太少无趋势意义）
-   *  - 6 ≤ 跨度 < 24 → 实际月数（按月，startDate 所在月~当前月）
-   *  - 跨度 ≥ 24 月  → 切换按年；近6年=含今年共 6 年（最少 6 年保底），全部=最早数据年到今年（按实际年数，数据不足 6 年按实际）
-   */
-  computeTrend() {
-    const now = /* @__PURE__ */ new Date();
-    const cy = now.getFullYear();
-    const cm = now.getMonth() + 1;
-    const pad = (x) => String(x).padStart(2, "0");
-    if (this.range === "last6y") {
-      return { points: yearlyTrend(this.transactions, cy - 5, 6, { base: this.baseCurrency }), gran: "year" };
-    }
-    const startDate = this.rangeStartDate();
-    const startYear = Number(startDate.slice(0, 4));
-    const startMonth = Number(startDate.slice(5, 7));
-    const spanMonths = (cy - startYear) * 12 + (cm - startMonth) + 1;
-    if (spanMonths >= 24) {
-      const yearCount = Math.max(cy - startYear + 1, 1);
-      return { points: yearlyTrend(this.transactions, startYear, yearCount, { base: this.baseCurrency }), gran: "year" };
-    }
-    if (spanMonths < 6) {
-      return { points: monthlyTrend(this.transactions, trendStartYM(), TREND_MONTHS, { base: this.baseCurrency }), gran: "month" };
-    }
-    return { points: monthlyTrend(this.transactions, `${startYear}-${pad(startMonth)}`, spanMonths, { base: this.baseCurrency }), gran: "month" };
-  }
-  /** range 起点 date-only（趋势窗口用）；全部 range 取最早有数据月（其余与三数字卡 rangeBounds 同源）。 */
-  rangeStartDate() {
-    switch (this.range) {
-      case "thisMonth":
-        return firstOfMonth();
-      case "last1m":
-        return monthsAgoDateInput(1);
-      case "last3m":
-        return monthsAgoDateInput(3);
-      case "thisYear":
-        return firstOfYear();
-      case "last6y":
-        return yearsAgoDateInput(6);
-      case "all":
-        return this.earliestDataDate();
-    }
-  }
-  /** 最早有数据月 date-only（YYYY-MM-01）；无数据回退当前月。 */
-  earliestDataDate() {
-    const now = /* @__PURE__ */ new Date();
-    let ey = now.getFullYear();
-    let em = now.getMonth() + 1;
-    for (const t2 of this.transactions) {
-      const ym = isoToMonthStr(t2.ts);
-      if (!ym) continue;
-      const y = Number(ym.slice(0, 4));
-      const m = Number(ym.slice(5, 7));
-      if (y < ey || y === ey && m < em) {
-        ey = y;
-        em = m;
-      }
-    }
-    const pad = (x) => String(x).padStart(2, "0");
-    return `${ey}-${pad(em)}-01`;
   }
   renderTrend(container, points, gran) {
     const section = container.createDiv({ cls: "accounting-section" });
