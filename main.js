@@ -23,8 +23,8 @@ __export(main_exports, {
   default: () => AccountingPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian18 = require("obsidian");
 var import_obsidian19 = require("obsidian");
+var import_obsidian20 = require("obsidian");
 
 // ../../packages/core/src/types/account.ts
 function kindOfType(type) {
@@ -704,11 +704,19 @@ function convertToBase(amount, from, base, rate) {
 function txBaseAmount(t2, base) {
   return convertToBase(t2.amount, t2.currency, base, t2.rate ?? 1);
 }
-function convertBalancesToBase(balances, accounts, rates, base) {
+function convertBalancesToBase(balances, accounts, rates, base, logger) {
   const out = /* @__PURE__ */ new Map();
+  const warned = /* @__PURE__ */ new Set();
   for (const a of accounts) {
     const bal = balances.get(a.id) ?? 0;
-    const rate = rates[a.currency]?.rate ?? 1;
+    const entry = rates[a.currency];
+    const rate = entry?.rate ?? 1;
+    if (!entry && a.currency && a.currency !== base && !warned.has(a.currency)) {
+      warned.add(a.currency);
+      const msg = `\u8D26\u6237\u5E01\u79CD ${a.currency} \u7F3A\u5931\u6C47\u7387\uFF0C\u6309 1 \u56DE\u9000`;
+      if (logger) logger.warn("fx", msg, { currency: a.currency });
+      else console.warn(`[fx] ${msg}`);
+    }
     out.set(a.id, convertToBase(bal, a.currency, base, rate));
   }
   return out;
@@ -1118,7 +1126,7 @@ function parseTagsInput(raw) {
 }
 
 // ../../packages/core/src/fold.ts
-function foldEvents(events) {
+function foldEvents(events, logger) {
   const latest = /* @__PURE__ */ new Map();
   for (const ev of events) {
     const key = ev.op === "upsert" ? ev.id : ev.targetId;
@@ -1133,7 +1141,8 @@ function foldEvents(events) {
     if (ev.op !== "upsert") continue;
     if (ev.type === "adjust") {
       if (!warnedLegacyAdjust) {
-        console.warn("[foldEvents] \u8DF3\u8FC7\u9057\u7559\u7684 adjust \u4E8B\u4EF6\uFF1B\u8BE5\u7C7B\u578B\u5DF2\u88AB\u79FB\u9664\uFF0C\u8BF7\u901A\u8FC7\u300C\u4FEE\u6539\u4F59\u989D\u300D\u91CD\u65B0\u767B\u8BB0\u3002");
+        if (logger) logger.warn("fold", "\u8DF3\u8FC7\u9057\u7559\u7684 adjust \u4E8B\u4EF6\uFF1B\u8BE5\u7C7B\u578B\u5DF2\u88AB\u79FB\u9664\uFF0C\u8BF7\u901A\u8FC7\u300C\u4FEE\u6539\u4F59\u989D\u300D\u91CD\u65B0\u767B\u8BB0\u3002");
+        else console.warn("[foldEvents] \u8DF3\u8FC7\u9057\u7559\u7684 adjust \u4E8B\u4EF6\uFF1B\u8BE5\u7C7B\u578B\u5DF2\u88AB\u79FB\u9664\uFF0C\u8BF7\u901A\u8FC7\u300C\u4FEE\u6539\u4F59\u989D\u300D\u91CD\u65B0\u767B\u8BB0\u3002");
         warnedLegacyAdjust = true;
       }
       continue;
@@ -1143,8 +1152,8 @@ function foldEvents(events) {
   entries.sort((a, b) => b[0] - a[0]);
   return entries.map(([, t2]) => t2);
 }
-function tsKey(ts) {
-  const t2 = Date.parse(ts);
+function tsKey(ts2) {
+  const t2 = Date.parse(ts2);
   return Number.isNaN(t2) ? 0 : t2;
 }
 function toTransaction(ev) {
@@ -1157,6 +1166,58 @@ function toTransaction(ev) {
     ...data
   } = ev;
   return data;
+}
+function detectTiedConflicts(events) {
+  const top = /* @__PURE__ */ new Map();
+  for (const ev of events) {
+    const key = ev.op === "upsert" ? ev.id : ev.targetId;
+    const cur = top.get(key);
+    if (!cur) {
+      top.set(key, { updatedAt: ev.updatedAt, count: 1 });
+    } else if (ev.updatedAt > cur.updatedAt) {
+      top.set(key, { updatedAt: ev.updatedAt, count: 1 });
+    } else if (ev.updatedAt === cur.updatedAt) {
+      cur.count += 1;
+    }
+  }
+  return [...top.entries()].filter(([, v]) => v.count > 1).map(([id, v]) => ({ id, count: v.count }));
+}
+
+// ../../packages/core/src/logger.ts
+var SENSITIVE_CTX_KEYS = /* @__PURE__ */ new Set([
+  "amount",
+  "toAmount",
+  "rate",
+  "openingBalance",
+  "balance",
+  "netWorth",
+  "name",
+  "accountName",
+  "categoryName",
+  "subcategoryName",
+  "personName",
+  "alias",
+  "note",
+  "remark",
+  "memo"
+]);
+var REDACTED = "[redacted]";
+function redactContext(ctx) {
+  if (!ctx) return ctx;
+  let out;
+  for (const [k, v] of Object.entries(ctx)) {
+    if (SENSITIVE_CTX_KEYS.has(k)) {
+      if (out === void 0) out = { ...ctx };
+      out[k] = REDACTED;
+    }
+  }
+  return out ?? ctx;
+}
+function levelName(level) {
+  if (level === 10 /* Debug */) return "DEBUG";
+  if (level === 20 /* Info */) return "INFO";
+  if (level === 30 /* Warn */) return "WARN";
+  return "ERROR";
 }
 
 // ../../packages/core/src/listSort.ts
@@ -1244,8 +1305,8 @@ function computeBalances(transactions, accounts) {
   }
   return balances;
 }
-function tsMs(ts) {
-  const t2 = Date.parse(ts);
+function tsMs(ts2) {
+  const t2 = Date.parse(ts2);
   return Number.isNaN(t2) ? 0 : t2;
 }
 function computeBalancesUpTo(transactions, accounts, targetTxId) {
@@ -1258,7 +1319,7 @@ function computeBalancesUpTo(transactions, accounts, targetTxId) {
 // ../../packages/core/src/networth.ts
 function computeNetWorth(transactions, accounts, opts) {
   const native = computeBalances(transactions, accounts);
-  const balances = opts?.base ? convertBalancesToBase(native, accounts, opts.rates ?? {}, opts.base) : native;
+  const balances = opts?.base ? convertBalancesToBase(native, accounts, opts.rates ?? {}, opts.base, opts.logger) : native;
   let totalAssets = 0;
   let totalLiabilities = 0;
   let creditPayable = 0;
@@ -1298,8 +1359,8 @@ function computeNetWorth(transactions, accounts, opts) {
 }
 
 // ../../packages/core/src/reports.ts
-function inRange(ts, start, endExclusive) {
-  const t2 = Date.parse(ts);
+function inRange(ts2, start, endExclusive) {
+  const t2 = Date.parse(ts2);
   if (Number.isNaN(t2)) return false;
   if (start) {
     const s = Date.parse(start);
@@ -1719,7 +1780,9 @@ function validateLedgerName(name, existing) {
   if (!n) return "err.ledger.nameEmpty";
   if (n.includes("/") || n.includes("\\")) return "err.ledger.nameSeparator";
   if (n === "." || n === ".." || n === "backups") return "err.ledger.nameReserved";
-  if (existing.includes(n)) return "err.ledger.nameExists";
+  const stripDot = (s) => s.replace(/^\.+/, "");
+  const base = stripDot(n);
+  if (existing.some((e) => stripDot(e) === base)) return "err.ledger.nameExists";
   return null;
 }
 
@@ -1761,7 +1824,7 @@ function calculateRecurringSchedule(rule, asOfDate) {
   const max = rule.maxRuns;
   if (typeof max === "number" && max <= 0) return [];
   const result = [];
-  const push = (d) => {
+  const push2 = (d) => {
     if (d.getTime() < start.getTime() || d.getTime() > end.getTime()) return true;
     result.push(d);
     if (typeof max === "number" && result.length >= max) return false;
@@ -1775,7 +1838,7 @@ function calculateRecurringSchedule(rule, asOfDate) {
     const diff = (dow - startDow + 7) % 7;
     cur.setUTCDate(cur.getUTCDate() + diff);
     while (cur.getTime() <= end.getTime()) {
-      if (!push(new Date(cur.getTime()))) break;
+      if (!push2(new Date(cur.getTime()))) break;
       cur.setUTCDate(cur.getUTCDate() + 7);
     }
     return result;
@@ -1789,7 +1852,7 @@ function calculateRecurringSchedule(rule, asOfDate) {
       const candidate = adjustMonthlyDay(y, m, dom);
       if (candidate.getTime() > end.getTime()) break;
       if (candidate.getTime() >= start.getTime()) {
-        if (!push(candidate)) break;
+        if (!push2(candidate)) break;
       }
       m += 1;
       if (m > 12) {
@@ -1810,7 +1873,7 @@ function calculateRecurringSchedule(rule, asOfDate) {
       const candidate = adjustMonthlyDay(y, moy, doy);
       if (candidate.getTime() > end.getTime()) break;
       if (candidate.getTime() >= start.getTime()) {
-        if (!push(candidate)) break;
+        if (!push2(candidate)) break;
       }
       y += 1;
       if (y > start.getUTCFullYear() + 200) break;
@@ -1885,13 +1948,13 @@ function generateDueRecurringEvents(rules, existingTxIds, asOfDate) {
       const dateStr = formatDateOnly(date);
       const txId = buildRecurringTxId(rule.id, dateStr);
       if (existingTxIds.has(txId)) continue;
-      const ts = dateToLocalISO(/* @__PURE__ */ new Date(`${dateStr}T00:00:00`));
+      const ts2 = dateToLocalISO(/* @__PURE__ */ new Date(`${dateStr}T00:00:00`));
       const note = expandNoteTemplate(rule.note, date);
       const ev = {
         op: "upsert",
         id: txId,
         type: rule.type,
-        ts,
+        ts: ts2,
         amount: round2(rule.amount),
         currency: rule.currency || "CNY",
         rate: rule.rate,
@@ -2422,6 +2485,8 @@ var zh = {
   "txList.batchDelete": "\u6279\u91CF\u5220\u9664",
   "txList.batchDeleteConfirm": "\u5C06\u5220\u9664\u9009\u4E2D\u7684 {{n}} \u7B14\u6D41\u6C34\u3002\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\uFF0C\u786E\u5B9A\uFF1F",
   "txList.batchDeleteConfirmPartner": "\u5C06\u5220\u9664\u9009\u4E2D\u7684 {{selected}} \u7B14\u6D41\u6C34\uFF0C\u5E76\u8054\u52A8\u5220\u9664\u7ED3\u6E05\u5BF9\u7AEF {{partner}} \u7B14\uFF0C\u5171 {{total}} \u7B14\u3002\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\uFF0C\u786E\u5B9A\uFF1F",
+  "tiedConflict.notice": "\u68C0\u6D4B\u5230 {{count}} \u7B14\u4EA4\u6613\u5B58\u5728\u540C\u6B65\u51B2\u7A81\uFF08\u65F6\u95F4\u6233\u76F8\u540C\uFF0C\u7ED3\u679C\u53D6\u51B3\u4E8E\u540C\u6B65\u987A\u5E8F\uFF09\u3002\u70B9\u51FB\u5E26 \u26A0\uFE0F \u7684\u6D41\u6C34\u7F16\u8F91\u5E76\u4FDD\u5B58\u53EF\u6D88\u9664\u3002",
+  "tiedConflict.badgeTip": "\u540C\u6B65\u51B2\u7A81\uFF1A\u8BE5\u8BB0\u5F55\u4E0E\u53E6\u4E00\u7AEF\u540C\u65F6\u66F4\u65B0\uFF08\u65F6\u95F4\u6233\u76F8\u540C\uFF09\uFF0C\u663E\u793A\u7ED3\u679C\u53D6\u51B3\u4E8E\u540C\u6B65\u987A\u5E8F\u3002\u70B9\u51FB\u7F16\u8F91\u5E76\u4FDD\u5B58\u5373\u53EF\u6D88\u9664\u3002",
   "txList.concurrencyConflict": "\u6240\u9009\u8BB0\u5F55\u5DF2\u88AB\u53E6\u4E00\u7AEF\u66F4\u65B0\uFF0C\u5DF2\u5237\u65B0\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u5E76\u91CD\u8BD5",
   "txList.deletedN": "\u5DF2\u5220\u9664 {{n}} \u6761",
   "txList.batchDeleteFailed": "\u6279\u91CF\u5220\u9664\u5931\u8D25\uFF1A{{msg}}",
@@ -2921,7 +2986,18 @@ var zh = {
   "settle.cat.interest": "\u5229\u606F",
   "settle.cat.gift": "\u8D60\u4E0E",
   "settle.cat.fee": "\u606F\u8D39",
-  "settle.writeoffNotePrefix": "\u7ED3\u6E05\u6838\u9500 \xB7 "
+  "settle.writeoffNotePrefix": "\u7ED3\u6E05\u6838\u9500 \xB7 ",
+  // 诊断日志调试视图（DiagLogModal）
+  "diaglog.title": "\u8BCA\u65AD\u65E5\u5FD7",
+  "diaglog.all": "\u5168\u90E8",
+  "diaglog.search": "\u641C\u7D22\u5173\u952E\u5B57",
+  "diaglog.refresh": "\u5237\u65B0",
+  "diaglog.export": "\u5BFC\u51FA",
+  "diaglog.copy": "\u590D\u5236",
+  "diaglog.empty": "\u6682\u65E0\u65E5\u5FD7",
+  "diaglog.exportDone": "\u5DF2\u5BFC\u51FA",
+  "diaglog.exportFail": "\u5BFC\u51FA\u5931\u8D25",
+  "cmd.diaglog": "\u8BCA\u65AD\u65E5\u5FD7"
 };
 var zh_default = zh;
 
@@ -3016,6 +3092,8 @@ var en = {
   "txList.batchDelete": "Batch delete",
   "txList.batchDeleteConfirm": "Delete {{n}} selected transactions? This cannot be undone. Continue?",
   "txList.batchDeleteConfirmPartner": "Will delete {{selected}} selected transactions plus {{partner}} linked settlement partner(s), {{total}} total. This cannot be undone. Continue?",
+  "tiedConflict.notice": "{{count}} transaction(s) have sync conflicts (same timestamp; result depends on sync order). Tap a row marked \u26A0\uFE0F and save to resolve.",
+  "tiedConflict.badgeTip": "Sync conflict: this record was updated on another device at the same timestamp, so the shown result depends on sync order. Edit and save to resolve.",
   "txList.concurrencyConflict": "Selected entries were updated on another device; refreshed. Please re-select and retry.",
   "txList.deletedN": "Deleted {{n}} entries",
   "txList.batchDeleteFailed": "Batch delete failed: {{msg}}",
@@ -3515,7 +3593,18 @@ var en = {
   "settle.cat.interest": "Interest",
   "settle.cat.gift": "Gift",
   "settle.cat.fee": "Fee",
-  "settle.writeoffNotePrefix": "Settlement writeoff \xB7 "
+  "settle.writeoffNotePrefix": "Settlement writeoff \xB7 ",
+  // Diagnostic logs debug view (DiagLogModal)
+  "diaglog.title": "Diagnostic logs",
+  "diaglog.all": "All",
+  "diaglog.search": "Search keyword",
+  "diaglog.refresh": "Refresh",
+  "diaglog.export": "Export",
+  "diaglog.copy": "Copy",
+  "diaglog.empty": "No logs yet",
+  "diaglog.exportDone": "Exported",
+  "diaglog.exportFail": "Export failed",
+  "cmd.diaglog": "Diagnostic logs"
 };
 var en_default = en;
 
@@ -3594,13 +3683,93 @@ function settlementLabels() {
   };
 }
 
+// src/logger.ts
+var MAX_ENTRIES = 1e3;
+var FLUSH_MS = 2e3;
+var DIR = "accounting-logs";
+var FILE = "app.log";
+var vault = null;
+var logPath = null;
+var buffer = [];
+var flushTimer = null;
+var verbose = false;
+var degraded = false;
+function initLogger(v) {
+  vault = v;
+  logPath = `${v.configDir}/${DIR}/${FILE}`;
+}
+function ts() {
+  return (/* @__PURE__ */ new Date()).toISOString();
+}
+function formatLine(e) {
+  const ctx = e.ctx ? ` ctx=${JSON.stringify(e.ctx)}` : "";
+  return `${e.ts} ${e.level} [${e.scope}] ${e.msg}${ctx}`;
+}
+function scheduleFlush() {
+  if (flushTimer || !vault || !logPath) return;
+  flushTimer = setTimeout(() => {
+    void flush();
+  }, FLUSH_MS);
+}
+async function flush() {
+  flushTimer = null;
+  if (!vault || !logPath || buffer.length === 0) return;
+  const text = buffer.map(formatLine).join("\n") + "\n";
+  try {
+    await vault.adapter.write(logPath, text);
+  } catch {
+    degraded = true;
+  }
+}
+function push(level, scope, msg, ctx) {
+  const entry = { ts: ts(), level: levelName(level), scope, msg, ctx: redactContext(ctx) };
+  buffer.push(entry);
+  if (buffer.length > MAX_ENTRIES) buffer = buffer.slice(-MAX_ENTRIES);
+  const cmsg = `[${scope}] ${msg}`;
+  if (level >= 40 /* Error */) console.error(cmsg);
+  else if (level >= 30 /* Warn */) console.warn(cmsg);
+  else console.log(cmsg);
+  if (level >= 30 /* Warn */ || verbose) {
+    scheduleFlush();
+  }
+}
+var pluginLogger = {
+  debug: (s, m, c) => push(10 /* Debug */, s, m, c),
+  info: (s, m, c) => push(20 /* Info */, s, m, c),
+  warn: (s, m, c) => push(30 /* Warn */, s, m, c),
+  error: (s, m, c) => push(40 /* Error */, s, m, c)
+};
+async function readPluginLogText() {
+  if (vault && logPath) {
+    try {
+      if (await vault.adapter.exists(logPath)) return await vault.adapter.read(logPath);
+    } catch {
+    }
+  }
+  return buffer.map(formatLine).join("\n");
+}
+async function exportPluginLog() {
+  if (!vault) throw new Error("logger \u672A\u521D\u59CB\u5316");
+  const text = await readPluginLogText();
+  const out = `# accounting diagnostic log (plugin)
+# platform=obsidian
+# exported_at=${ts()}
+# \u8131\u654F\uFF1A\u91D1\u989D/\u8D26\u6237\u540D/\u5907\u6CE8\u5DF2\u5C4F\u853D
+
+${text}
+`;
+  const path = `${DIR}-export-${Date.now()}.log`;
+  await vault.adapter.write(path, out);
+  return path;
+}
+
 // src/dataAdapter.ts
 function normalizeTxAmount(data) {
   return { ...data, amount: round2(data.amount) };
 }
 var ObsidianDataAdapter = class _ObsidianDataAdapter {
-  constructor(vault, dataSubdir, _plugin) {
-    this.vault = vault;
+  constructor(vault2, dataSubdir, _plugin) {
+    this.vault = vault2;
     this.dataSubdir = dataSubdir;
   }
   p(name) {
@@ -3636,12 +3805,14 @@ var ObsidianDataAdapter = class _ObsidianDataAdapter {
     const text = await this.readFile("transactions.jsonl");
     if (text == null) return [];
     const events = [];
-    for (const line of text.split("\n")) {
-      const t2 = line.trim();
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const t2 = (lines[i] ?? "").trim();
       if (!t2) continue;
       try {
         events.push(JSON.parse(t2));
       } catch {
+        pluginLogger.warn("adapter", "\u8DF3\u8FC7\u65E0\u6CD5\u89E3\u6790\u7684\u65E5\u5FD7\u884C", { line: i + 1 });
       }
     }
     return events;
@@ -6055,6 +6226,11 @@ var SORT_OPTIONS = [
   { value: "amount-asc", i18nKey: "txList.sort.amountAsc" }
 ];
 var PAGE_SIZE = 50;
+function nextConflictNotice(prevSig, conflicts) {
+  if (conflicts.length === 0) return { sig: "", notify: false };
+  const sig = conflicts.map((c) => c.id).slice().sort().join(",");
+  return { sig, notify: sig !== prevSig };
+}
 var TransactionListModal = class extends import_obsidian7.Modal {
   constructor(app, adapter, presetAccountId, navCtx, slide, presetRecurringRuleId, drillDown, categoryDrill, onDataChanged, onSwitchLedger, onOpened) {
     super(app);
@@ -6101,6 +6277,11 @@ var TransactionListModal = class extends import_obsidian7.Modal {
   selectedIds = /* @__PURE__ */ new Set();
   updatedAtById = /* @__PURE__ */ new Map();
   deleting = false;
+  /** 打平冲突（同 id 同 updatedAt）：折叠结果取决于文件顺序，行内 ⚠️ 标记 + 一次性 Notice 提示 */
+  tiedConflicts = [];
+  conflictIds = /* @__PURE__ */ new Set();
+  /** 上次 Notice 时的冲突签名，用于「同集合不重复打扰」 */
+  prevConflictSig = "";
   /** 在挂载到 DOM 前就预设全屏类与禁用 Obsidian 默认 modal-pop 动画，避免「先上跳再滑入」。 */
   open() {
     presetModalChrome(this.modalEl, this.containerEl);
@@ -6126,8 +6307,7 @@ var TransactionListModal = class extends import_obsidian7.Modal {
     }
     try {
       const events = await this.adapter.loadLog();
-      this.updatedAtById = latestUpdatedAtById(events);
-      this.transactions = foldEvents(events);
+      this.applyEvents(events);
       const meta = await this.adapter.readMeta();
       this.accounts = meta.accounts;
       this.accountById = new Map(this.accounts.map((a) => [a.id, a]));
@@ -6572,6 +6752,13 @@ var TransactionListModal = class extends import_obsidian7.Modal {
       text: this.typeLabel(tx.type),
       cls: `accounting-tx-type accounting-tx-${tx.type}`
     });
+    if (this.conflictIds.has(tx.id)) {
+      left.createEl("span", {
+        text: "\u26A0\uFE0F",
+        cls: "accounting-tx-conflict-mark",
+        attr: { title: t("tiedConflict.badgeTip"), "aria-label": t("tiedConflict.badgeTip") }
+      });
+    }
     left.createEl("div", {
       text: this.formatTime(tx.ts),
       cls: "accounting-tx-time"
@@ -6626,11 +6813,22 @@ var TransactionListModal = class extends import_obsidian7.Modal {
       sort: this.filter.sort
     });
   }
+  /** 应用 freshly-loaded 事件：折叠交易 + 更新 updatedAt 索引 + 检测打平冲突（行角标 + 一次性 Notice）。 */
+  applyEvents(events) {
+    this.updatedAtById = latestUpdatedAtById(events);
+    this.transactions = foldEvents(events);
+    this.tiedConflicts = detectTiedConflicts(events);
+    this.conflictIds = new Set(this.tiedConflicts.map((c) => c.id));
+    const { sig, notify } = nextConflictNotice(this.prevConflictSig, this.tiedConflicts);
+    if (notify) {
+      new import_obsidian7.Notice(t("tiedConflict.notice", { count: this.tiedConflicts.length }), 5e3);
+    }
+    this.prevConflictSig = sig;
+  }
   async reloadAndRender() {
     try {
       const events = await this.adapter.loadLog();
-      this.updatedAtById = latestUpdatedAtById(events);
-      this.transactions = foldEvents(events);
+      this.applyEvents(events);
       this.accountById = new Map(this.accounts.map((a) => [a.id, a]));
       this.applyFilter();
       this.render();
@@ -8324,9 +8522,9 @@ var AccountingSettings = class {
   /** 优先用最新的 dataSubdir 重建 adapter（切换账本后立即生效），
    *  无 vault（测试环境）则回退到构造时注入的 adapter。 */
   currentAdapter() {
-    const vault = this.app?.vault;
-    if (vault) {
-      return new ObsidianDataAdapter(vault, this.plugin.settings.dataSubdir);
+    const vault2 = this.app?.vault;
+    if (vault2) {
+      return new ObsidianDataAdapter(vault2, this.plugin.settings.dataSubdir);
     }
     return this.injectedAdapter;
   }
@@ -9922,15 +10120,99 @@ var OnboardingModal = class extends import_obsidian17.Modal {
   }
 };
 
+// src/diagLogModal.ts
+var import_obsidian18 = require("obsidian");
+var LEVELS = ["ALL", "ERROR", "WARN", "INFO", "DEBUG"];
+var TONE = {
+  ERROR: "#dc2626",
+  WARN: "#d97706",
+  INFO: "#3b82f6",
+  DEBUG: "#a3a3a3"
+};
+function lineLevel(line) {
+  return line.split(/\s+/)[1] ?? null;
+}
+var DiagLogModal = class extends import_obsidian18.Modal {
+  level = "ALL";
+  keyword = "";
+  listEl;
+  constructor(app) {
+    super(app);
+  }
+  async onOpen() {
+    this.titleEl.setText(t("diaglog.title"));
+    const { contentEl } = this;
+    contentEl.empty();
+    const toolbar = contentEl.createDiv({ cls: "diaglog-toolbar" });
+    const seg = toolbar.createDiv({ cls: "diaglog-seg" });
+    for (const l of LEVELS) {
+      const b = seg.createEl("button", { text: l === "ALL" ? t("diaglog.all") : l, cls: "diaglog-seg-btn" });
+      b.onclick = () => {
+        this.level = l;
+        this.updateSegActive(seg);
+        void this.render();
+      };
+    }
+    this.updateSegActive(seg);
+    const search = toolbar.createEl("input", { cls: "diaglog-search" });
+    search.placeholder = t("diaglog.search");
+    search.oninput = () => {
+      this.keyword = search.value;
+      void this.render();
+    };
+    const refresh = toolbar.createEl("button", { text: t("diaglog.refresh"), cls: "accounting-btn" });
+    refresh.onclick = () => void this.render();
+    const exportBtn = toolbar.createEl("button", { text: t("diaglog.export"), cls: "accounting-btn" });
+    exportBtn.onclick = async () => {
+      try {
+        const path = await exportPluginLog();
+        new import_obsidian18.Notice(`${t("diaglog.exportDone")}: ${path}`);
+      } catch {
+        new import_obsidian18.Notice(t("diaglog.exportFail"));
+      }
+    };
+    this.listEl = contentEl.createDiv({ cls: "diaglog-list" });
+    await this.render();
+  }
+  updateSegActive(seg) {
+    seg.querySelectorAll("button").forEach((b, i) => {
+      b.classList.toggle("is-active", LEVELS[i] === this.level);
+    });
+  }
+  async render() {
+    const text = await readPluginLogText();
+    const kw = this.keyword.trim().toLowerCase();
+    const lines = text.split("\n").filter((l) => {
+      if (!l.trim()) return false;
+      if (this.level !== "ALL" && lineLevel(l) !== this.level) return false;
+      if (kw && !l.toLowerCase().includes(kw)) return false;
+      return true;
+    });
+    this.listEl.empty();
+    if (lines.length === 0) {
+      this.listEl.createEl("div", { text: t("diaglog.empty"), cls: "diaglog-empty" });
+      return;
+    }
+    for (const ln of lines) {
+      const lv = lineLevel(ln);
+      const color = lv && TONE[lv] || "inherit";
+      const div = this.listEl.createDiv({ text: ln, cls: "diaglog-line" });
+      div.style.color = color;
+    }
+  }
+};
+
 // src/main.ts
 var DEFAULT_SETTINGS = { dataSubdir: ".data", autoOpenOnStartup: true, onboardingCompleted: false, locale: defaultLocale };
 var DEFAULT_LEDGER_NAME = ".myledger";
-var AccountingPlugin = class extends import_obsidian18.Plugin {
+var AccountingPlugin = class extends import_obsidian19.Plugin {
   settingsTab;
   /** 引导期间的背景设置页（应用主界面）；引导完成后按需刷新/关闭，避免双 Modal 堆叠。 */
   onboardingBackdrop = null;
   async onload() {
     await this.loadSettings();
+    initLogger(this.app.vault);
+    this.addCommand({ id: "open-diaglog", name: t("cmd.diaglog"), callback: () => new DiagLogModal(this.app).open() });
     this.addCommand({
       id: "open",
       name: t("cmd.open"),
@@ -9942,12 +10224,12 @@ var AccountingPlugin = class extends import_obsidian18.Plugin {
         try {
           await this.autoMigrateLedgerDirs();
         } catch (error) {
-          console.error("\u81EA\u52A8\u8FC1\u79FB\u8D26\u672C\u5931\u8D25:", error);
+          pluginLogger.error("migrate", "\u81EA\u52A8\u8FC1\u79FB\u8D26\u672C\u5931\u8D25", { err: String(error) });
         }
         try {
           await this.selfHealActiveLedger();
         } catch (error) {
-          console.error("\u81EA\u6108\u5F53\u524D\u8D26\u672C\u5931\u8D25:", error);
+          pluginLogger.error("selfheal", "\u81EA\u6108\u5F53\u524D\u8D26\u672C\u5931\u8D25", { err: String(error) });
         }
         if (!this.settings.onboardingCompleted) {
           this.showOnboardingModal();
@@ -9976,7 +10258,7 @@ var AccountingPlugin = class extends import_obsidian18.Plugin {
         void this.handleOnboardingResult(result);
       }).open();
     } catch (error) {
-      console.error("\u663E\u793A\u5F15\u5BFC Modal \u5931\u8D25:", error);
+      pluginLogger.error("onboarding", "\u663E\u793A\u5F15\u5BFC Modal \u5931\u8D25", { err: String(error) });
     }
   }
   /** 引导完成：落盘标记与所选账本，并重建 settingsTab。
@@ -10003,7 +10285,7 @@ var AccountingPlugin = class extends import_obsidian18.Plugin {
         this.settingsTab = new AccountingSettings(this.app, this, adapter);
       }
     } catch (error) {
-      console.error("\u5F15\u5BFC\u5B8C\u6210\u5904\u7406\u5931\u8D25:", error);
+      pluginLogger.error("onboarding", "\u5F15\u5BFC\u5B8C\u6210\u5904\u7406\u5931\u8D25", { err: String(error) });
     }
     if (ledgerChanged) {
       this.openSettings();
@@ -10024,10 +10306,10 @@ var AccountingPlugin = class extends import_obsidian18.Plugin {
         await this.saveSettings();
       }
       if (migrated.length > 0) {
-        new import_obsidian18.Notice(t("notice.migratedN", { n: migrated.length }));
+        new import_obsidian19.Notice(t("notice.migratedN", { n: migrated.length }));
       }
       if (failed.length > 0) {
-        new import_obsidian18.Notice(t("notice.migrateFailed", { n: failed.length, list: failed.join(", ") }));
+        new import_obsidian19.Notice(t("notice.migrateFailed", { n: failed.length, list: failed.join(", ") }));
       }
     } catch (error) {
       console.error("\u81EA\u52A8\u8FC1\u79FB\u8D26\u672C\u5931\u8D25:", error);
@@ -10047,7 +10329,7 @@ var AccountingPlugin = class extends import_obsidian18.Plugin {
     this.settings.dataSubdir = target;
     await this.saveSettings();
     this.settingsTab = new AccountingSettings(this.app, this, new ObsidianDataAdapter(this.app.vault, this.settings.dataSubdir, this));
-    new import_obsidian18.Notice(t("notice.selfHealed", { alias }));
+    new import_obsidian19.Notice(t("notice.selfHealed", { alias }));
   }
   /** 导航上下文：三个目标的打开回调，注入到各 Modal 使其底部导航条可用。public 供设置页「查看」跳转复用。 */
   navCtx(adapter) {
@@ -10076,7 +10358,7 @@ var AccountingPlugin = class extends import_obsidian18.Plugin {
       if (cfg.lastSuccess?.slice(0, 10) === today) return;
       const baseCurrency = await adapter.readBaseCurrency();
       const url = `https://api.frankfurter.app/latest?from=${baseCurrency.toUpperCase()}`;
-      const resp = await (0, import_obsidian19.requestUrl)({ url, method: "GET" });
+      const resp = await (0, import_obsidian20.requestUrl)({ url, method: "GET" });
       const fetched = parseRateResponse(resp.json, baseCurrency, nowISO());
       if (!fetched) return;
       const rates = await adapter.readRates();
@@ -10084,9 +10366,9 @@ var AccountingPlugin = class extends import_obsidian18.Plugin {
       if (updated === 0) return;
       await adapter.writeRates(merged);
       await adapter.writeRateConfig({ ...cfg, lastSuccess: nowISO() });
-      console.log(`\u81EA\u52A8\u5237\u65B0\u6C47\u7387\uFF1A\u5DF2\u66F4\u65B0 ${updated} \u4E2A\u5E01\u79CD`);
+      pluginLogger.info("rates", `\u81EA\u52A8\u5237\u65B0\u6C47\u7387\uFF1A\u5DF2\u66F4\u65B0 ${updated} \u4E2A\u5E01\u79CD`);
     } catch (e) {
-      console.warn("\u81EA\u52A8\u5237\u65B0\u6C47\u7387\u5931\u8D25", e);
+      pluginLogger.warn("rates", "\u81EA\u52A8\u5237\u65B0\u6C47\u7387\u5931\u8D25", { err: String(e) });
     }
   }
   /** 启动回填：扫描周期账规则并自动生成到期交易（仅运行一次） */
@@ -10097,10 +10379,10 @@ var AccountingPlugin = class extends import_obsidian18.Plugin {
       const generated = generateDueRecurringEvents(rules, existingIds, /* @__PURE__ */ new Date());
       if (generated.length > 0) {
         await adapter.appendEvents(generated);
-        console.log(`\u542F\u52A8\u56DE\u586B\uFF1A\u81EA\u52A8\u751F\u6210 ${generated.length} \u7B14\u5468\u671F\u8D26\u4EA4\u6613`);
+        pluginLogger.info("backfill", `\u542F\u52A8\u56DE\u586B\uFF1A\u81EA\u52A8\u751F\u6210 ${generated.length} \u7B14\u5468\u671F\u8D26\u4EA4\u6613`);
       }
     } catch (error) {
-      console.error("\u542F\u52A8\u56DE\u586B\u5468\u671F\u8D26\u5931\u8D25", error);
+      pluginLogger.error("backfill", "\u542F\u52A8\u56DE\u586B\u5468\u671F\u8D26\u5931\u8D25", { err: String(error) });
     }
   }
   /** 切换账本：更新当前 dataSubdir 并落盘。目标页的重开由各调用方用新 adapter 完成（重建 navCtx），与记账页切换同一根基。 */

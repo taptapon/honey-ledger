@@ -3507,3 +3507,56 @@ details[open] > .accounting-collapsible-head::before {
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
 }
+
+/* 诊断日志调试视图（DiagLogModal） */
+.diaglog-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.diaglog-seg {
+  display: inline-flex;
+  gap: 0.125rem;
+  padding: 0.125rem;
+  border-radius: var(--radius-m, 8px);
+  background: var(--background-modifier-hover);
+}
+.diaglog-seg-btn {
+  border: none;
+  background: transparent;
+  padding: 0.25rem 0.5rem;
+  font-size: var(--font-ui-smaller);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.diaglog-seg-btn.is-active {
+  background: var(--background-primary);
+  color: var(--text-normal);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+.diaglog-search {
+  flex: 1;
+  min-width: 10rem;
+}
+.diaglog-list {
+  max-height: 60vh;
+  overflow: auto;
+  padding: 0.75rem;
+  border-radius: var(--radius-m, 8px);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.5;
+}
+.diaglog-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.diaglog-empty {
+  color: var(--text-muted);
+  text-align: center;
+}
