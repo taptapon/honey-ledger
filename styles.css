@@ -1309,8 +1309,11 @@
   flex: 1;
 }
 
-/* 日期范围组独占一行，避免与三个快捷按钮挤在同一行被裁断。 */
-.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-date-range-wrap {
+/* 日期范围组独占一行，避免与快捷按钮挤在同一行被裁断。
+   不加 :not(.accounting-desktop) 守卫：桌面端 50vh 窄面板同样放不下「快捷按钮 + 日期组」一行，
+   日期框 flex-shrink:0 不可压缩会溢出、被 .accounting-transaction-modal 的 overflow:hidden 裁断
+   显成残缺按钮。两端窄面板统一强制换行。 */
+.modal.accounting-fullscreen .accounting-date-range-wrap {
   flex-basis: 100%;
 }
 
@@ -3708,10 +3711,4 @@ details[open] > .accounting-collapsible-head::before {
 .accounting-diaglog-empty {
   color: var(--text-muted);
   text-align: center;
-}
-/* 关于页诊断卡说明文字：.accounting-ledger-list 无横向 padding，需自补内容缩进。 */
-.accounting-diaglog-desc {
-  padding: var(--ac-card-pad-y) var(--ac-card-content-x);
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
 }
