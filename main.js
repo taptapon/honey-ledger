@@ -2476,6 +2476,45 @@ function buildBatchUpsertEvents(input) {
   return { events, skipped };
 }
 
+// ../../packages/core/src/backupConfig.ts
+var DEFAULT_BACKUP_CONFIG = {
+  backupEnabled: true,
+  backupIntervalDays: 1,
+  backupKeep: 7
+};
+function mergeBackupConfig(raw) {
+  const cfg = { ...DEFAULT_BACKUP_CONFIG };
+  if (!raw || typeof raw !== "object") return cfg;
+  const r = raw;
+  if (typeof r["backupEnabled"] === "boolean") {
+    cfg.backupEnabled = r["backupEnabled"];
+  }
+  cfg.backupIntervalDays = clampPositiveInt(r["backupIntervalDays"], DEFAULT_BACKUP_CONFIG.backupIntervalDays);
+  cfg.backupKeep = clampPositiveInt(r["backupKeep"], DEFAULT_BACKUP_CONFIG.backupKeep);
+  return cfg;
+}
+function clampPositiveInt(v, fallback) {
+  if (typeof v !== "number" || !Number.isFinite(v)) return fallback;
+  const n = Math.floor(v);
+  return n < 1 ? fallback : n;
+}
+
+// ../../packages/core/src/backupScheduling.ts
+var MS_PER_DAY = 864e5;
+function shouldAutoBackup(input) {
+  if (!input.config.backupEnabled) return false;
+  if (input.lastBackupMs <= 0) return true;
+  const intervalMs = input.config.backupIntervalDays * MS_PER_DAY;
+  return input.nowMs - input.lastBackupMs > intervalMs;
+}
+function selectAutoBackupsToPrune(entries, keep) {
+  if (keep < 1) return [];
+  const autos = entries.filter((e) => e.name.startsWith("auto-"));
+  if (autos.length <= keep) return [];
+  const sorted = [...autos].sort((a, b) => b.mtime - a.mtime);
+  return sorted.slice(keep);
+}
+
 // ../../packages/core/src/changelog.ts
 var MOBILE_RECENT_UPDATES = [
   { i18nKey: "settings.about.update.m1" },
@@ -2855,11 +2894,19 @@ var zh = {
   "settings.onboarding.resetFailed": "\u64CD\u4F5C\u5931\u8D25\uFF1A{{msg}}",
   // KR7/task2: settings — 备份卡片 + 处理器 + BackupModal
   "settings.backup.title": "\u5907\u4EFD",
-  "settings.backup.helpDetail": "\u5907\u4EFD\u5B58\u50A8\u5728\u8D26\u672C\u76EE\u5F55\u7684 backups/<label>-<timestamp> \u5B50\u76EE\u5F55\u3002\u6062\u590D\u524D\u4F1A\u81EA\u52A8\u521B\u5EFA pre-restore \u515C\u5E95\u5907\u4EFD\u3002",
+  "settings.backup.helpDetail": "\u5907\u4EFD\u5B58\u50A8\u5728\u8D26\u672C\u76EE\u5F55\u7684 backups/<label>-<timestamp> \u5B50\u76EE\u5F55\u3002\u6062\u590D\u524D\u4F1A\u81EA\u52A8\u521B\u5EFA pre-restore \u515C\u5E95\u5907\u4EFD\u3002\u300C\u81EA\u52A8\u5907\u4EFD\u300D\u5728\u6253\u5F00\u8BB0\u8D26\u754C\u9762\u65F6\uFF0C\u82E5\u8DDD\u4E0A\u6B21\u5907\u4EFD\u8D85\u8FC7\u8BBE\u5B9A\u95F4\u9694\u5219\u81EA\u52A8\u5907\u4EFD\u4E00\u4EFD\uFF08\u6807\u8BB0\u4E3A auto\uFF0C\u4EC5\u4FDD\u7559\u6700\u8FD1\u82E5\u5E72\u4EFD\u3001\u81EA\u52A8\u6E05\u7406\u6700\u65E7\u7684\uFF1B\u4E24\u7AEF\u5171\u4EAB\u8BBE\u7F6E\uFF0C\u5B58\u4E8E ledger.json\uFF09\u3002\u6CE8\u610F\uFF1AiOS \u540E\u53F0\u4E0D\u4F1A\u89E6\u53D1\uFF0C\u4EC5 Obsidian \u6253\u5F00\u65F6\u68C0\u67E5\u3002",
   "settings.backup.createBtn": "\u2913 \u7ACB\u5373\u5907\u4EFD",
   "settings.backup.listBtn": "\u21A9 \u67E5\u770B\u5907\u4EFD",
   "settings.backup.createdNotice": "\u5DF2\u521B\u5EFA\u5907\u4EFD\uFF1A{{path}}",
   "settings.backup.createFailed": "\u5907\u4EFD\u5931\u8D25\uFF1A{{msg}}",
+  "settings.backup.autoEnable": "\u6253\u5F00\u65F6\u81EA\u52A8\u5907\u4EFD",
+  "settings.backup.autoInterval": "\u95F4\u9694",
+  "settings.backup.autoKeep": "\u4FDD\u7559",
+  "settings.backup.intervalDays": "{{count}} \u5929",
+  "settings.backup.keepCount": "\u6700\u8FD1 {{count}} \u4EFD",
+  "settings.backup.loadFailed": "\u8BFB\u53D6\u81EA\u52A8\u5907\u4EFD\u8BBE\u7F6E\u5931\u8D25\uFF1A{{msg}}",
+  "settings.backup.configSaved": "\u5DF2\u4FDD\u5B58\u81EA\u52A8\u5907\u4EFD\u8BBE\u7F6E",
+  "settings.backup.configSaveFailed": "\u4FDD\u5B58\u81EA\u52A8\u5907\u4EFD\u8BBE\u7F6E\u5931\u8D25\uFF1A{{msg}}",
   "settings.backup.modalTitle": "\u9009\u62E9\u5907\u4EFD\u6062\u590D",
   "settings.backup.empty": "\u6682\u65E0\u5907\u4EFD",
   "settings.backup.restoreBtn": "\u6062\u590D",
@@ -3471,11 +3518,19 @@ var en = {
   "settings.onboarding.resetFailed": "Action failed: {{msg}}",
   // KR7/task2: settings — Backup card + handlers + BackupModal
   "settings.backup.title": "Backups",
-  "settings.backup.helpDetail": "Backups are stored in the ledger directory under backups/<label>-<timestamp>. A pre-restore safety backup is auto-created before restoring.",
+  "settings.backup.helpDetail": 'Backups are stored in the ledger directory under backups/<label>-<timestamp>. A pre-restore safety backup is auto-created before restoring. "Auto-backup" creates one on opening the accounting view if more than the chosen interval has passed since the last backup (labeled auto; only the latest few are kept, oldest pruned; setting shared by both ends, stored in ledger.json). Note: iOS does not trigger this in the background \u2014 it only runs when Obsidian is open.',
   "settings.backup.createBtn": "\u2913 Back up now",
   "settings.backup.listBtn": "\u21A9 View backups",
   "settings.backup.createdNotice": "Backup created: {{path}}",
   "settings.backup.createFailed": "Backup failed: {{msg}}",
+  "settings.backup.autoEnable": "Auto-backup on open",
+  "settings.backup.autoInterval": "Interval",
+  "settings.backup.autoKeep": "Keep",
+  "settings.backup.intervalDays": "{{count}} days",
+  "settings.backup.keepCount": "Latest {{count}}",
+  "settings.backup.loadFailed": "Failed to load auto-backup settings: {{msg}}",
+  "settings.backup.configSaved": "Auto-backup settings saved",
+  "settings.backup.configSaveFailed": "Failed to save auto-backup settings: {{msg}}",
   "settings.backup.modalTitle": "Restore a backup",
   "settings.backup.empty": "No backups",
   "settings.backup.restoreBtn": "Restore",
@@ -3979,6 +4034,17 @@ var ObsidianDataAdapter = class _ObsidianDataAdapter {
     await this.vault.adapter.write(
       this.p("ledger.json"),
       JSON.stringify({ ...existing, baseCurrency: base }, null, 2)
+    );
+  }
+  async readBackupConfig() {
+    const data = await this.readLedgerJson(this.dataSubdir);
+    return mergeBackupConfig(data);
+  }
+  async writeBackupConfig(config) {
+    const existing = await this.readLedgerJson(this.dataSubdir);
+    await this.vault.adapter.write(
+      this.p("ledger.json"),
+      JSON.stringify({ ...existing, ...config }, null, 2)
     );
   }
   async readRateConfig() {
@@ -9081,14 +9147,26 @@ var AccountingSettings = class {
     const diagCardEl = panel.createDiv("accounting-ledger-card");
     const diagHeadEl = diagCardEl.createDiv("accounting-ledger-card-head");
     diagHeadEl.createEl("span", { text: t("settings.about.diaglog"), cls: "accounting-ledger-card-title" });
+    appendHeaderHelp(diagHeadEl, { detail: t("settings.about.diaglogDesc") });
     const diagBodyEl = diagCardEl.createDiv("accounting-ledger-list");
-    diagBodyEl.createDiv({ text: t("settings.about.diaglogDesc"), cls: "accounting-diaglog-desc" });
     const diagActionsEl = diagBodyEl.createDiv("accounting-ledger-card-actions");
     const diagBtn = diagActionsEl.createEl("button", {
       text: t("settings.about.diaglogBtn"),
       cls: "accounting-btn accounting-btn-secondary"
     });
     diagBtn.onclick = () => new DiagLogModal(this.app).open();
+    const diagExportBtn = diagActionsEl.createEl("button", {
+      text: t("diaglog.export"),
+      cls: "accounting-btn accounting-btn-secondary"
+    });
+    diagExportBtn.onclick = async () => {
+      try {
+        const path = await exportPluginLog();
+        new import_obsidian17.Notice(`${t("diaglog.exportDone")}: ${path}`);
+      } catch {
+        new import_obsidian17.Notice(t("diaglog.exportFail"));
+      }
+    };
   }
   /** 账本管理 panel：账本卡片（新建/刷新/切换/改名/删除）。 */
   renderLedgerPanel(panel, onSwitchLedger) {
@@ -9204,6 +9282,48 @@ var AccountingSettings = class {
     listBackupBtn.onclick = () => {
       void this.showBackupList();
     };
+    const autoSectionEl = backupBodyEl.createDiv("accounting-backup-auto");
+    void (async () => {
+      const adapter = this.currentAdapter();
+      let cfg;
+      try {
+        cfg = await adapter.readBackupConfig();
+      } catch (error) {
+        autoSectionEl.createEl("p", { text: t("settings.backup.loadFailed", { msg: formatError(error) }), cls: "accounting-ledger-empty" });
+        return;
+      }
+      const enableRow = autoSectionEl.createDiv("accounting-settings-row");
+      const enableCb = enableRow.createEl("input", { cls: "accounting-checkbox" });
+      enableCb.type = "checkbox";
+      enableCb.checked = cfg.backupEnabled;
+      enableRow.createEl("span", { text: t("settings.backup.autoEnable"), cls: "accounting-currency-online-label" });
+      const optionsRow = autoSectionEl.createDiv("accounting-settings-row accounting-backup-options");
+      const intervalGroup = optionsRow.createDiv("accounting-backup-option");
+      intervalGroup.createEl("span", { text: t("settings.backup.autoInterval"), cls: "accounting-currency-online-label" });
+      const intervalSel = intervalGroup.createEl("select", { cls: "accounting-ledger-input" });
+      for (const d of [1, 3, 7, 14, 30]) {
+        const opt = intervalSel.createEl("option", { value: String(d), text: t("settings.backup.intervalDays", { count: d }) });
+        if (d === cfg.backupIntervalDays) opt.selected = true;
+      }
+      const keepGroup = optionsRow.createDiv("accounting-backup-option");
+      keepGroup.createEl("span", { text: t("settings.backup.autoKeep"), cls: "accounting-currency-online-label" });
+      const keepSel = keepGroup.createEl("select", { cls: "accounting-ledger-input" });
+      for (const k of [3, 5, 7, 10, 15, 30]) {
+        const opt = keepSel.createEl("option", { value: String(k), text: t("settings.backup.keepCount", { count: k }) });
+        if (k === cfg.backupKeep) opt.selected = true;
+      }
+      const persist = async (next) => {
+        try {
+          await adapter.writeBackupConfig(next);
+          new import_obsidian17.Notice(t("settings.backup.configSaved"));
+        } catch (e) {
+          new import_obsidian17.Notice(t("settings.backup.configSaveFailed", { msg: formatError(e) }));
+        }
+      };
+      enableCb.onchange = () => void persist({ ...cfg, backupEnabled: enableCb.checked });
+      intervalSel.onchange = () => void persist({ ...cfg, backupIntervalDays: Number(intervalSel.value) });
+      keepSel.onchange = () => void persist({ ...cfg, backupKeep: Number(keepSel.value) });
+    })();
   }
   /** 币种 panel：本位币下拉 + 汇率表编辑器（手动维护「1 外币 = rate 本位币」，随 iCloud 与桌面端同步）。 */
   renderCurrencyPanel(panel) {
@@ -10690,6 +10810,29 @@ var AccountingPlugin = class extends import_obsidian19.Plugin {
     await openEntry(this.app, adapter, void 0, this.navCtx(adapter), void 0, this.switchLedgerAndReopen, () => this.settingsTab.showRecurring(), onOpened);
     void this.tryAutoRefreshRates(adapter);
     await this.runStartupBackfill(adapter);
+    void this.tryAutoBackup(adapter);
+  }
+  /** 机会式自动备份：读配置 → 超间隔则 backup('auto') → 按 keep 清理最旧 auto。
+   *  空账本 / 关闭 / 未到间隔均跳过；失败静默（仅诊断日志）。 */
+  async tryAutoBackup(adapter) {
+    try {
+      const config = await adapter.readBackupConfig();
+      if (!config.backupEnabled) return;
+      const events = await adapter.loadLog();
+      if (events.length === 0) return;
+      let backups = await adapter.listBackups();
+      const lastBackupMs = backups.reduce((m, b) => Math.max(m, b.mtime), 0);
+      if (shouldAutoBackup({ lastBackupMs, nowMs: Date.now(), config })) {
+        await adapter.backup("auto");
+        backups = await adapter.listBackups();
+      }
+      const toPrune = selectAutoBackupsToPrune(backups, config.backupKeep);
+      for (const p of toPrune) {
+        await adapter.deleteBackup(p.name);
+      }
+    } catch (e) {
+      pluginLogger.warn("backup", "\u81EA\u52A8\u5907\u4EFD\u5931\u8D25", { err: String(e) });
+    }
   }
   /** 自动刷新汇率：若 autoRefresh 开启且当天未成功刷新，则后台刷新（静默，失败不提示） */
   async tryAutoRefreshRates(adapter) {

@@ -2118,6 +2118,8 @@
   color: var(--text-normal);
   cursor: pointer;
   font-size: var(--font-ui-smaller);
+  /* iOS/WebView 点击会留深色高亮块，像「被选中」残留——显式透明掉，只让真正的选中态显色。 */
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* hover 仅在真有指针的设备生效：触屏（iOS WebView）点击后 :hover 会粘住，
@@ -2131,11 +2133,29 @@
 
 .accounting-nav-btn.accounting-nav-current,
 .accounting-nav-btn:disabled {
+  cursor: default;
+}
+
+/* 选中态仅认 .accounting-nav-current（蓝底白字），不与 :disabled 共色——
+   否则任何被禁用的按钮都会染成选中蓝，造成「非选中按钮像被选中」的误判。
+   当前选中的按钮虽也 disabled，但这条规则更靠后、特异性相同，故覆盖上方的弱化。 */
+.accounting-nav-btn:disabled {
+  opacity: 0.5;
+}
+.accounting-nav-btn.accounting-nav-current {
   background: var(--interactive-accent);
   color: var(--text-on-accent);
   border-color: var(--interactive-accent);
-  cursor: default;
   opacity: 1;
+}
+
+/* 底部导航条按钮不挂焦点环：Modal 打开时首个可聚焦元素会落到 nav 第二个按钮（记账
+   disabled 不可聚焦 → 焦点落到流水），全局焦点环会把流水染成淡蓝，像被选中。选中态已
+   用蓝底白字表达，焦点环对触屏导航条多余且易误判，去掉。特异性 (0,3,0) 高于全局焦点环 (0,2,1)。 */
+.accounting-nav-bar .accounting-nav-btn:focus,
+.accounting-nav-bar .accounting-nav-btn:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 /* drill-down 流水页聚焦模式的右下角「‹ 返回」：固定在底部右侧（拇指易够），
@@ -2725,6 +2745,25 @@ details[open] > .accounting-collapsible-head::before {
 
 .accounting-backup-card-actions button {
   width: 100%;
+}
+
+/* 自动备份分区：合并进备份卡 body，上边框分隔 + 卡片内容缩进（与 .accounting-currency-online 同构）。
+   .accounting-settings-row 自身无水平 padding，靠此容器的 --ac-card-content-x 提供左右缩进。 */
+.accounting-backup-auto {
+  padding: var(--ac-card-pad-y) var(--ac-card-content-x);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* 自动备份「间隔 / 保留」一行：两组在行内均匀分布（space-between），每组 label+select 紧凑成组。
+   只覆盖 justify-content，不影响共享的 .accounting-settings-row（开关行 / 币种行仍默认左对齐）。 */
+.accounting-backup-options {
+  justify-content: space-between;
+}
+
+.accounting-backup-option {
+  display: flex;
+  align-items: center;
+  gap: var(--ac-gap-md);
 }
 
 .accounting-ledger-create {
