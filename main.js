@@ -1357,6 +1357,70 @@ function computeNetWorth(transactions, accounts, opts) {
     payables: payables.map((p) => ({ ...p, amount: round2(p.amount) }))
   };
 }
+function tsMs2(ts2) {
+  const t2 = Date.parse(ts2);
+  return Number.isNaN(t2) ? 0 : t2;
+}
+var pad2 = (n) => String(n).padStart(2, "0");
+function netWorthSeries(transactions, accounts, startYM, monthsCount, opts) {
+  const parts = startYM.split("-").map(Number);
+  const sy = parts[0] ?? 0;
+  const sm = parts[1] ?? 1;
+  const sorted = [...transactions].sort((a, b) => tsMs2(a.ts) - tsMs2(b.ts));
+  const points = [];
+  const cumulative = [];
+  let cursor = 0;
+  for (let i = 0; i < monthsCount; i++) {
+    const d = new Date(Date.UTC(sy, sm - 1 + i, 1));
+    const y = d.getUTCFullYear();
+    const m = d.getUTCMonth() + 1;
+    const cutoff = Date.parse(localDateStartISO(y, m + 1, 1));
+    while (cursor < sorted.length) {
+      const t2 = sorted[cursor];
+      if (t2 && tsMs2(t2.ts) < cutoff) {
+        cumulative.push(t2);
+        cursor += 1;
+      } else {
+        break;
+      }
+    }
+    const nw = computeNetWorth(cumulative, accounts, opts);
+    points.push({
+      bucket: `${y}-${pad2(m)}`,
+      totalAssets: nw.totalAssets,
+      totalLiabilities: nw.totalLiabilities,
+      netWorth: nw.netWorth
+    });
+  }
+  return points;
+}
+function netWorthYearlySeries(transactions, accounts, startYear, yearsCount, opts) {
+  const sorted = [...transactions].sort((a, b) => tsMs2(a.ts) - tsMs2(b.ts));
+  const points = [];
+  const cumulative = [];
+  let cursor = 0;
+  for (let i = 0; i < yearsCount; i++) {
+    const y = startYear + i;
+    const cutoff = Date.parse(localDateStartISO(y + 1, 1, 1));
+    while (cursor < sorted.length) {
+      const t2 = sorted[cursor];
+      if (t2 && tsMs2(t2.ts) < cutoff) {
+        cumulative.push(t2);
+        cursor += 1;
+      } else {
+        break;
+      }
+    }
+    const nw = computeNetWorth(cumulative, accounts, opts);
+    points.push({
+      bucket: String(y),
+      totalAssets: nw.totalAssets,
+      totalLiabilities: nw.totalLiabilities,
+      netWorth: nw.netWorth
+    });
+  }
+  return points;
+}
 
 // ../../packages/core/src/reports.ts
 function inRange(ts2, start, endExclusive) {
@@ -1486,6 +1550,33 @@ function rangeTrend(transactions, key, opts) {
   }
   const startYM = `${startYear}-${pad(startMonth)}`;
   return { points: monthlyTrend(transactions, startYM, spanMonths, trendOpts), gran: "month" };
+}
+function rangeNetWorthTrend(transactions, accounts, key, opts) {
+  const base = opts?.base;
+  const seriesOpts = base != null ? { base, rates: opts?.rates ?? {}, logger: opts?.logger } : void 0;
+  const now = /* @__PURE__ */ new Date();
+  const cy = now.getFullYear();
+  const cm = now.getMonth() + 1;
+  const pad = (x) => String(x).padStart(2, "0");
+  if (key === "last6y") {
+    return { points: netWorthYearlySeries(transactions, accounts, cy - 5, RANGE_TREND_MONTHS, seriesOpts), gran: "year" };
+  }
+  const startDate = key === "all" ? opts?.earliestData ?? firstOfMonth() : rangeStartDate(key, opts?.earliestData);
+  const startYear = Number(startDate.slice(0, 4));
+  const startMonth = Number(startDate.slice(5, 7));
+  const spanMonths = (cy - startYear) * 12 + (cm - startMonth) + 1;
+  if (spanMonths >= 24) {
+    const yearCount = Math.max(cy - startYear + 1, 1);
+    return { points: netWorthYearlySeries(transactions, accounts, startYear, yearCount, seriesOpts), gran: "year" };
+  }
+  if (spanMonths < 6) {
+    const d = /* @__PURE__ */ new Date();
+    d.setMonth(d.getMonth() - (RANGE_TREND_MONTHS - 1));
+    const startYM2 = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+    return { points: netWorthSeries(transactions, accounts, startYM2, RANGE_TREND_MONTHS, seriesOpts), gran: "month" };
+  }
+  const startYM = `${startYear}-${pad(startMonth)}`;
+  return { points: netWorthSeries(transactions, accounts, startYM, spanMonths, seriesOpts), gran: "month" };
 }
 
 // ../../packages/core/src/loanSettle.ts
@@ -2676,6 +2767,12 @@ var zh = {
   "report.trend.byMonth": "\u6536\u652F\u8D8B\u52BF\uFF08\u6309\u6708\uFF09",
   "report.trend.clickHint": "\u70B9\u51FB\u67F1\u5B50\u67E5\u770B\u6536\u652F\u660E\u7EC6",
   "report.trend.monthSuffix": "{{bucket}} \u6708",
+  "report.netWorth.byYear": "\u51C0\u503C\u8D8B\u52BF\uFF08\u6309\u5E74\uFF09",
+  "report.netWorth.byMonth": "\u51C0\u503C\u8D8B\u52BF\uFF08\u6309\u6708\uFF09",
+  "report.netWorth.clickHint": "\u70B9\u51FB\u8282\u70B9\u67E5\u770B\u51C0\u503C\u660E\u7EC6",
+  "report.netWorth.totalAssets": "\u603B\u8D44\u4EA7",
+  "report.netWorth.totalLiabilities": "\u603B\u8D1F\u503A",
+  "report.netWorth.netWorth": "\u51C0\u8D44\u4EA7",
   // KR6/task3: batchModifyModal — 复用 tx.type.*/entry.field.*/entry.direction.*/common.cancel/
   // account.selectPlaceholder/entry.err.sameAccount/txList.concurrencyConflict/entry.amount；插件专属 batch.*
   "batch.keepHint": "\u7559\u7A7A\u4FDD\u6301\u539F\u503C",
@@ -3286,6 +3383,12 @@ var en = {
   "report.trend.byMonth": "Income & expense trend (by month)",
   "report.trend.clickHint": "Click a bar for details",
   "report.trend.monthSuffix": "{{bucket}}",
+  "report.netWorth.byYear": "Net worth trend (by year)",
+  "report.netWorth.byMonth": "Net worth trend (by month)",
+  "report.netWorth.clickHint": "Tap a point for net worth details",
+  "report.netWorth.totalAssets": "Total assets",
+  "report.netWorth.totalLiabilities": "Total liabilities",
+  "report.netWorth.netWorth": "Net worth",
   // KR6/task3: batchModifyModal — reused tx.type.*/entry.field.*/entry.direction.*/common.cancel/
   // account.selectPlaceholder/entry.err.sameAccount/txList.concurrencyConflict/entry.amount; plugin-specific batch.*
   "batch.keepHint": "Leave blank to keep",
@@ -7888,6 +7991,19 @@ var RANGE_OPTIONS = [
   { key: "all", i18nKey: "report.range.all" }
 ];
 var TOP_N = 5;
+function formatAxisAmount(n, currency) {
+  const sign = n < 0 ? "-" : "";
+  const abs = Math.abs(n);
+  const r1 = (x) => Math.round(x * 10) / 10;
+  if (currency === "CNY") {
+    if (abs >= 1e8) return `${sign}${r1(abs / 1e8)}\u4EBF`;
+    if (abs >= 1e4) return abs >= 1e6 ? `${sign}${Math.round(abs / 1e4)}\u4E07` : `${sign}${r1(abs / 1e4)}\u4E07`;
+    return `${sign}${Math.round(abs)}`;
+  }
+  if (abs >= 1e6) return `${sign}${r1(abs / 1e6)}M`;
+  if (abs >= 1e3) return `${sign}${r1(abs / 1e3)}k`;
+  return `${sign}${Math.round(abs)}`;
+}
 var ReportModal = class extends import_obsidian14.Modal {
   constructor(app, adapter, navCtx, slide, onSwitchLedger, onOpened) {
     super(app);
@@ -7902,6 +8018,10 @@ var ReportModal = class extends import_obsidian14.Modal {
   transactions = [];
   loadFailed = false;
   range = "thisMonth";
+  /** 账户元数据（净值序列归集用）；reloadData 时从 accounts.json 读取 */
+  accounts = [];
+  /** 汇率表（多币种折算到本位币）；reloadData 时从 rates.json 读取，缺失为空表（各币种按 1 回退） */
+  rates = {};
   /** 支出/收入分类是否展开全部（默认折叠到 TOP_N，点「展开其他」逐项显示，不再合并为「其他」） */
   expandedExpense = false;
   expandedIncome = false;
@@ -7946,6 +8066,17 @@ var ReportModal = class extends import_obsidian14.Modal {
     } catch {
       this.baseCurrency = "CNY";
     }
+    try {
+      const meta = await this.adapter.readMeta();
+      this.accounts = meta.accounts;
+    } catch {
+      this.accounts = [];
+    }
+    try {
+      this.rates = await this.adapter.readRates();
+    } catch {
+      this.rates = {};
+    }
     this.render();
   }
   /** 用已缓存的 transactions 重渲染（时间段/展开切换用，不读磁盘）。 */
@@ -7986,6 +8117,8 @@ var ReportModal = class extends import_obsidian14.Modal {
     this.renderCategoryBars(container, t("report.expenseCategory"), expenseSlices, "expense", this.expandedExpense, earliest);
     const { points: trendPoints, gran: trendGran } = rangeTrend(this.transactions, this.range, { base: this.baseCurrency, earliestData: earliest });
     this.renderTrend(container, trendPoints, trendGran);
+    const { points: nwPoints, gran: nwGran } = rangeNetWorthTrend(this.transactions, this.accounts, this.range, { base: this.baseCurrency, rates: this.rates, earliestData: earliest });
+    this.renderNetWorthTrend(container, nwPoints, nwGran);
   }
   renderRangeSelector(container) {
     const box = container.createDiv({ cls: "accounting-filter-box" });
@@ -8115,15 +8248,177 @@ var ReportModal = class extends import_obsidian14.Modal {
     cell.createEl("span", { text: formatMoney(amount, this.baseCurrency), cls: "accounting-trend-info-cell-value" });
   }
   /**
+   * 净值趋势（总资产/总负债/净资产三条线）：与 renderTrend 同区间/同粒度，但每点是「截止该桶末」的
+   * 累计存量（时点），非期间流量。多币种按当前汇率折算（rangeNetWorthTrend 已折算到本位币）。
+   */
+  renderNetWorthTrend(container, points, gran) {
+    const section = container.createDiv({ cls: "accounting-section" });
+    const head = section.createDiv({ cls: "accounting-group-head" });
+    head.createEl("span", { text: gran === "year" ? t("report.netWorth.byYear") : t("report.netWorth.byMonth") });
+    const legend = head.createEl("span", { cls: "accounting-trend-legend" });
+    legend.createSpan({ text: t("report.netWorth.totalAssets"), cls: "accounting-nw-leg-assets" });
+    legend.createSpan({ text: t("report.netWorth.totalLiabilities"), cls: "accounting-nw-leg-liab" });
+    legend.createSpan({ text: t("report.netWorth.netWorth"), cls: "accounting-nw-leg-net" });
+    if (points.length === 0) {
+      section.createEl("div", { text: t("report.noData"), cls: "accounting-empty-mini" });
+      return;
+    }
+    const wrap = section.createDiv({ cls: "accounting-trend-chart-wrap" });
+    const info = section.createDiv({ cls: "accounting-trend-info" });
+    info.createEl("span", { text: t("report.netWorth.clickHint"), cls: "accounting-trend-info-hint" });
+    this.renderNetWorthSvg(wrap, points, gran, container.clientWidth, (i) => {
+      const p = points[i];
+      if (!p) return;
+      info.empty();
+      const bucket = info.createEl("span", { cls: "accounting-trend-info-bucket" });
+      bucket.textContent = gran === "year" ? p.bucket : t("report.trend.monthSuffix", { bucket: p.bucket.slice(5) });
+      const cells = info.createDiv({ cls: "accounting-trend-info-cells" });
+      this.appendNwInfoCell(cells, t("report.netWorth.totalAssets"), p.totalAssets, "assets");
+      this.appendNwInfoCell(cells, t("report.netWorth.totalLiabilities"), p.totalLiabilities, "liab");
+      this.appendNwInfoCell(cells, t("report.netWorth.netWorth"), p.netWorth, p.netWorth < 0 ? "liab" : "net");
+    });
+  }
+  appendNwInfoCell(parent, label, amount, cls) {
+    const cell = parent.createDiv({ cls: `accounting-trend-info-cell accounting-nw-info-${cls}` });
+    cell.createEl("span", { text: label, cls: "accounting-trend-info-cell-label" });
+    cell.createEl("span", { text: formatMoney(amount, this.baseCurrency), cls: "accounting-trend-info-cell-value" });
+  }
+  /**
+   * SVG 绘制净值三线图：总资产（绿）/总负债（红）/净资产（蓝，粗）。零基线居中，正区 posH、负区 negH
+   * （净资产可为负，资产/负债恒 >= 0）。每列透明点击热区，点击出明细格（复用 trend hit 样式）。
+   */
+  renderNetWorthSvg(parent, points, gran, availWidth, onSelect) {
+    const NS = "http://www.w3.org/2000/svg";
+    const axisW = 44;
+    const minColW = 50;
+    const maxColW = 80;
+    const padL = axisW + 4;
+    const padR = 4;
+    const fillColW = (availWidth - padL - padR) / points.length;
+    const colW = points.length <= 6 ? Math.min(Math.max(fillColW, minColW), maxColW) : minColW;
+    const padT = 16;
+    const posH = 179;
+    const baselineY = padT + posH;
+    const negH = 42;
+    const labelH = 18;
+    const W = padL + padR + points.length * colW;
+    const H = baselineY + negH + labelH;
+    const maxPos = Math.max(1, ...points.map((p) => Math.max(p.totalAssets, p.totalLiabilities, p.netWorth, 0)));
+    const maxNeg = Math.max(1, ...points.map((p) => -Math.min(0, p.netWorth)));
+    const xy = (i, v) => {
+      const cx = padL + i * colW + colW / 2;
+      const y = v >= 0 ? baselineY - v / maxPos * posH : baselineY + -v / maxNeg * negH;
+      return [cx, y];
+    };
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("xmlns", NS);
+    svg.setAttribute("width", String(W));
+    svg.setAttribute("height", String(H));
+    svg.classList.add("accounting-trend-svg");
+    const el = (tag) => document.createElementNS(NS, tag);
+    const axis = el("line");
+    axis.setAttribute("x1", String(padL));
+    axis.setAttribute("x2", String(W));
+    axis.setAttribute("y1", String(baselineY));
+    axis.setAttribute("y2", String(baselineY));
+    axis.setAttribute("class", "accounting-trend-axis");
+    svg.appendChild(axis);
+    this.appendSvgYAxis(svg, axisW, padL, W, padT, baselineY, negH, maxPos, points.some((p) => p.netWorth < 0) ? -maxNeg : void 0);
+    const drawSeries = (key, lineCls, dotCls) => {
+      const pts = points.map((p, i) => {
+        const [cx, y] = xy(i, p[key]);
+        return `${cx},${y}`;
+      }).join(" ");
+      const line = el("polyline");
+      line.setAttribute("points", pts);
+      line.setAttribute("class", lineCls);
+      svg.appendChild(line);
+      points.forEach((p, i) => {
+        const [cx, y] = xy(i, p[key]);
+        const c = el("circle");
+        c.setAttribute("cx", String(cx));
+        c.setAttribute("cy", String(y));
+        c.setAttribute("r", "2.5");
+        c.setAttribute("class", dotCls);
+        svg.appendChild(c);
+      });
+    };
+    drawSeries("totalAssets", "accounting-nw-line-assets", "accounting-nw-dot-assets");
+    drawSeries("totalLiabilities", "accounting-nw-line-liab", "accounting-nw-dot-liab");
+    drawSeries("netWorth", "accounting-nw-line-net", "accounting-nw-dot-net");
+    points.forEach((p, i) => {
+      const cx = padL + i * colW + colW / 2;
+      const lbl = el("text");
+      lbl.setAttribute("x", String(cx));
+      lbl.setAttribute("y", String(H - 4));
+      lbl.setAttribute("text-anchor", "middle");
+      lbl.setAttribute("class", "accounting-trend-axis-label");
+      lbl.textContent = gran === "year" ? p.bucket : p.bucket.slice(5);
+      svg.appendChild(lbl);
+    });
+    if (onSelect) {
+      points.forEach((_p, i) => {
+        const hit = el("rect");
+        hit.setAttribute("x", String(padL + i * colW));
+        hit.setAttribute("y", "0");
+        hit.setAttribute("width", String(colW));
+        hit.setAttribute("height", String(baselineY + negH));
+        hit.setAttribute("class", "accounting-trend-hit");
+        hit.addEventListener("click", () => onSelect(i));
+        svg.appendChild(hit);
+      });
+    }
+    parent.appendChild(svg);
+  }
+  /**
    * SVG 绘制趋势：结余柱（正=蓝向上、负=红向下，柱端标金额）+ 收入虚线 + 支出实线。
    * 零基线居中分隔正负区；用 SVG 而非 CSS div 是因为折线（polyline）无法用纯 CSS 连接。
    * 手动 createElementNS 构建（Obsidian createEl 不支持 svg 命名空间）。
    */
+  /**
+   * SVG 左侧 Y 轴：正区均分 5 档刻度（0 / 25% / 50% / 75% / 100% = topValue），中间档配虚线网格
+   * 便于读数；0 与顶部不重复画网格（0 即零基线、顶部即图上沿）。存在负值时在负区中点另加一档。
+   * 刻度值右对齐到 axisW（紧凑金额，不含币种；精确值点节点查看明细格）。
+   */
+  appendSvgYAxis(svg, axisW, padL, W, padT, baselineY, negH, topValue, negBottomValue) {
+    const NS = "http://www.w3.org/2000/svg";
+    const posH = baselineY - padT;
+    const mkText = (v, y) => {
+      const t2 = document.createElementNS(NS, "text");
+      t2.setAttribute("x", String(axisW));
+      t2.setAttribute("y", String(y));
+      t2.setAttribute("text-anchor", "end");
+      t2.setAttribute("class", "accounting-trend-axis-label");
+      t2.textContent = formatAxisAmount(v, this.baseCurrency);
+      svg.appendChild(t2);
+    };
+    const mkGrid = (y) => {
+      const l = document.createElementNS(NS, "line");
+      l.setAttribute("x1", String(padL));
+      l.setAttribute("x2", String(W));
+      l.setAttribute("y1", String(y));
+      l.setAttribute("y2", String(y));
+      l.setAttribute("class", "accounting-trend-grid");
+      svg.appendChild(l);
+    };
+    const fracs = [0, 0.25, 0.5, 0.75, 1];
+    for (const f of fracs) {
+      const y = baselineY - f * posH;
+      if (f > 0 && f < 1) mkGrid(y);
+      mkText(f * topValue, y + 3);
+    }
+    if (negBottomValue && negBottomValue < 0) {
+      const yMid = baselineY + negH / 2;
+      mkGrid(yMid);
+      mkText(negBottomValue / 2, yMid + 3);
+    }
+  }
   renderTrendSvg(parent, points, gran, availWidth, onSelect) {
     const NS = "http://www.w3.org/2000/svg";
+    const axisW = 44;
     const minColW = 50;
     const maxColW = 80;
-    const padL = 4;
+    const padL = axisW + 4;
     const padR = 4;
     const fillColW = (availWidth - padL - padR) / points.length;
     const colW = points.length <= 6 ? Math.min(Math.max(fillColW, minColW), maxColW) : minColW;
@@ -8142,12 +8437,13 @@ var ReportModal = class extends import_obsidian14.Modal {
     svg.classList.add("accounting-trend-svg");
     const el = (tag) => document.createElementNS(NS, tag);
     const axis = el("line");
-    axis.setAttribute("x1", "0");
+    axis.setAttribute("x1", String(padL));
     axis.setAttribute("x2", String(W));
     axis.setAttribute("y1", String(baselineY));
     axis.setAttribute("y2", String(baselineY));
     axis.setAttribute("class", "accounting-trend-axis");
     svg.appendChild(axis);
+    this.appendSvgYAxis(svg, axisW, padL, W, padT, baselineY, negH, maxVal, points.some((p) => p.surplus < 0) ? -maxVal : void 0);
     points.forEach((p, i) => {
       const cx = padL + i * colW + colW / 2;
       const barW = Math.min(colW * 0.5, 30);
@@ -8369,10 +8665,10 @@ async function openEntryRecurring(app, adapter, mode, onDone) {
 var import_obsidian16 = require("obsidian");
 var LEVELS = ["ALL", "ERROR", "WARN", "INFO", "DEBUG"];
 var TONE = {
-  ERROR: "#dc2626",
-  WARN: "#d97706",
-  INFO: "#3b82f6",
-  DEBUG: "#a3a3a3"
+  ERROR: "var(--color-red)",
+  WARN: "var(--color-orange)",
+  INFO: "var(--color-blue)",
+  DEBUG: "var(--text-faint)"
 };
 function lineLevel(line) {
   return line.split(/\s+/)[1] ?? null;
@@ -8385,13 +8681,14 @@ var DiagLogModal = class extends import_obsidian16.Modal {
     super(app);
   }
   async onOpen() {
+    this.modalEl.addClass("accounting-sub-modal");
     this.titleEl.setText(t("diaglog.title"));
     const { contentEl } = this;
     contentEl.empty();
-    const toolbar = contentEl.createDiv({ cls: "diaglog-toolbar" });
-    const seg = toolbar.createDiv({ cls: "diaglog-seg" });
+    const toolbar = contentEl.createDiv({ cls: "accounting-diaglog-toolbar" });
+    const seg = toolbar.createDiv({ cls: "accounting-diaglog-seg" });
     for (const l of LEVELS) {
-      const b = seg.createEl("button", { text: l === "ALL" ? t("diaglog.all") : l, cls: "diaglog-seg-btn" });
+      const b = seg.createEl("button", { text: l === "ALL" ? t("diaglog.all") : l, cls: "accounting-diaglog-seg-btn" });
       b.onclick = () => {
         this.level = l;
         this.updateSegActive(seg);
@@ -8399,15 +8696,15 @@ var DiagLogModal = class extends import_obsidian16.Modal {
       };
     }
     this.updateSegActive(seg);
-    const search = toolbar.createEl("input", { cls: "diaglog-search" });
+    const search = toolbar.createEl("input", { cls: "accounting-search-input accounting-diaglog-search" });
     search.placeholder = t("diaglog.search");
     search.oninput = () => {
       this.keyword = search.value;
       void this.render();
     };
-    const refresh = toolbar.createEl("button", { text: t("diaglog.refresh"), cls: "accounting-btn" });
+    const refresh = toolbar.createEl("button", { text: t("diaglog.refresh"), cls: "accounting-btn accounting-btn-secondary" });
     refresh.onclick = () => void this.render();
-    const exportBtn = toolbar.createEl("button", { text: t("diaglog.export"), cls: "accounting-btn" });
+    const exportBtn = toolbar.createEl("button", { text: t("diaglog.export"), cls: "accounting-btn accounting-btn-secondary" });
     exportBtn.onclick = async () => {
       try {
         const path = await exportPluginLog();
@@ -8416,7 +8713,7 @@ var DiagLogModal = class extends import_obsidian16.Modal {
         new import_obsidian16.Notice(t("diaglog.exportFail"));
       }
     };
-    this.listEl = contentEl.createDiv({ cls: "diaglog-list" });
+    this.listEl = contentEl.createDiv({ cls: "accounting-diaglog-list" });
     await this.render();
   }
   updateSegActive(seg) {
@@ -8435,13 +8732,13 @@ var DiagLogModal = class extends import_obsidian16.Modal {
     });
     this.listEl.empty();
     if (lines.length === 0) {
-      this.listEl.createEl("div", { text: t("diaglog.empty"), cls: "diaglog-empty" });
+      this.listEl.createEl("div", { text: t("diaglog.empty"), cls: "accounting-diaglog-empty" });
       return;
     }
     for (const ln of lines) {
       const lv = lineLevel(ln);
       const color = lv && TONE[lv] || "inherit";
-      const div = this.listEl.createDiv({ text: ln, cls: "diaglog-line" });
+      const div = this.listEl.createDiv({ text: ln, cls: "accounting-diaglog-line" });
       div.style.color = color;
     }
   }
@@ -8757,8 +9054,9 @@ var AccountingSettings = class {
     const diagHeadEl = diagCardEl.createDiv("accounting-ledger-card-head");
     diagHeadEl.createEl("span", { text: t("settings.about.diaglog"), cls: "accounting-ledger-card-title" });
     const diagBodyEl = diagCardEl.createDiv("accounting-ledger-list");
-    diagBodyEl.createDiv({ text: t("settings.about.diaglogDesc"), cls: "accounting-about-value" });
-    const diagBtn = diagBodyEl.createEl("button", {
+    diagBodyEl.createDiv({ text: t("settings.about.diaglogDesc"), cls: "accounting-diaglog-desc" });
+    const diagActionsEl = diagBodyEl.createDiv("accounting-ledger-card-actions");
+    const diagBtn = diagActionsEl.createEl("button", {
       text: t("settings.about.diaglogBtn"),
       cls: "accounting-btn accounting-btn-secondary"
     });
