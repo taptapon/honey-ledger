@@ -8284,7 +8284,7 @@ var ReportModal = class extends import_obsidian14.Modal {
     cell.createEl("span", { text: formatMoney(amount, this.baseCurrency), cls: "accounting-trend-info-cell-value" });
   }
   /**
-   * SVG 绘制净值三线图：总资产（绿）/总负债（红）/净资产（蓝，粗）。零基线居中，正区 posH、负区 negH
+   * SVG 绘制净值图：总资产/总负债（线）+ 净资产（蓝柱，置于线下层）。零基线居中，正区 posH、负区 negH
    * （净资产可为负，资产/负债恒 >= 0）。每列透明点击热区，点击出明细格（复用 trend hit 样式）。
    */
   renderNetWorthSvg(parent, points, gran, availWidth, onSelect) {
@@ -8324,6 +8324,17 @@ var ReportModal = class extends import_obsidian14.Modal {
     axis.setAttribute("class", "accounting-trend-axis");
     svg.appendChild(axis);
     this.appendSvgYAxis(svg, axisW, padL, W, padT, baselineY, negH, maxPos, points.some((p) => p.netWorth < 0) ? -maxNeg : void 0);
+    const barW = Math.min(colW * 0.55, 30);
+    points.forEach((p, i) => {
+      const [cx, y] = xy(i, p.netWorth);
+      const bar = el("rect");
+      bar.setAttribute("x", String(cx - barW / 2));
+      bar.setAttribute("y", String(Math.min(baselineY, y)));
+      bar.setAttribute("width", String(barW));
+      bar.setAttribute("height", String(Math.abs(baselineY - y)));
+      bar.setAttribute("class", "accounting-nw-bar-net");
+      svg.appendChild(bar);
+    });
     const drawSeries = (key, lineCls, dotCls) => {
       const pts = points.map((p, i) => {
         const [cx, y] = xy(i, p[key]);
@@ -8345,7 +8356,17 @@ var ReportModal = class extends import_obsidian14.Modal {
     };
     drawSeries("totalAssets", "accounting-nw-line-assets", "accounting-nw-dot-assets");
     drawSeries("totalLiabilities", "accounting-nw-line-liab", "accounting-nw-dot-liab");
-    drawSeries("netWorth", "accounting-nw-line-net", "accounting-nw-dot-net");
+    points.forEach((p, i) => {
+      if (!p.netWorth) return;
+      const [cx, y] = xy(i, p.netWorth);
+      const lbl = el("text");
+      lbl.setAttribute("x", String(cx));
+      lbl.setAttribute("y", String(p.netWorth >= 0 ? y - 4 : y + 12));
+      lbl.setAttribute("text-anchor", "middle");
+      lbl.setAttribute("class", "accounting-nw-bar-label");
+      lbl.textContent = formatAxisAmount(p.netWorth, this.baseCurrency);
+      svg.appendChild(lbl);
+    });
     points.forEach((p, i) => {
       const cx = padL + i * colW + colW / 2;
       const lbl = el("text");
@@ -8682,9 +8703,10 @@ var DiagLogModal = class extends import_obsidian16.Modal {
   }
   async onOpen() {
     this.modalEl.addClass("accounting-sub-modal");
-    this.titleEl.setText(t("diaglog.title"));
+    if (!import_obsidian16.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     const { contentEl } = this;
     contentEl.empty();
+    contentEl.createEl("h2", { text: t("diaglog.title") }).addClass("accounting-modal-title");
     const toolbar = contentEl.createDiv({ cls: "accounting-diaglog-toolbar" });
     const seg = toolbar.createDiv({ cls: "accounting-diaglog-seg" });
     for (const l of LEVELS) {
@@ -8715,6 +8737,12 @@ var DiagLogModal = class extends import_obsidian16.Modal {
     };
     this.listEl = contentEl.createDiv({ cls: "accounting-diaglog-list" });
     await this.render();
+    const closeWrap = contentEl.createDiv({ cls: "accounting-modal-close" });
+    const closeBtn = closeWrap.createEl("button", { text: t("common.close"), cls: "accounting-btn-secondary" });
+    closeBtn.onclick = () => this.close();
+  }
+  onClose() {
+    this.contentEl.empty();
   }
   updateSegActive(seg) {
     seg.querySelectorAll("button").forEach((b, i) => {

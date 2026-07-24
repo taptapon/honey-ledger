@@ -3265,6 +3265,17 @@ details[open] > .accounting-collapsible-head::before {
   fill: var(--color-blue);
 }
 
+.accounting-nw-bar-net {
+  fill: var(--color-blue);
+  fill-opacity: 0.85;
+}
+
+.accounting-nw-bar-label {
+  fill: var(--color-blue);
+  font-size: 9px;
+  font-weight: 600;
+}
+
 /* 净值图例色块（实线方块）。 */
 .accounting-nw-leg-assets,
 .accounting-nw-leg-liab,
