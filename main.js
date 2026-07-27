@@ -10574,7 +10574,7 @@ var OnboardingModal = class extends import_obsidian18.Modal {
     if (existing.length === 0) {
       this.renderEmptyState();
     } else {
-      this.renderLedgerSelection(existing);
+      await this.renderLedgerSelection(existing);
     }
   }
   /** 无账本时：提供示例账本创建和手动创建两个选项 */
@@ -10609,7 +10609,7 @@ var OnboardingModal = class extends import_obsidian18.Modal {
     createBtn.onclick = () => this.renderCreateForm();
   }
   /** 渲染现有账本选择列表 */
-  renderLedgerSelection(existing) {
+  async renderLedgerSelection(existing) {
     const { contentEl } = this;
     contentEl.empty();
     this.currentStep = "main";
@@ -10617,8 +10617,9 @@ var OnboardingModal = class extends import_obsidian18.Modal {
     titleEl.addClass("accounting-modal-title");
     const listEl = contentEl.createDiv("accounting-onboarding-folder-list");
     for (const folder of existing.sort()) {
+      const label = await this.adapter.readLedgerAlias(folder);
       const itemEl = listEl.createEl("button", {
-        text: folder,
+        text: label,
         cls: "accounting-btn accounting-btn-secondary accounting-btn-block"
       });
       itemEl.onclick = () => {
