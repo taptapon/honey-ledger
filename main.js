@@ -51,32 +51,38 @@ var SYSTEM_ACCOUNT_TYPES = [
   "credit",
   "loan"
 ];
-var DEFAULT_TYPE_LABEL = {
-  cash: "\u73B0\u91D1",
-  savings: "\u50A8\u84C4",
-  ewallet: "\u7535\u5B50\u94B1\u5305",
-  securities: "\u8BC1\u5238",
-  fund: "\u57FA\u91D1",
-  "other-investment": "\u5176\u4ED6\u6295\u8D44",
-  "fixed-asset": "\u56FA\u5B9A\u8D44\u4EA7",
-  company: "\u516C\u53F8",
-  person: "\u5F80\u6765(\u501F\u8D37)",
-  credit: "\u4FE1\u7528\u5361",
-  loan: "\u8D37\u6B3E"
-};
-var DEFAULT_GROUP_OF_TYPE = {
-  cash: "g-cash",
-  savings: "g-cash",
-  ewallet: "g-cash",
-  securities: "g-investment",
-  fund: "g-investment",
-  "other-investment": "g-investment",
-  "fixed-asset": "g-fixed-asset",
-  company: "g-company",
-  person: "g-credit",
-  credit: "g-credit",
-  loan: "g-credit"
-};
+function accountKindOf(settings, type) {
+  const kind = settings?.types.find((t2) => t2.type === type)?.kind;
+  if (kind === "asset" || kind === "liability") return kind;
+  return kindOfType(type);
+}
+var DEFAULT_TYPE_LABEL_PAIRS = [
+  ["cash", "\u73B0\u91D1"],
+  ["savings", "\u50A8\u84C4"],
+  ["ewallet", "\u7535\u5B50\u94B1\u5305"],
+  ["securities", "\u8BC1\u5238"],
+  ["fund", "\u57FA\u91D1"],
+  ["other-investment", "\u5176\u4ED6\u6295\u8D44"],
+  ["fixed-asset", "\u56FA\u5B9A\u8D44\u4EA7"],
+  ["company", "\u516C\u53F8"],
+  ["person", "\u5F80\u6765(\u501F\u8D37)"],
+  ["credit", "\u4FE1\u7528\u5361"],
+  ["loan", "\u8D37\u6B3E"]
+];
+var DEFAULT_TYPE_LABEL = Object.fromEntries(DEFAULT_TYPE_LABEL_PAIRS);
+var DEFAULT_GROUP_OF_TYPE = Object.fromEntries([
+  ["cash", "g-cash"],
+  ["savings", "g-cash"],
+  ["ewallet", "g-cash"],
+  ["securities", "g-investment"],
+  ["fund", "g-investment"],
+  ["other-investment", "g-investment"],
+  ["fixed-asset", "g-fixed-asset"],
+  ["company", "g-company"],
+  ["person", "g-credit"],
+  ["credit", "g-credit"],
+  ["loan", "g-credit"]
+]);
 var DEFAULT_GROUPS = [
   { id: "g-cash", label: "\u73B0\u91D1\u7C7B" },
   { id: "g-investment", label: "\u6295\u8D44\u7C7B" },
@@ -96,8 +102,8 @@ function defaultAccountTypeSettings() {
     groups: DEFAULT_GROUPS.map((g) => ({ ...g })),
     types: SYSTEM_ACCOUNT_TYPES.map((t2) => ({
       type: t2,
-      label: DEFAULT_TYPE_LABEL[t2],
-      groupId: DEFAULT_GROUP_OF_TYPE[t2],
+      label: DEFAULT_TYPE_LABEL[t2] ?? t2,
+      groupId: DEFAULT_GROUP_OF_TYPE[t2] ?? DEFAULT_GROUPS[0].id,
       active: true
     }))
   };
@@ -118,9 +124,19 @@ function normalizeAccountTypeSettings(input) {
   const fallbackGroupId = groups[0].id;
   const defByType = new Map(def.types.map((d) => [d.type, d]));
   const types = [];
+  const customTypes = [];
   const seen = /* @__PURE__ */ new Set();
   for (const t2 of raw.types) {
-    if (!t2 || !isSystemAccountType(t2.type) || seen.has(t2.type)) continue;
+    if (!t2 || typeof t2.type !== "string" || !t2.type || seen.has(t2.type)) continue;
+    if (!isSystemAccountType(t2.type)) {
+      const label2 = typeof t2.label === "string" && t2.label.trim() ? t2.label.trim() : "";
+      if (!label2) continue;
+      const groupId2 = typeof t2.groupId === "string" && groupIdSet.has(t2.groupId) ? t2.groupId : fallbackGroupId;
+      const kind = t2.kind === "asset" || t2.kind === "liability" ? t2.kind : "asset";
+      seen.add(t2.type);
+      customTypes.push({ type: t2.type, label: label2, groupId: groupId2, active: t2.active !== false, kind });
+      continue;
+    }
     seen.add(t2.type);
     const defT = defByType.get(t2.type);
     const label = typeof t2.label === "string" && t2.label.trim() ? t2.label : defT.label;
@@ -132,7 +148,7 @@ function normalizeAccountTypeSettings(input) {
     const groupId = groupIdSet.has(d.groupId) ? d.groupId : fallbackGroupId;
     types.push({ type: d.type, label: d.label, groupId, active: true });
   }
-  return { groups, types };
+  return { groups, types: [...types, ...customTypes] };
 }
 function resolveTypeGroups(settings) {
   const byGroup = /* @__PURE__ */ new Map();
@@ -142,6 +158,13 @@ function resolveTypeGroups(settings) {
     else byGroup.set(t2.groupId, [t2]);
   }
   return settings.groups.map((g) => ({ id: g.id, label: g.label, types: byGroup.get(g.id) ?? [] })).filter((g) => g.types.length > 0);
+}
+var CUSTOM_TYPE_PREFIX = "custom-";
+function newCustomTypeKey(s, _label) {
+  const used = new Set(s.types.map((t2) => t2.type));
+  let n = 1;
+  while (used.has(`${CUSTOM_TYPE_PREFIX}${n}`)) n += 1;
+  return `${CUSTOM_TYPE_PREFIX}${n}`;
 }
 function displayTypeLabel(type, storedLabel, translate) {
   return storedLabel === DEFAULT_TYPE_LABEL[type] ? translate(`accountType.${type}`) : storedLabel;
@@ -187,6 +210,9 @@ function isoToMonthStr(iso) {
 }
 function formatDateDisplay(ymd, locale) {
   return locale === "en" && /^\d{4}-\d{2}-\d{2}$/.test(ymd) ? ymd.replace(/-/g, "/") : ymd;
+}
+function formatMonthDisplay(ym, locale) {
+  return locale === "en" && /^\d{4}-\d{2}$/.test(ym) ? ym.replace("-", "/") : ym;
 }
 function isoToYearNum(iso) {
   const d = new Date(iso);
@@ -1315,6 +1341,103 @@ function computeBalancesUpTo(transactions, accounts, targetTxId) {
   if (idx < 0) return null;
   return computeBalances(chronological.slice(0, idx + 1), accounts);
 }
+function accountDelta(t2, accountId) {
+  switch (t2.type) {
+    case "expense":
+      return t2.account === accountId ? -t2.amount : 0;
+    case "income":
+      return t2.account === accountId ? t2.amount : 0;
+    case "transfer": {
+      let d = 0;
+      if (t2.fromAccount === accountId) d -= t2.amount;
+      if (t2.toAccount === accountId) d += t2.toAmount ?? t2.amount;
+      return d;
+    }
+    case "loan": {
+      const selfInc = loanCashIn(t2.direction);
+      let d = 0;
+      if (t2.account === accountId) d += selfInc ? t2.amount : -t2.amount;
+      if (t2.person === accountId) d += selfInc ? -t2.amount : t2.amount;
+      return d;
+    }
+  }
+}
+function touchesAccount(t2, accountId) {
+  return t2.account === accountId || t2.fromAccount === accountId || t2.toAccount === accountId || t2.person === accountId;
+}
+function computeRunningBalanceForAccount(transactions, accounts, accountId) {
+  const chronological = [...transactions].sort((a, b) => tsMs(a.ts) - tsMs(b.ts));
+  const opening = accounts.find((a) => a.id === accountId)?.openingBalance ?? 0;
+  let bal = round2(opening);
+  const map = /* @__PURE__ */ new Map();
+  for (const t2 of chronological) {
+    if (touchesAccount(t2, accountId)) {
+      bal = round2(bal + accountDelta(t2, accountId));
+      map.set(t2.id, bal);
+    }
+  }
+  return map;
+}
+function predictOverdraft(accounts, baseline, newTx, settings) {
+  const assetIds = new Set(
+    accounts.filter((a) => accountKindOf(settings, a.type) !== "liability" && a.type !== "person").map((a) => a.id)
+  );
+  const concerned = [newTx.account, newTx.fromAccount, newTx.toAccount, newTx.person].filter(
+    (id) => !!id
+  );
+  const result = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const id of concerned) {
+    if (seen.has(id) || !assetIds.has(id)) continue;
+    seen.add(id);
+    const delta = accountDelta(newTx, id);
+    if (delta >= 0) continue;
+    const wouldBe = round2((baseline.get(id) ?? 0) + delta);
+    if (wouldBe < 0) result.push({ accountId: id, wouldBe });
+  }
+  return result;
+}
+
+// ../../packages/core/src/monthGroups.ts
+function buildMonthGroups(sorted, opts) {
+  const { sort, base, singleAccount = false, accountId, balanceByTxId = null } = opts;
+  const useFlow = singleAccount && !!accountId;
+  const order = [];
+  const map = /* @__PURE__ */ new Map();
+  for (const t2 of sorted) {
+    const ym = isoToMonthStr(t2.ts);
+    if (!ym) continue;
+    let g = map.get(ym);
+    if (!g) {
+      g = { ym, txs: [], income: 0, expense: 0 };
+      map.set(ym, g);
+      order.push(ym);
+    }
+    g.txs.push(t2);
+    if (useFlow) {
+      const delta = accountDelta(t2, accountId);
+      if (delta > 0) g.income += delta;
+      else if (delta < 0) g.expense += -delta;
+    } else {
+      const amt = txBaseAmount(t2, base);
+      if (t2.type === "income") g.income += amt;
+      else if (t2.type === "expense") g.expense += amt;
+    }
+  }
+  return order.map((ym) => {
+    const g = map.get(ym);
+    if (!g) return { ym, txs: [], income: 0, expense: 0 };
+    const res = { ...g, income: round2(g.income), expense: round2(g.expense) };
+    if (balanceByTxId) {
+      const endTx = sort === "time-desc" ? g.txs[0] : g.txs[g.txs.length - 1];
+      if (endTx) {
+        const bal = balanceByTxId.get(endTx.id);
+        if (bal != null) res.endBalance = bal;
+      }
+    }
+    return res;
+  });
+}
 
 // ../../packages/core/src/networth.ts
 function computeNetWorth(transactions, accounts, opts) {
@@ -1337,7 +1460,7 @@ function computeNetWorth(transactions, accounts, opts) {
       }
       continue;
     }
-    if (kindOfType(a.type) === "liability") {
+    if (accountKindOf(opts?.accountTypeSettings, a.type) === "liability") {
       if (bal < 0) {
         totalLiabilities += -bal;
         if (a.type === "credit") creditPayable += -bal;
@@ -2379,6 +2502,30 @@ function moveType(s, type, dir) {
   types[b] = tmp;
   return { ...s, types };
 }
+function addType(s, input) {
+  if (!s.groups.some((g) => g.id === input.groupId)) return s;
+  const type = newCustomTypeKey(s, input.label);
+  const cfg = {
+    type,
+    label: input.label,
+    groupId: input.groupId,
+    active: true,
+    kind: input.kind
+  };
+  return { ...s, types: [...s.types, cfg] };
+}
+function removeType(s, type) {
+  if (isSystemAccountType(type)) return s;
+  const next = s.types.filter((t2) => t2.type !== type);
+  if (next.length === s.types.length) return s;
+  return { ...s, types: next };
+}
+function setTypeKind(s, type, kind) {
+  if (isSystemAccountType(type)) return s;
+  const cfg = s.types.find((t2) => t2.type === type);
+  if (!cfg || cfg.kind === kind) return s;
+  return { ...s, types: s.types.map((t2) => t2.type === type ? { ...t2, kind } : t2) };
+}
 
 // ../../packages/core/src/batchOps.ts
 function latestUpdatedAtById(events) {
@@ -2623,6 +2770,15 @@ var zh = {
   "txList.emptyRecurring": "\u8BE5\u89C4\u5219\u6682\u672A\u751F\u6210\u4EA4\u6613",
   "txList.emptyFiltered": "\u6CA1\u6709\u7B26\u5408\u6761\u4EF6\u7684\u6D41\u6C34\u3002",
   "txList.loadMore": "\u52A0\u8F7D\u66F4\u591A\u2026",
+  "txList.monthIncome": "\u6536",
+  "txList.monthExpense": "\u652F",
+  "txList.monthIn": "\u8FDB",
+  "txList.monthOut": "\u51FA",
+  "txList.monthBalanceTitle": "{{account}} \u6708\u672B\u7D2F\u8BA1\u4F59\u989D",
+  "txList.balancePrefix": "\u4F59 {{amount}}",
+  "txList.flatSortHint": "\u91D1\u989D\u6392\u5E8F\u65F6\u4E0D\u6309\u6708\u5206\u7EC4",
+  "txList.expandAll": "\u5C55\u5F00\u5168\u90E8",
+  "txList.collapseAll": "\u6298\u53E0\u5168\u90E8",
   "txList.loanDir.lend": "\u501F\u51FA",
   "txList.loanDir.borrow": "\u501F\u5165",
   "txList.loanDir.collect": "\u6536\u6B3E",
@@ -2672,6 +2828,7 @@ var zh = {
   "entry.nonePerson": "\u65E0\u5F80\u6765",
   "entry.settle": "\u7ED3\u6E05",
   "entry.currentBalanceBase": "\u5F53\u524D\u4F59\u989D {{amount}}",
+  "entry.overdraftWarn": "\u300C{{name}}\u300D\u4F59\u989D\u5C06\u53D8\u4E3A {{amount}}",
   "entry.personCurrentBase": "\u5BF9\u65B9\u5F53\u524D {{amount}}\uFF08{{state}}\uFF09",
   "entry.outstandingBase": "\u5BF9\u65B9\u5F53\u524D\u672A\u7ED3 {{amount}}\uFF08{{state}}\uFF09",
   "entry.settleExact": "\uFF1B\u6B63\u597D\u7ED3\u6E05\uFF0C\u65E0\u5DEE\u989D",
@@ -3020,7 +3177,7 @@ var zh = {
   "settings.category.mergeConfirmUsed": "\u5C06\u628A {{n}} \u6761\u5386\u53F2\u4EA4\u6613\u6539\u5199\u4E3A\u300C{{target}}\u300D\u3001\u6E90\u5206\u7C7B\u300C{{from}}\u300D\u5C06\u88AB\u5220\u9664\uFF0C\u4E0D\u53EF\u64A4\u9500\uFF08\u5DF2\u81EA\u52A8\u5907\u4EFD\uFF09",
   "settings.category.mergeConfirmEmpty": "\u5C06\u5220\u9664\u6E90\u5206\u7C7B\u300C{{from}}\u300D\uFF08\u65E0\u5386\u53F2\u4EA4\u6613\u9700\u6539\u5199\uFF09\uFF0C\u4E0D\u53EF\u64A4\u9500",
   // KR7/task4: settings — 账户类型管理（卡片/分组/停用区/footer + RegroupTypeModal）
-  "settings.accountType.title": "\u8D26\u6237\u7C7B\u578B",
+  "settings.accountType.title": "\u8D26\u6237\u7C7B\u578B\u5206\u7EC4",
   "settings.accountType.resetBtn": "\u6062\u590D\u9ED8\u8BA4",
   "settings.accountType.deleteGroupConfirm": "\u5220\u9664\u5206\u7EC4\u300C{{label}}\u300D\uFF1F\u5176\u4E0B\u7C7B\u578B\u5C06\u8FC1\u79FB\u5230\u300C{{fallback}}\u300D\u3002",
   "settings.accountType.firstRemainingGroup": "\u9996\u4E2A\u5269\u4F59\u5206\u7EC4",
@@ -3043,6 +3200,14 @@ var zh = {
   "settings.accountType.disableBtn": "\u505C\u7528",
   "settings.accountType.regroupTitle": "\u91CD\u5206\u7EC4",
   "settings.accountType.regroupIntro": "\u5C06\u300C{{label}}\u300D\u79FB\u52A8\u5230\uFF1A",
+  // KR7-扩展: settings — 账户类型（重命名 + 自定义类型）
+  "settings.accountTypes.title": "\u8D26\u6237\u7C7B\u578B",
+  "settings.accountTypes.newPlaceholder": "\u65B0\u7C7B\u578B\u540D\u79F0",
+  "settings.accountTypes.add": "\uFF0B \u65B0\u589E\u7C7B\u578B",
+  "settings.accountTypes.delete": "\u5220\u9664",
+  "settings.accountTypes.deleteConfirm": "\u5220\u9664\u81EA\u5B9A\u4E49\u7C7B\u578B\u300C{{label}}\u300D\uFF1F\u65E2\u6709\u8BE5\u7C7B\u578B\u8D26\u6237\u5C06\u663E\u793A\u4E3A\u672A\u77E5\u7C7B\u578B\uFF0C\u4F46\u4E0D\u4E22\u5931\u6570\u636E\u3002",
+  "accountKind.asset": "\u8D44\u4EA7",
+  "accountKind.liability": "\u8D1F\u503A",
   // err.* — core AppError 错误码（两端 catch 处 formatError → t(code) 翻译；code 见 packages/core/src/errors.ts）
   "err.category.notFound": "\u5206\u7C7B\u4E0D\u5B58\u5728",
   "err.category.nameEmpty": "\u5206\u7C7B\u540D\u4E0D\u80FD\u4E3A\u7A7A",
@@ -3247,6 +3412,15 @@ var en = {
   "txList.emptyRecurring": "No entries generated by this rule yet",
   "txList.emptyFiltered": "No matching transactions.",
   "txList.loadMore": "Load more\u2026",
+  "txList.monthIncome": "In",
+  "txList.monthExpense": "Ex",
+  "txList.monthIn": "In",
+  "txList.monthOut": "Out",
+  "txList.monthBalanceTitle": "{{account}} month-end balance",
+  "txList.balancePrefix": "Bal {{amount}}",
+  "txList.flatSortHint": "Not grouped by month when sorted by amount",
+  "txList.expandAll": "Expand all",
+  "txList.collapseAll": "Collapse all",
   "txList.loanDir.lend": "Lend",
   "txList.loanDir.borrow": "Borrow",
   "txList.loanDir.collect": "Collect",
@@ -3296,6 +3470,7 @@ var en = {
   "entry.nonePerson": "no entries",
   "entry.settle": "Settle",
   "entry.currentBalanceBase": "Balance {{amount}}",
+  "entry.overdraftWarn": '"{{name}}" balance will become {{amount}}',
   "entry.personCurrentBase": "Counterparty now {{amount}} ({{state}})",
   "entry.outstandingBase": "Outstanding {{amount}} ({{state}})",
   "entry.settleExact": "; settles exactly, no difference",
@@ -3644,7 +3819,7 @@ var en = {
   "settings.category.mergeConfirmUsed": 'Rewrite {{n}} historical txn(s) to "{{target}}"; source category "{{from}}" will be deleted. Irreversible (auto-backed up).',
   "settings.category.mergeConfirmEmpty": 'Delete source category "{{from}}" (no historical transactions to rewrite). Irreversible.',
   // KR7/task4: settings — account-type management (card/group/disabled-area/footer + RegroupTypeModal)
-  "settings.accountType.title": "Account types",
+  "settings.accountType.title": "Account type groups",
   "settings.accountType.resetBtn": "Reset to default",
   "settings.accountType.deleteGroupConfirm": 'Delete group "{{label}}"? Its types move to "{{fallback}}".',
   "settings.accountType.firstRemainingGroup": "first remaining group",
@@ -3667,6 +3842,14 @@ var en = {
   "settings.accountType.disableBtn": "Disable",
   "settings.accountType.regroupTitle": "Regroup",
   "settings.accountType.regroupIntro": 'Move "{{label}}" to:',
+  // Account types card: rename + custom types
+  "settings.accountTypes.title": "Account Types",
+  "settings.accountTypes.newPlaceholder": "New type name",
+  "settings.accountTypes.add": "\uFF0B Add type",
+  "settings.accountTypes.delete": "Delete",
+  "settings.accountTypes.deleteConfirm": 'Delete custom type "{{label}}"? Accounts of this type will show as unknown type; data is preserved.',
+  "accountKind.asset": "Asset",
+  "accountKind.liability": "Liability",
   // err.* — core AppError error codes (both ends' formatError → t(code); codes in packages/core/src/errors.ts)
   "err.category.notFound": "Category not found",
   "err.category.nameEmpty": "Category name cannot be empty",
@@ -4392,6 +4575,35 @@ var ObsidianDataAdapter = class _ObsidianDataAdapter {
   }
 };
 
+// src/accountGrouping.ts
+var byName = (a, b) => a.name.localeCompare(b.name, "zh");
+function displayTypeLabel2(type, storedLabel) {
+  return displayTypeLabel(type, storedLabel, (key) => t(key));
+}
+function displayGroupLabel2(id, storedLabel) {
+  return displayGroupLabel(id, storedLabel, (key) => t(key));
+}
+function fillAccountOptions(sel, accounts, value, includeHidden, settings, typeFilter) {
+  const typeToGroup = new Map(settings.types.map((at) => [at.type, at.groupId]));
+  const pool = accounts.filter((a) => typeFilter ? a.type === typeFilter : true);
+  const active = pool.filter((a) => a.active).sort(byName);
+  const hidden = includeHidden ? pool.filter((a) => !a.active).sort(byName) : [];
+  const selectedAcc = value ? pool.find((a) => a.id === value) : void 0;
+  if (selectedAcc && !selectedAcc.active && !includeHidden) {
+    hidden.push(selectedAcc);
+  }
+  const groups = resolveTypeGroups(settings).map((g) => ({ label: displayGroupLabel2(g.id, g.label), items: active.filter((a) => typeToGroup.get(a.type) === g.id) })).filter((g) => g.items.length > 0);
+  if (hidden.length > 0) groups.push({ label: t("account.hiddenGroup"), items: hidden });
+  for (const g of groups) {
+    const og = sel.createEl("optgroup", { attr: { label: g.label } });
+    for (const a of g.items) {
+      const o = og.createEl("option", { text: a.name });
+      o.value = a.id;
+      if (a.id === value) o.selected = true;
+    }
+  }
+}
+
 // src/helpDisclosure.ts
 var activeHeaderHelp = null;
 var headerHelpIdSeq = 0;
@@ -4471,35 +4683,6 @@ var import_obsidian17 = require("obsidian");
 
 // src/transactionListModal.ts
 var import_obsidian7 = require("obsidian");
-
-// src/accountGrouping.ts
-var byName = (a, b) => a.name.localeCompare(b.name, "zh");
-function displayTypeLabel2(type, storedLabel) {
-  return displayTypeLabel(type, storedLabel, (key) => t(key));
-}
-function displayGroupLabel2(id, storedLabel) {
-  return displayGroupLabel(id, storedLabel, (key) => t(key));
-}
-function fillAccountOptions(sel, accounts, value, includeHidden, settings, typeFilter) {
-  const typeToGroup = new Map(settings.types.map((at) => [at.type, at.groupId]));
-  const pool = accounts.filter((a) => typeFilter ? a.type === typeFilter : true);
-  const active = pool.filter((a) => a.active).sort(byName);
-  const hidden = includeHidden ? pool.filter((a) => !a.active).sort(byName) : [];
-  const selectedAcc = value ? pool.find((a) => a.id === value) : void 0;
-  if (selectedAcc && !selectedAcc.active && !includeHidden) {
-    hidden.push(selectedAcc);
-  }
-  const groups = resolveTypeGroups(settings).map((g) => ({ label: displayGroupLabel2(g.id, g.label), items: active.filter((a) => typeToGroup.get(a.type) === g.id) })).filter((g) => g.items.length > 0);
-  if (hidden.length > 0) groups.push({ label: t("account.hiddenGroup"), items: hidden });
-  for (const g of groups) {
-    const og = sel.createEl("optgroup", { attr: { label: g.label } });
-    for (const a of g.items) {
-      const o = og.createEl("option", { text: a.name });
-      o.value = a.id;
-      if (a.id === value) o.selected = true;
-    }
-  }
-}
 
 // src/batchModifyModal.ts
 var import_obsidian2 = require("obsidian");
@@ -5545,6 +5728,8 @@ var EntryModal = class extends import_obsidian5.Modal {
     const includeHidden = !this.isCopy;
     this.settlePreviewEl = null;
     this.fromNoteHintEl = null;
+    const od = this.overdraftWarnings();
+    const odFor = (id) => od.find((w) => w.accountId === id)?.wouldBe;
     const amountRow = wrap.createDiv({ cls: "accounting-entry-row" });
     const amountCur = this.amountCurrency();
     amountRow.createEl("label", { text: amountCur !== this.baseCurrency ? t("entry.amountWithCur", { cur: amountCur }) : t("entry.amount"), cls: "accounting-entry-label" });
@@ -5565,6 +5750,7 @@ var EntryModal = class extends import_obsidian5.Modal {
         amountInput.value = next;
         this.updateSettlePreview();
         this.updateFromNoteHint();
+        this.updateOverdraftHints();
       },
       onClose: () => this.closeKeypad(),
       onError: () => flashAmountError(amountInput)
@@ -5583,7 +5769,7 @@ var EntryModal = class extends import_obsidian5.Modal {
         s.account = v;
         this.applyRatePrefill();
         this.rerender();
-      });
+      }, void 0, odFor(s.account));
       const cats = this.categories.filter((c) => c.flow === s.type && c.active !== false).sort((a, b) => a.name.localeCompare(b.name, "zh"));
       this.selectRow(wrap, t("entry.field.category"), s.category, [
         { value: "", label: t("account.selectPlaceholder") },
@@ -5594,11 +5780,11 @@ var EntryModal = class extends import_obsidian5.Modal {
       this.accountSelectRow(wrap, t("entry.field.fromAccount"), s.fromAccount, includeHidden, (v) => {
         s.fromAccount = v;
         this.rerender();
-      });
+      }, void 0, odFor(s.fromAccount));
       this.accountSelectRow(wrap, t("entry.field.toAccount"), s.toAccount, includeHidden, (v) => {
         s.toAccount = v;
         this.rerender();
-      });
+      }, void 0, odFor(s.toAccount));
       this.renderToAmountRow(wrap);
     } else {
       const dirOptions = this.repeatOn ? [
@@ -5618,7 +5804,7 @@ var EntryModal = class extends import_obsidian5.Modal {
         s.account = v;
         this.applyRatePrefill();
         this.rerender();
-      });
+      }, void 0, odFor(s.account));
       this.renderPersonField(wrap);
       this.renderRateRow(wrap);
       const mismatch = this.loanCurrencyMismatch();
@@ -5759,7 +5945,7 @@ var EntryModal = class extends import_obsidian5.Modal {
       }
     }));
   }
-  accountSelectRow(parent, label, value, includeHidden, onChange, typeFilter) {
+  accountSelectRow(parent, label, value, includeHidden, onChange, typeFilter, overdraftWouldBe) {
     const row = parent.createDiv({ cls: "accounting-entry-row" });
     row.createEl("label", { text: label, cls: "accounting-entry-label" });
     const sel = row.createEl("select", { cls: "accounting-entry-input" });
@@ -5772,9 +5958,11 @@ var EntryModal = class extends import_obsidian5.Modal {
       const acc = this.accounts.find((a) => a.id === value);
       if (acc) {
         const bal = this.balancesMap().get(value) ?? 0;
-        const hint = parent.createDiv({ cls: "accounting-entry-balance-hint" });
-        hint.textContent = t("entry.currentBalanceBase", { amount: formatMoney(bal, acc.currency) });
-        row.after(hint);
+        const after = parent.createDiv();
+        after.createEl("div", { text: t("entry.currentBalanceBase", { amount: formatMoney(bal, acc.currency) }), cls: "accounting-entry-balance-hint" });
+        const odEl = after.createEl("div", { cls: "accounting-entry-balance-hint accounting-error", attr: { "data-overdraft-account": value } });
+        this.applyOverdraftToEl(odEl, value, overdraftWouldBe);
+        row.after(after);
       }
     }
     return row;
@@ -5875,6 +6063,40 @@ var EntryModal = class extends import_obsidian5.Modal {
     const map = computeBalances(this.transactions, this.accounts);
     this.balancesCache = { txs: this.transactions, accs: this.accounts, map };
     return map;
+  }
+  /** 预测本笔提交后哪些资产类账户余额<0（软警告，不禁用保存）。编辑时 baseline 排除本笔（this.originalTxId）以撤回旧值。 */
+  overdraftWarnings() {
+    const s = this.state;
+    const txs = this.originalTxId ? this.transactions.filter((tx) => tx.id !== this.originalTxId) : this.transactions;
+    return predictOverdraft(this.accounts, computeBalances(txs, this.accounts), {
+      type: s.type,
+      amount: amountValueOr(s.amount),
+      account: s.account,
+      fromAccount: s.fromAccount,
+      toAccount: s.toAccount,
+      toAmount: amountValueOr(s.toAmount) || void 0,
+      person: s.person,
+      direction: s.direction
+    }, this.accountTypeSettings);
+  }
+  /** 更新单个 overdraft 提示元素的文本与显隐（wouldBe 缺省→隐藏清空）。 */
+  applyOverdraftToEl(el, accountId, wouldBe) {
+    if (wouldBe == null) {
+      el.hide();
+      el.setText("");
+      return;
+    }
+    const acc = this.accounts.find((a) => a.id === accountId);
+    el.setText("\u26A0\uFE0F " + t("entry.overdraftWarn", { name: acc?.name ?? "", amount: formatMoney(wouldBe, acc?.currency ?? this.baseCurrency) }));
+    el.show();
+  }
+  /** 金额变化时局部刷新所有 overdraft 提示（不触发全量 rerender，避免干扰正在使用的计算器键盘）。 */
+  updateOverdraftHints() {
+    const byId = new Map(this.overdraftWarnings().map((w) => [w.accountId, w.wouldBe]));
+    this.fieldContainer?.querySelectorAll("[data-overdraft-account]").forEach((el) => {
+      const id = el.getAttribute("data-overdraft-account");
+      if (id) this.applyOverdraftToEl(el, id, byId.get(id));
+    });
   }
   /** 对方人账户当前已签余额（>0 应收 / <0 应付），移动端仅新建无需排除本对。 */
   outstandingOf(personId) {
@@ -6420,9 +6642,9 @@ var TransactionListModal = class extends import_obsidian7.Modal {
     const hasCategoryPreset = !!categoryDrill;
     const hasPreset = !!presetAccountId || !!presetRecurringRuleId || hasCategoryPreset;
     this.filter = {
-      // preset 跳转（账户、周期账规则、报表分类）：使用传入范围或默认全部历史；否则默认近1月
+      // preset 跳转（账户、周期账规则、报表分类）：使用传入范围或默认全部历史；否则默认近3月
       // 结束日 = 当天，配合「整天包含」语义把今天完整包进来
-      start: categoryDrill?.start ?? (hasPreset ? "1970-01-01" : monthsAgoDateInput(1)),
+      start: categoryDrill?.start ?? (hasPreset ? "1970-01-01" : monthsAgoDateInput(3)),
       end: categoryDrill?.end ?? todayDateInput(),
       types: categoryDrill ? [categoryDrill.flow] : [],
       keyword: "",
@@ -6430,7 +6652,7 @@ var TransactionListModal = class extends import_obsidian7.Modal {
       recurringRuleId: presetRecurringRuleId ?? "",
       category: categoryDrill?.uncategorized ? "" : categoryDrill?.category ?? "",
       uncategorized: categoryDrill?.uncategorized ?? false,
-      quickActive: hasCategoryPreset ? null : hasPreset ? "all" : "month",
+      quickActive: hasCategoryPreset ? null : hasPreset ? "all" : "quarter",
       sort: "time-desc"
     };
   }
@@ -6441,6 +6663,8 @@ var TransactionListModal = class extends import_obsidian7.Modal {
   filteredTransactions = [];
   filter;
   recurringRules = [];
+  /** 本位币（onOpen 读 ledger.json，失败兜底 CNY）；月分组全账户口径折算与月末余额币种用。 */
+  baseCurrency = "CNY";
   accountById = /* @__PURE__ */ new Map();
   opened = false;
   closing = false;
@@ -6449,6 +6673,8 @@ var TransactionListModal = class extends import_obsidian7.Modal {
   sentinelEl = null;
   loadMoreObserver = null;
   selectMode = false;
+  /** 月份分组批量展开态：null=默认（仅最新月 open）/ true=全展开 / false=全折叠；手动单月 toggle 不改此字段。 */
+  allMonthsExpanded = null;
   selectedIds = /* @__PURE__ */ new Set();
   updatedAtById = /* @__PURE__ */ new Map();
   deleting = false;
@@ -6488,6 +6714,11 @@ var TransactionListModal = class extends import_obsidian7.Modal {
       this.accountById = new Map(this.accounts.map((a) => [a.id, a]));
       this.categories = meta.categories;
       this.recurringRules = await this.adapter.readRecurringRules();
+      try {
+        this.baseCurrency = await this.adapter.readBaseCurrency();
+      } catch {
+        this.baseCurrency = "CNY";
+      }
       const storedTypes = await this.adapter.readAccountTypeSettings();
       this.accountTypeSettings = storedTypes ? normalizeAccountTypeSettings(storedTypes) : defaultAccountTypeSettings();
       if (this.transactions.length === 0) {
@@ -6537,9 +6768,9 @@ var TransactionListModal = class extends import_obsidian7.Modal {
     timeRow.createSpan({ text: t("txList.rangeTime"), cls: "accounting-filter-label" });
     const timeControls = timeRow.createDiv({ cls: "accounting-filter-controls" });
     const quickOptions = [
-      { key: "month", label: t("txList.lastMonths", { n: 1 }), start: monthsAgoDateInput(1) },
       { key: "quarter", label: t("txList.lastMonths", { n: 3 }), start: monthsAgoDateInput(3) },
       { key: "halfYear", label: t("txList.lastMonths", { n: 6 }), start: monthsAgoDateInput(6) },
+      { key: "year", label: t("txList.lastMonths", { n: 12 }), start: monthsAgoDateInput(12) },
       { key: "all", label: t("txList.allTime"), start: "1970-01-01" }
     ];
     for (const opt of quickOptions) {
@@ -6707,6 +6938,26 @@ var TransactionListModal = class extends import_obsidian7.Modal {
       if (!this.selectMode) this.selectedIds.clear();
       this.render();
     };
+    const isTimeSort = this.filter.sort === "time-desc" || this.filter.sort === "time-asc";
+    if (!isTimeSort) {
+      bar.createSpan({ text: t("txList.flatSortHint"), cls: "accounting-sort-hint" });
+      return;
+    }
+    if (this.filteredTransactions.length === 0) return;
+    const expandBtn = bar.createEl("button", {
+      text: this.allMonthsExpanded === true ? t("txList.collapseAll") : t("txList.expandAll"),
+      cls: "accounting-collapse-toggle"
+    });
+    expandBtn.onclick = () => {
+      const groups = this.contentEl.querySelectorAll("details.accounting-month-group");
+      if (groups.length === 0) return;
+      const wantExpand = this.allMonthsExpanded !== true;
+      this.allMonthsExpanded = wantExpand;
+      groups.forEach((d) => {
+        d.open = wantExpand;
+      });
+      expandBtn.textContent = wantExpand ? t("txList.collapseAll") : t("txList.expandAll");
+    };
   }
   /** 多选操作栏：全选（覆盖全部 filtered）· 取消 · 已选 N 条 · 批量修改/删除；操作组 margin-left:auto 固定靠右。 */
   renderBatchBar(container) {
@@ -6845,10 +7096,60 @@ var TransactionListModal = class extends import_obsidian7.Modal {
       });
       return;
     }
+    const isTimeSort = this.filter.sort === "time-desc" || this.filter.sort === "time-asc";
+    if (isTimeSort) {
+      this.renderMonthGroups(listEl);
+      return;
+    }
     this.renderedCount = 0;
     this.appendChunk();
     if (this.renderedCount < this.filteredTransactions.length) {
       this.setupInfiniteScroll();
+    }
+  }
+  /**
+   * 时间序按月分组渲染：每月一个可折叠 `<details>`，标题=月份+笔数+收入/支出（+单账户月末累计余额）。
+   * 原生 `<details>` 单月 toggle 免 JS state；批量「展开/折叠全部」由 allMonthsExpanded 字段驱动（render 重建按其复位 open，默认仅最新月）。
+   * 分组态不挂 IntersectionObserver（展开月全量渲染、折叠月只标题，默认仅展开 1 个月，DOM 可控）。
+   */
+  renderMonthGroups(listEl) {
+    const accountId = this.filter.accountId;
+    const singleAccount = !!accountId;
+    const balanceByTxId = singleAccount ? computeRunningBalanceForAccount(this.transactions, this.accounts, accountId) : null;
+    const groups = buildMonthGroups(this.filteredTransactions, {
+      sort: this.filter.sort === "time-desc" ? "time-desc" : "time-asc",
+      base: this.baseCurrency,
+      singleAccount,
+      accountId,
+      balanceByTxId
+    });
+    const latestYm = groups.reduce((m, g) => g.ym > m ? g.ym : m, "");
+    const fmtInt = (n) => {
+      const sign = n < 0 ? "-" : "";
+      return sign + Math.round(Math.abs(n)).toLocaleString("zh-CN", { maximumFractionDigits: 0 });
+    };
+    for (const g of groups) {
+      const details = listEl.createEl("details", { cls: "accounting-month-group" });
+      details.open = this.allMonthsExpanded === true ? true : this.allMonthsExpanded === false ? false : g.ym === latestYm;
+      const head = details.createEl("summary", { cls: "accounting-collapsible-head accounting-month-head" });
+      const label = head.createDiv({ cls: "accounting-month-label" });
+      label.createSpan({ text: formatMonthDisplay(g.ym, getLocale()) });
+      label.createSpan({ text: `(${g.txs.length})`, cls: "accounting-month-count" });
+      const totals = head.createDiv({ cls: "accounting-month-totals" });
+      const inLabel = singleAccount ? t("txList.monthIn") : t("txList.monthIncome");
+      const outLabel = singleAccount ? t("txList.monthOut") : t("txList.monthExpense");
+      totals.createSpan({ text: `${inLabel} ${fmtInt(g.income)}`, cls: "accounting-amount-positive" });
+      totals.createSpan({ text: `${outLabel} ${fmtInt(g.expense)}`, cls: "accounting-amount-negative" });
+      if (g.endBalance != null) {
+        totals.createSpan({
+          text: t("txList.balancePrefix", { amount: fmtInt(g.endBalance) }),
+          cls: g.endBalance < 0 ? "accounting-amount-negative" : "accounting-month-balance",
+          attr: { title: t("txList.monthBalanceTitle", { account: this.accountById.get(accountId)?.name ?? accountId }) }
+        });
+      }
+      for (const tx of g.txs) {
+        this.renderTransaction(details, tx);
+      }
     }
   }
   /** 追加下一批流水到列表尾部；首批与滚动触达预载区时复用。加载到顶即收尾观察者。 */
@@ -6891,7 +7192,10 @@ var TransactionListModal = class extends import_obsidian7.Modal {
       this.loadMoreObserver.disconnect();
       this.loadMoreObserver = null;
     }
-    this.sentinelEl = null;
+    if (this.sentinelEl) {
+      this.sentinelEl.remove();
+      this.sentinelEl = null;
+    }
     this.listEl = null;
   }
   renderTransaction(container, tx) {
@@ -6955,12 +7259,12 @@ var TransactionListModal = class extends import_obsidian7.Modal {
   /** 是否有任意筛选项生效（决定是否显示统一「清除」按钮；对齐桌面 hasFilter）。 */
   hasActiveFilter() {
     const f = this.filter;
-    return f.types.length > 0 || !!f.accountId || !!f.keyword || !!f.recurringRuleId || !!f.category || f.uncategorized || f.quickActive !== "month" || f.start !== monthsAgoDateInput(1) || f.end !== todayDateInput();
+    return f.types.length > 0 || !!f.accountId || !!f.keyword || !!f.recurringRuleId || !!f.category || f.uncategorized || f.quickActive !== "quarter" || f.start !== monthsAgoDateInput(3) || f.end !== todayDateInput();
   }
-  /** 重置所有筛选项到默认（近1月 + 全部类型/账户 + 无关键词 + 无周期账；对齐桌面 clearAll）。 */
+  /** 重置所有筛选项到默认（近3月 + 全部类型/账户 + 无关键词 + 无周期账；对齐桌面 clearAll）。 */
   resetFilter() {
     this.filter = {
-      start: monthsAgoDateInput(1),
+      start: monthsAgoDateInput(3),
       end: todayDateInput(),
       types: [],
       keyword: "",
@@ -6968,7 +7272,7 @@ var TransactionListModal = class extends import_obsidian7.Modal {
       recurringRuleId: "",
       category: "",
       uncategorized: false,
-      quickActive: "month",
+      quickActive: "quarter",
       sort: this.filter.sort
       // 排序非筛选维度，清除时保留（对齐桌面 clearAll 不动 sort）
     };
@@ -7095,6 +7399,8 @@ var AdjustBalanceModal = class extends import_obsidian8.Modal {
   keyboardAvoidance;
   adjustCat = t("seed.category.adjust");
   selectedCategory = this.adjustCat;
+  /** 交易时间（datetime-local 表单值）；默认当前时刻，提交时转本地偏移 ISO 写入 ts */
+  tsValue = nowDatetimeLocal();
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
@@ -7128,6 +7434,13 @@ var AdjustBalanceModal = class extends import_obsidian8.Modal {
     });
     this.deltaEl = contentEl.createEl("div", { cls: "accounting-adjust-delta" });
     this.updateDelta();
+    const categoryRow = contentEl.createDiv({ cls: "accounting-adjust-row" });
+    categoryRow.createEl("label", { text: t("entry.field.category"), cls: "accounting-adjust-label" });
+    this.categoryEl = categoryRow.createEl("select", { cls: "accounting-adjust-input" });
+    this.categoryEl.addEventListener("change", () => {
+      this.selectedCategory = this.categoryEl.value;
+    });
+    this.renderCategoryOptions();
     const noteRow = contentEl.createDiv({ cls: "accounting-adjust-row" });
     noteRow.createEl("label", { text: t("entry.field.note"), cls: "accounting-adjust-label" });
     this.noteEl = noteRow.createEl("input", { cls: "accounting-adjust-input" });
@@ -7137,13 +7450,16 @@ var AdjustBalanceModal = class extends import_obsidian8.Modal {
       if (e.key === "Enter") this.submit();
       if (e.key === "Escape") this.close();
     });
-    const categoryRow = contentEl.createDiv({ cls: "accounting-adjust-row" });
-    categoryRow.createEl("label", { text: t("entry.field.category"), cls: "accounting-adjust-label" });
-    this.categoryEl = categoryRow.createEl("select", { cls: "accounting-adjust-input" });
-    this.categoryEl.addEventListener("change", () => {
-      this.selectedCategory = this.categoryEl.value;
-    });
-    this.renderCategoryOptions();
+    const timeRow = contentEl.createDiv({ cls: "accounting-adjust-row" });
+    timeRow.createEl("label", { text: t("entry.field.ts"), cls: "accounting-adjust-label" });
+    timeRow.appendChild(createDateField({
+      kind: "datetime-local",
+      value: this.tsValue,
+      cls: "accounting-adjust-input",
+      onChange: (iso) => {
+        this.tsValue = iso;
+      }
+    }));
     this.errorEl = contentEl.createDiv();
     const footer = contentEl.createDiv({ cls: "accounting-adjust-footer" });
     const cancel = footer.createEl("button", { text: t("common.cancel"), cls: "accounting-btn-secondary" });
@@ -7237,7 +7553,7 @@ var AdjustBalanceModal = class extends import_obsidian8.Modal {
       op: "upsert",
       id: newTxId(),
       type: delta > 0 ? "income" : "expense",
-      ts: nowLocalISO(),
+      ts: datetimeLocalToISO(this.tsValue),
       amount: Math.abs(delta),
       currency: this.account.currency,
       account: this.account.id,
@@ -7921,7 +8237,7 @@ var BalanceModal = class extends import_obsidian13.Modal {
     this.baseCurrency = await this.adapter.readBaseCurrency();
     const rates = await this.adapter.readRates();
     const balances = computeBalances(snap.transactions, snap.accounts);
-    const nw = computeNetWorth(snap.transactions, snap.accounts, { rates, base: this.baseCurrency });
+    const nw = computeNetWorth(snap.transactions, snap.accounts, { rates, base: this.baseCurrency, accountTypeSettings: this.accountTypeSettings });
     const baseBalances = convertBalancesToBase(balances, snap.accounts, rates, this.baseCurrency);
     const totalRec = nw.receivables.reduce((s, r) => s + r.amount, 0);
     const totalPay = nw.payables.reduce((s, p) => s + p.amount, 0);
@@ -7942,11 +8258,6 @@ var BalanceModal = class extends import_obsidian13.Modal {
     const active = snap.accounts.filter((a) => a.active);
     const hidden = snap.accounts.filter((a) => !a.active);
     this.renderGroups(contentEl, active, balances, baseBalances, snap);
-    if (hidden.length > 0) {
-      const h = contentEl.createEl("details", { cls: "accounting-hidden" });
-      h.createEl("summary", { text: t("balance.hiddenSummary"), cls: "accounting-collapsible-head" });
-      this.renderGroups(h, hidden, balances, baseBalances, snap);
-    }
     const createAccountEl = contentEl.createDiv({ cls: "accounting-create-account-row" });
     const createBtn = createAccountEl.createEl("button", {
       text: t("balance.createAccountBtn"),
@@ -7962,6 +8273,11 @@ var BalanceModal = class extends import_obsidian13.Modal {
         () => this.refresh()
       ).open();
     };
+    if (hidden.length > 0) {
+      const h = contentEl.createEl("details", { cls: "accounting-hidden" });
+      h.createEl("summary", { text: t("balance.hiddenSummary"), cls: "accounting-collapsible-head" });
+      this.renderGroups(h, hidden, balances, baseBalances, snap);
+    }
   }
   /** 统一底部导航条（由 CSS 固定到底部，内容区预留 safe-area）。 */
   renderNav() {
@@ -7980,16 +8296,17 @@ var BalanceModal = class extends import_obsidian13.Modal {
     for (const g of resolveTypeGroups(this.accountTypeSettings)) {
       const items = (byGroup.get(g.id) ?? []).slice().sort((a, b) => a.name.localeCompare(b.name, "zh"));
       if (items.length === 0) continue;
-      const group = parent.createDiv({ cls: "accounting-group" });
-      const head = group.createDiv({ cls: "accounting-group-head" });
+      const group = parent.createEl("details", { cls: "accounting-group" });
+      const head = group.createEl("summary", { cls: "accounting-group-head" });
       const groupTotal = items.reduce((s, a) => s + (baseBalances.get(a.id) ?? 0), 0);
-      const hasLiability = g.types.some((at) => kindOfType(at.type) === "liability");
-      head.createEl("span", { text: `${displayGroupLabel2(g.id, g.label)} \xB7 ${hasLiability ? t("balance.kindLiability") : t("balance.kindAsset")}` });
+      const hasLiability = g.types.some((at) => accountKindOf(this.accountTypeSettings, at.type) === "liability");
+      head.createEl("span", { text: `${displayGroupLabel2(g.id, g.label)} \xB7 ${hasLiability ? t("balance.kindLiability") : t("balance.kindAsset")}`, cls: "accounting-group-head-title" });
       head.createEl("span", { text: formatMoney(groupTotal, this.baseCurrency) });
       for (const a of items) {
         const row = group.createDiv({ cls: "accounting-row" });
-        const name = row.createEl("span", { text: a.name, cls: "accounting-row-name" });
-        if (a.note) name.createSpan({ text: ` ${a.note}`, cls: "accounting-muted" });
+        const name = row.createEl("span", { cls: "accounting-row-name" });
+        const label = name.createEl("span", { text: a.name, cls: "accounting-row-name-label" });
+        if (a.note) label.createSpan({ text: ` ${a.note}`, cls: "accounting-muted" });
         name.title = t("balance.accountOptionsHint");
         name.onclick = () => {
           new AccountActionModal(
@@ -8083,7 +8400,7 @@ var ReportModal = class extends import_obsidian14.Modal {
   closing = false;
   transactions = [];
   loadFailed = false;
-  range = "thisMonth";
+  range = "last1m";
   /** 账户元数据（净值序列归集用）；reloadData 时从 accounts.json 读取 */
   accounts = [];
   /** 汇率表（多币种折算到本位币）；reloadData 时从 rates.json 读取，缺失为空表（各币种按 1 回退） */
@@ -8667,6 +8984,7 @@ var SettingsModal = class extends import_obsidian15.Modal {
     const sc = slideClass(this.slide);
     if (sc) this.contentEl.addClass(sc);
     this.contentEl.addClass("accounting-settings-modal");
+    this.contentEl.addClass("accounting-has-ledger-pill");
     renderNavBar(this.modalEl, "settings", this.navCtx, () => this.close());
     const onSwitch = this.onSwitchLedger ? (newSubdir) => {
       this.onSwitchLedger(newSubdir, () => this.close());
@@ -8840,6 +9158,9 @@ var DiagLogModal = class extends import_obsidian16.Modal {
 
 // src/settings.ts
 var FEEDBACK_EMAIL = "honeyledger@163.com";
+function kindOfLabel(type) {
+  return type === "credit" || type === "loan" ? t("accountKind.liability") : t("accountKind.asset");
+}
 function createCurrencyPicker(parent, opts) {
   const wrap = parent.createDiv({ cls: "accounting-currency-picker" });
   const input = wrap.createEl("input", { cls: "accounting-ledger-input accounting-currency-picker-input" });
@@ -10065,11 +10386,21 @@ var AccountingSettings = class {
     await adapter.writeAccountTypeSettings(draft);
   }
   /**
-   * 渲染账户类型管理卡片。tap-based 编辑（不拖拽）：分组/类型排序用上移/下移按钮，类型换组用分组下拉。
-   * 本地 draft + dirty 跟踪；保存走 saveAccountTypeDraft（含备份），取消重新读入丢弃草稿。
-   * 复用 core 默认值/归一化与既有 adapter 读写方法，不重新实现归一化、不新增 adapter 方法。
+   * 渲染「设置-分类」账户类型界面：拆两个卡片（与桌面端对齐）。
+   *  1. 账户类型卡（accountTypes）：系统类型重命名 + 自定义类型新增/删除/改 kind + 启停。
+   *  2. 账户类型分组卡（accountType）：分组改名/增删/排序、类型归属/组内排序；类型行 label 只读（重命名/停用归「账户类型」卡）。
+   * tap-based 编辑（不拖拽）：排序用上移/下移按钮，换组用 RegroupTypeModal。
+   * 即时保存（与桌面端一致）：每次编辑直接写 account-types.json，无保存/取消 footer；
+   * 破坏性操作（删类型/删分组/恢复默认）先 backup('pre-account-types') 再写。内联 label 输入 blur 提交（避免每击键写盘）。
+   * 复用 core 默认值/归一化/编辑纯函数与既有 adapter 读写方法，不重新实现归一化、不新增 adapter 方法。
    */
   renderAccountTypeView(containerEl) {
+    const typesCardEl = containerEl.createDiv("accounting-ledger-card accounting-cat-flow-card accounting-cat-collapsed");
+    const typesHeadEl = typesCardEl.createDiv("accounting-ledger-card-head");
+    typesHeadEl.createEl("span", { cls: "accounting-cat-toggle" });
+    typesHeadEl.createEl("span", { text: t("settings.accountTypes.title"), cls: "accounting-ledger-card-title" });
+    const typesBadgeEl = typesHeadEl.createEl("span", { cls: "accounting-ledger-badge accounting-ledger-badge-muted" });
+    const typesBodyEl = typesCardEl.createDiv("accounting-ledger-list");
     const cardEl = containerEl.createDiv("accounting-ledger-card accounting-cat-flow-card accounting-cat-collapsed");
     const headEl = cardEl.createDiv("accounting-ledger-card-head");
     headEl.createEl("span", { cls: "accounting-cat-toggle" });
@@ -10077,61 +10408,150 @@ var AccountingSettings = class {
     const badgeEl = headEl.createEl("span", { cls: "accounting-ledger-badge accounting-ledger-badge-muted" });
     const headActions = headEl.createDiv("accounting-ledger-head-actions");
     const resetBtn = headActions.createEl("button", { text: t("settings.accountType.resetBtn"), cls: "accounting-ledger-refresh" });
-    const refreshBtn = headActions.createEl("button", { text: t("settings.refreshBtn"), cls: "accounting-ledger-refresh" });
     const bodyEl = cardEl.createDiv("accounting-ledger-list");
     headEl.addEventListener("click", (e) => {
       if (e.target.closest("button")) return;
       cardEl.classList.toggle("accounting-cat-collapsed");
     });
+    typesHeadEl.addEventListener("click", (e) => {
+      if (e.target.closest("button")) return;
+      typesCardEl.classList.toggle("accounting-cat-collapsed");
+    });
     let draft = defaultAccountTypeSettings();
-    let baseline = JSON.stringify(draft);
-    let footerEl = null;
-    let saveBtn = null;
-    let cancelBtn = null;
-    const dirty = () => JSON.stringify(draft) !== baseline;
-    const syncFooter = () => {
-      if (!footerEl || !saveBtn || !cancelBtn) return;
-      const d = dirty();
-      saveBtn.disabled = !d;
-      cancelBtn.style.display = d ? "" : "none";
+    const persist = async (next, withBackup = false) => {
+      try {
+        if (withBackup) await this.saveAccountTypeDraft(next);
+        else await this.currentAdapter().writeAccountTypeSettings(next);
+      } catch (error) {
+        new import_obsidian17.Notice(t("entry.saveFailed", { msg: formatError(error) }));
+      }
     };
-    const renderList = () => {
+    const renderTypesBody = () => {
+      typesBodyEl.empty();
+      typesBadgeEl.setText(String(draft.types.length));
+      const renderRow = (at, inactive2) => {
+        const row = typesBodyEl.createDiv("accounting-at-type");
+        const info = row.createDiv("accounting-at-type-info");
+        const isSys = isSystemAccountType(at.type);
+        const labelIn = info.createEl("input", { cls: "accounting-ledger-input" });
+        labelIn.value = isSys ? displayTypeLabel2(at.type, at.label) : at.label;
+        labelIn.addEventListener("blur", () => {
+          const raw = labelIn.value.trim();
+          if (raw && raw !== labelIn.defaultValue) {
+            draft = setTypeLabel(draft, at.type, raw);
+            void persist(draft);
+          }
+        });
+        labelIn.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") labelIn.blur();
+        });
+        const actions = row.createDiv("accounting-ledger-actions");
+        if (isSys) {
+          const kindSpan = actions.createEl("span", { text: kindOfLabel(at.type), cls: "accounting-at-kind" });
+        } else {
+          const kindSel2 = actions.createEl("select", { cls: "accounting-ledger-input accounting-at-kind-select" });
+          kindSel2.createEl("option", { text: t("accountKind.asset"), value: "asset" });
+          kindSel2.createEl("option", { text: t("accountKind.liability"), value: "liability" });
+          kindSel2.value = at.kind ?? "asset";
+          kindSel2.addEventListener("change", () => {
+            draft = setTypeKind(draft, at.type, kindSel2.value);
+            void persist(draft);
+          });
+        }
+        if (inactive2) {
+          const enableBtn = actions.createEl("button", { text: t("settings.accountType.enableBtn"), cls: "accounting-ledger-create" });
+          enableBtn.onclick = () => {
+            draft = setTypeActive(draft, at.type, true);
+            void persist(draft);
+            renderTypesBody();
+            renderGroupsBody();
+          };
+        } else {
+          const stopBtn = actions.createEl("button", { text: t("settings.accountType.disableBtn") });
+          stopBtn.onclick = () => {
+            draft = setTypeActive(draft, at.type, false);
+            void persist(draft);
+            renderTypesBody();
+            renderGroupsBody();
+          };
+        }
+        if (!isSys) {
+          const delBtn = actions.createEl("button", { text: t("settings.accountTypes.delete"), cls: "accounting-ledger-delete" });
+          delBtn.onclick = () => {
+            if (!confirm(t("settings.accountTypes.deleteConfirm", { label: at.label }))) return;
+            draft = removeType(draft, at.type);
+            void persist(draft, true);
+            renderTypesBody();
+            renderGroupsBody();
+          };
+        }
+      };
+      const active = draft.types.filter((at) => at.active !== false);
+      const inactive = draft.types.filter((at) => at.active === false);
+      for (const at of active) renderRow(at, false);
+      if (inactive.length > 0) {
+        const details = typesBodyEl.createEl("details");
+        details.createEl("summary", { text: t("settings.accountType.inactiveSummary", { n: inactive.length }), cls: "accounting-collapsible-head" });
+        for (const at of inactive) renderRow(at, true);
+      }
+      const addRow = typesBodyEl.createDiv("accounting-at-add-group");
+      const nameInput = addRow.createEl("input", { cls: "accounting-ledger-input" });
+      nameInput.type = "text";
+      nameInput.placeholder = t("settings.accountTypes.newPlaceholder");
+      const kindSel = addRow.createEl("select", { cls: "accounting-ledger-input accounting-at-kind-select" });
+      kindSel.createEl("option", { text: t("accountKind.asset"), value: "asset" });
+      kindSel.createEl("option", { text: t("accountKind.liability"), value: "liability" });
+      const groupSel = addRow.createEl("select", { cls: "accounting-ledger-input" });
+      for (const g of draft.groups) groupSel.createEl("option", { text: g.label, value: g.id });
+      const addBtn = addRow.createEl("button", { text: t("settings.accountTypes.add"), cls: "accounting-ledger-create" });
+      addBtn.disabled = true;
+      nameInput.addEventListener("input", () => {
+        addBtn.disabled = !nameInput.value.trim();
+      });
+      addBtn.onclick = () => {
+        const label = nameInput.value.trim();
+        if (!label) return;
+        draft = addType(draft, { label, kind: kindSel.value, groupId: groupSel.value });
+        void persist(draft, true);
+        nameInput.value = "";
+        addBtn.disabled = true;
+        renderTypesBody();
+        renderGroupsBody();
+      };
+    };
+    const renderGroupsBody = () => {
       bodyEl.empty();
       badgeEl.setText(String(draft.types.filter((at) => at.active !== false).length));
       for (const group of draft.groups) {
         this.renderAccountTypeGroup(bodyEl, group, draft, {
           onGroupLabel: (label) => {
             draft = setGroupLabel(draft, group.id, label);
-            syncFooter();
+            void persist(draft);
           },
           onMoveGroup: (dir) => {
             draft = moveGroup(draft, group.id, dir);
-            renderList();
+            void persist(draft);
+            renderGroupsBody();
           },
           onRemoveGroup: () => {
             if (draft.groups.length <= 1) return;
             const fallback = draft.groups.find((g) => g.id !== group.id);
             if (!confirm(t("settings.accountType.deleteGroupConfirm", { label: group.label, fallback: fallback?.label ?? t("settings.accountType.firstRemainingGroup") }))) return;
             draft = removeGroup(draft, group.id);
-            renderList();
-          },
-          onTypeLabel: (type, label) => {
-            draft = setTypeLabel(draft, type, label);
-            syncFooter();
+            void persist(draft, true);
+            renderGroupsBody();
           },
           onRegroup: (type, label) => {
             new RegroupTypeModal(this.app, label, group.id, draft.groups, async (groupId) => {
               draft = setTypeGroup(draft, type, groupId);
-              renderList();
+              void persist(draft);
+              renderGroupsBody();
             }).open();
           },
           onMoveType: (type, dir) => {
             draft = moveType(draft, type, dir);
-            renderList();
-          },
-          onToggleActive: (type) => {
-            draft = setTypeActive(draft, type, false);
-            renderList();
+            void persist(draft);
+            renderGroupsBody();
           }
         });
       }
@@ -10148,76 +10568,34 @@ var AccountingSettings = class {
         const label = nameInput.value.trim();
         if (!label) return;
         draft = addGroup(draft, label);
+        void persist(draft, true);
         nameInput.value = "";
         addBtn.disabled = true;
-        renderList();
+        renderGroupsBody();
       };
-      const inactive = draft.types.filter((at) => at.active === false);
-      if (inactive.length > 0) {
-        const details = bodyEl.createEl("details");
-        details.createEl("summary", { text: t("settings.accountType.inactiveSummary", { n: inactive.length }), cls: "accounting-collapsible-head" });
-        for (const at of inactive) {
-          const row = details.createDiv("accounting-at-type");
-          const info = row.createDiv("accounting-at-type-info");
-          const labelIn = info.createEl("input", { cls: "accounting-ledger-input" });
-          labelIn.value = at.label;
-          labelIn.addEventListener("input", () => {
-            draft = setTypeLabel(draft, at.type, labelIn.value);
-            syncFooter();
-          });
-          const actions = row.createDiv("accounting-ledger-actions");
-          const enableBtn = actions.createEl("button", { text: t("settings.accountType.enableBtn"), cls: "accounting-ledger-create" });
-          enableBtn.onclick = () => {
-            draft = setTypeActive(draft, at.type, true);
-            renderList();
-          };
-        }
-      }
-      footerEl = bodyEl.createDiv("accounting-ledger-card-actions");
-      const saveBtnEl = footerEl.createEl("button", { text: t("common.save"), cls: "accounting-currency-save" });
-      const cancelBtnEl = footerEl.createEl("button", { text: t("common.cancel"), cls: "accounting-currency-cancel" });
-      saveBtn = saveBtnEl;
-      cancelBtn = cancelBtnEl;
-      saveBtnEl.onclick = async () => {
-        if (saveBtnEl.disabled) return;
-        saveBtnEl.disabled = true;
-        try {
-          await this.saveAccountTypeDraft(draft);
-          baseline = JSON.stringify(draft);
-          new import_obsidian17.Notice(t("settings.accountType.savedNotice"));
-        } catch (error) {
-          new import_obsidian17.Notice(t("entry.saveFailed", { msg: formatError(error) }));
-        } finally {
-          renderList();
-        }
-      };
-      cancelBtnEl.onclick = () => {
-        void refresh();
-      };
-      syncFooter();
+    };
+    const renderList = () => {
+      renderGroupsBody();
+      renderTypesBody();
     };
     const refresh = async () => {
       try {
         draft = await this.loadAccountTypeDraft();
-        baseline = JSON.stringify(draft);
         renderList();
       } catch (error) {
         bodyEl.empty();
         bodyEl.createEl("p", { text: t("settings.accountType.loadFailed", { msg: formatError(error) }), cls: "accounting-ledger-empty" });
       }
     };
-    refreshBtn.onclick = async () => {
-      await refresh();
-      new import_obsidian17.Notice(t("settings.accountType.refreshedNotice"));
-    };
     resetBtn.onclick = () => {
       if (!confirm(t("settings.accountType.resetConfirm"))) return;
       draft = defaultAccountTypeSettings();
+      void persist(draft, true);
       renderList();
     };
     void refresh();
   }
-  /** 渲染单个类型分组区块：改名 + 类型计数 + 上移/下移 + 删除分组，组内类型行（label + 重分组/上移/下移/停用）。 */
+  /** 渲染单个类型分组区块：改名 + 类型计数 + 上移/下移 + 删除分组，组内类型行（label + 重分组/上移/下移）。 */
   renderAccountTypeGroup(parent, group, draft, cb) {
     const groupIdx = draft.groups.findIndex((g) => g.id === group.id);
     const groupTypes = draft.types.filter((at) => at.groupId === group.id && at.active !== false);
@@ -10226,7 +10604,13 @@ var AccountingSettings = class {
     const nameInput = head.createEl("input", { cls: "accounting-ledger-input accounting-at-group-name" });
     nameInput.type = "text";
     nameInput.value = group.label;
-    nameInput.addEventListener("input", () => cb.onGroupLabel(nameInput.value));
+    nameInput.addEventListener("blur", () => {
+      const raw = nameInput.value.trim();
+      if (raw && raw !== nameInput.defaultValue) cb.onGroupLabel(raw);
+    });
+    nameInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") nameInput.blur();
+    });
     head.createEl("span", { text: String(groupTypes.length), cls: "accounting-ledger-badge accounting-ledger-badge-muted" });
     const actions = head.createDiv("accounting-ledger-actions");
     const upBtn = actions.createEl("button", { text: "\u2191" });
@@ -10256,16 +10640,12 @@ var AccountingSettings = class {
       tDown.setAttribute("aria-label", t("settings.accountType.moveDownTypeAria"));
       tDown.onclick = () => cb.onMoveType(at.type, 1);
       const info = row.createDiv("accounting-at-type-info");
-      const labelIn = info.createEl("input", { cls: "accounting-ledger-input" });
-      labelIn.value = at.label;
-      labelIn.addEventListener("input", () => cb.onTypeLabel(at.type, labelIn.value));
+      const labelEl = info.createEl("span", { text: displayTypeLabel2(at.type, at.label), cls: "accounting-at-type-label" });
       const rowActions = row.createDiv("accounting-ledger-actions");
       const regroupBtn = rowActions.createEl("button", { text: t("settings.accountType.regroupBtn") });
       regroupBtn.disabled = draft.groups.length <= 1;
       regroupBtn.setAttribute("aria-label", t("settings.accountType.regroupAria"));
       regroupBtn.onclick = () => cb.onRegroup(at.type, at.label);
-      const stopBtn = rowActions.createEl("button", { text: t("settings.accountType.disableBtn") });
-      stopBtn.onclick = () => cb.onToggleActive(at.type);
     });
   }
 };

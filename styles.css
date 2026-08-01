@@ -72,6 +72,13 @@
   overflow-y: auto;
 }
 
+/* 记一笔页 contentEl 自身即滚动容器，其 padding-top 不能再占顶部避让带——顶部带已改由 .modal 的
+   padding-top 提供（见 .accounting-fullscreen:not(.accounting-desktop)）。保留 40px 内 padding 会与之叠加成
+   80px、且随滚动滚走。移动端把顶部内 padding 收到 8px（仅留小间隙），底部/横向 padding 不动。 */
+.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-entry-modal {
+  padding-top: 8px;
+}
+
 /* 顶部当前账本别名胶囊：accent 圆点 + 别名，居中、随明暗主题 */
 .accounting-entry-ledger {
   align-self: center;
@@ -121,12 +128,12 @@
   font-size: var(--font-ui-smaller);
 }
 
-/* 顶部账本胶囊：绝对定位于 .modal（与右上角 .modal-close-button 同父级坐标系），镜像其 top，
+/* 顶部账本胶囊：绝对定位于 .modal（与右上角关闭按钮同父级坐标系），镜像其 top，
    保证任意刘海/安全区下都与 ✕ 同一水平线。记账/流水/账户/统计四页共用（由 mountLedgerPill 挂到 modalEl）。
    挂 modalEl 而非 contentEl——contentEl 各页 render() 会 empty()，胶囊在 modalEl 上不受影响。 */
 .modal.accounting-fullscreen:not(.accounting-desktop) .accounting-entry-ledger {
   position: absolute;
-  top: max(env(safe-area-inset-top), 24px); /* 与 .modal-close-button 移动端 top 完全一致 */
+  top: max(env(safe-area-inset-top), 24px); /* 与移动端关闭按钮 top 完全一致 */
   left: 12px;
   margin-bottom: 0; /* 覆盖流内默认 20px */
   z-index: 2;
@@ -139,11 +146,11 @@
   z-index: 2;
 }
 
-/* 胶囊占顶部一行：内容下移避让（移动端 ~40px 覆盖胶囊高度；桌面窄面板稍小）。
-   特异性 (0,3,0) 高于 .accounting-fullscreen .modal-content 的 padding:5px (0,2,0)，可靠覆盖 padding-top。 */
-.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-has-ledger-pill {
-  padding-top: 40px;
-}
+/* 顶部避让（胶囊 + 右上角 ✕）改由 .modal 自身的 padding-top 顶部带承担（见下方
+   .accounting-fullscreen:not(.accounting-desktop) 的 padding-top）。原先在 .modal-content（滚动容器）
+   内给 padding-top:40px，会随滚动滚走 → 正文上划时从胶囊/✕ 的透明缝隙穿帮。挪到不滚动的 .modal 上后，
+   正文可见顶沿固定落在带子下沿、被裁住，不再穿帮。移动端四页（记账/流水/账户/统计）共用此带。
+   桌面窄面板沿用 contentEl 内 padding（该区不滚动，无此问题）。 */
 .modal.accounting-fullscreen.accounting-desktop .accounting-has-ledger-pill {
   padding-top: 30px;
 }
@@ -672,42 +679,122 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: var(--font-ui-smaller);
+  font-size: var(--font-ui-medium);
   font-weight: 600;
   color: var(--text-normal);
   /* 浅绿底色：color-mix 把主题 --color-green 混进次级背景，与下方账户行拉开区分；随明/暗主题自适应。
-     前一行 --background-secondary 为兜底（color-mix 不可用时降级为原中性底）。 */
+     前一行 --background-secondary 为兜底（color-mix 不可用时降级为原中性底）。
+     字号/高度：用 medium（§3「区块标题」归档）+ 10px padding——原 smaller/4px 比下方账户行（small/12px）
+     还小还矮、层级反了；现标题条与账户行高度协调、字号大一档确立分组标题层级。 */
   background: var(--background-secondary);
   background: color-mix(in srgb, var(--color-green) 15%, var(--background-secondary));
   border: 1px solid var(--background-modifier-border);
   border-radius: 4px;
-  padding: 4px 8px;
-  margin-bottom: 2px;
+  padding: 10px 8px;
+  margin-bottom: 4px;
+  /* 作为 <details> 的 <summary>：整条可点切换展开/收纳（默认收纳见 .accounting-group 无 open）。
+     重置原生 disclosure 三角（WKWebView 下改用自定义 ▸/▾，与 .accounting-collapsible-head 同口径）。 */
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.accounting-group-head::-webkit-details-marker,
+.accounting-group-head::marker {
+  display: none;
+}
+
+/* 分组标题前的 ▸/▾：收纳（默认）朝右 ▸，展开 details[open] 朝下 ▾——与桌面端 Accounts 及
+   .accounting-collapsible-head 用字切换（非旋转）保持一致。 */
+.accounting-group-head-title::before {
+  content: '▸';
+  margin-right: 6px;
+  color: var(--text-faint);
+  font-size: 0.85em;
+}
+
+.accounting-group[open] > .accounting-group-head > .accounting-group-head-title::before {
+  content: '▾';
 }
 
 .accounting-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 3px 4px;
+  /* 触控行高：原 padding 3px 过密、相邻可点区几乎相连易误触，提到 12px 对齐 §4.8 列表行基线
+    （流水行 10px / 账本行 12px）；border-bottom 给每行明确视觉边界，避免密排行列里
+     左名称与右金额跨行错认。分组最后一行去线（见下 .accounting-group .accounting-row:last-child）。 */
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--background-modifier-border);
   font-size: var(--font-ui-small);
+}
+
+.accounting-group .accounting-row:last-child {
+  border-bottom: 0;
 }
 
 .accounting-row-name {
   cursor: pointer;
+  /* 撑满行高热区：原 span 可点区仅文字 line-height（~17px），align-self:stretch + 内部 flex 居中
+     把可点区扩到整行内容高，配合 12px 行 padding 拉开相邻行热区，降低误触。 */
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* 名称文字省略号目标（从 .accounting-row-name 下放到此层）：腾出 name 容器给 ::after chevron，
+   否则 chevron 会被 name 的 overflow:hidden 裁掉。note 备注挂在 label 内，随文字一起省略。 */
+.accounting-row-name-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 名称末尾 ›：提示"点开有更多操作"（查看流水/属性/合并）。faint 色不抢主体；移动端无 hover，
+   靠它 + :active 变色传递"名称可点"。 */
+.accounting-row-name::after {
+  content: '›';
+  flex: 0 0 auto;
+  margin-left: 6px;
+  color: var(--text-faint);
 }
 
 .accounting-row-amount {
   cursor: pointer;
+  /* 金额胶囊化：浅底圆角块——既强化"左名称 + 右数值块"同一行绑定（看不错行），又给"金额可点"
+     视觉引导（点金额→调余额）；tabular-nums 等宽让多行金额成柱状对齐，扫读不串行（§4.10）。
+     浅底实色 fallback 在前、color-mix 渐进增强在后（旧 WKWebView 不认时降级，见 docs/environment-traps.md）。 */
+  align-self: center;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary));
+  font-variant-numeric: tabular-nums;
+}
+
+/* 点按反馈（:active 移动端可用、抬起即消失不粘，无需 hover 守卫；仅 :hover 才会粘，见 §6）：
+   名称按下整条热区变 accent 色 + chevron 同步；金额胶囊按下加深底，与名称区反馈区隔。 */
+.accounting-row-name:active,
+.accounting-row-name:active::after {
+  color: var(--interactive-accent);
+}
+
+.accounting-row-amount:active {
+  background: var(--background-modifier-hover);
+  background: color-mix(in srgb, var(--interactive-accent) 22%, var(--background-secondary));
 }
 
 @media (hover: hover) {
-  .accounting-row-name:hover {
+  .accounting-row-name:hover,
+  .accounting-row-name:hover::after {
     color: var(--interactive-accent);
   }
 
   .accounting-row-amount:hover {
-    color: var(--interactive-accent);
+    background: var(--background-modifier-hover);
+    background: color-mix(in srgb, var(--interactive-accent) 22%, var(--background-secondary));
   }
 }
 
@@ -718,6 +805,15 @@
 
 .accounting-hidden {
   margin-top: 12px;
+}
+
+/* 余额页「隐藏账户」折叠标题：基线 .accounting-collapsible-head（smaller/8px 12px）在余额页与调大后的
+   分组标题(medium)、账户行(small/12px) 同框时显小显弱、上下节奏脱节；叠一层把字号提到 small、
+   padding 对齐账户行(12px 4px)，左缘与账户名对齐，作为"次级折叠区标题"层级低于主分组标题、不弱于账户行。
+   基线供其他页（分类隐藏区/周期账已暂停/账户类型已停用）继续统一使用。 */
+.accounting-hidden > .accounting-collapsible-head {
+  font-size: var(--font-ui-small);
+  padding: 12px 4px;
 }
 
 .accounting-empty {
@@ -973,12 +1069,13 @@
   line-height: 1;
 }
 
-.accounting-batch-toggle {
+/* 排序栏右侧紧凑 secondary 按钮族：「选择/完成」(.accounting-batch-toggle) + 「展开/折叠全部」(.accounting-collapse-toggle) 共享视觉；
+   margin-left:auto 仅给 batch-toggle 把整组推到行尾，collapse-toggle 紧随其后（右侧紧挨「选择」）。 */
+:is(.accounting-batch-toggle, .accounting-collapse-toggle) {
   display: inline-flex;
   align-items: center;
   box-sizing: border-box;
   height: var(--ac-control-h-compact);
-  margin-left: auto;
   padding: 0 12px;
   border: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
@@ -989,8 +1086,12 @@
   cursor: pointer;
 }
 
+.accounting-batch-toggle {
+  margin-left: auto;
+}
+
 @media (hover: hover) {
-  .accounting-batch-toggle:hover {
+  :is(.accounting-batch-toggle, .accounting-collapse-toggle):hover {
     background: var(--background-modifier-hover);
     color: var(--text-normal);
   }
@@ -1337,10 +1438,13 @@
   display: flex;
   align-items: center;
   padding: 10px;
+  box-sizing: border-box;
+  /* 暗色下 --background-secondary 与 modal(primary) 近乎同色，块底隐形；靠 border 变量勾轮廓，亮/暗主题都稳定可见。 */
+  border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
   background: var(--background-secondary);
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background 0.2s, border-color 0.2s;
   min-width: 0;
 }
 
@@ -1546,12 +1650,13 @@
   pointer-events: none;
 }
 
-/* 隐藏 Obsidian 默认 .modal-close-button，用抽屉自带的 ✕ */
-.modal.accounting-detail-sheet .modal-close-button {
+/* 隐藏 Obsidian 默认关闭按钮（1.13.4 起为 .modal-header-button，:is 兼容旧 .modal-close-button），用抽屉自带的 ✕ */
+.modal.accounting-detail-sheet :is(.modal-close-button, .modal-header-button) {
   display: none;
 }
 
-/* 居中子弹窗（账本切换 / 备份 / 调整余额 / 新建·改名账本 / 分类新建·改名·合并）：隐藏 Obsidian 默认右上角 .modal-close-button，
+/* 居中子弹窗（账本切换 / 备份 / 调整余额 / 新建·改名账本 / 分类新建·改名·合并）：隐藏 Obsidian 默认右上角关闭按钮
+   （.modal-close-button / .modal-header-button），
    关闭统一走底部「关闭/取消」按钮——与全屏页右上角 ✕（=退出整个记账视图）区分语义。
    Escape 与点遮罩仍可关闭，仅去掉视觉冗余入口。 */
 /* 桌面端：居中子弹窗收窄到 50vh，与全屏主页窄面板对齐（纳入「桌面=手机模拟」体系），
@@ -1561,7 +1666,7 @@
   max-width: var(--accounting-panel-width) !important;
 }
 
-.accounting-sub-modal .modal-close-button {
+.accounting-sub-modal :is(.modal-close-button, .modal-header-button) {
   display: none;
 }
 
@@ -1579,7 +1684,7 @@
 
 /* 账本引导（accounting-onboarding）：放行被 sub-modal 隐藏的默认右上角 ✕——引导需可跳过/关闭，
    故单独恢复 Obsidian 原生关闭按钮。特异性 (0,4,0) 高于上方 .accounting-sub-modal 的 (0,2,0)，胜出。 */
-.modal.accounting-sub-modal.accounting-onboarding .modal-close-button {
+.modal.accounting-sub-modal.accounting-onboarding :is(.modal-close-button, .modal-header-button) {
   display: block;
 }
 
@@ -1889,6 +1994,20 @@
 .modal.accounting-fullscreen:not(.accounting-desktop) {
   transform: none !important;
   opacity: 1 !important;
+  /* 顶部避让带：在 .modal（不滚动）上预留 safe-area + 40px。滚动容器 .modal-content 的可见顶沿即落在此带下沿，
+     正文上划时被裁住、不再穿过胶囊/✕ 的透明缝隙。原由 .accounting-has-ledger-pill 在 contentEl 内给
+     padding-top:40px，会随滚动滚走 → 穿帮；挪到 .modal 的 padding-top 上即固定不滚。
+     特异性 (0,3,0) 覆盖基线 .modal.accounting-fullscreen 的 padding-top (0,2,0)；桌面窄面板沿用基线不动。 */
+  padding-top: calc(max(env(safe-area-inset-top), 10px) + 40px);
+}
+
+/* 设置页 sticky tab 栏（.accounting-settings-tabs）留在正文滚动区内、吸顶在避让带下沿（= 滚动区顶），
+   靠自身不透明底色遮住上划的正文（不穿帮）。把 contentEl（.accounting-settings-modal）顶部 padding 清零，
+   tab 栏紧贴滚动区顶不留隙——默认 .modal-content 的 padding:5px 会在 tab 栏上方留一条隙。
+   避让带仍由 .modal 的 padding-top(+40) 提供，✕ 在带内、高于 tab 栏，不与 tab 栏同行重合。仅移动端。
+   特异性 (0,3,0) 覆盖 .modal.accounting-fullscreen .modal-content 的 padding:5px (0,2,0)。 */
+.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-settings-modal {
+  padding-top: 0;
 }
 
 .modal.accounting-fullscreen .modal-content {
@@ -1897,13 +2016,27 @@
   padding: 5px;
 }
 
-/* Obsidian 给每个 Modal 自动塞的默认 .modal-close-button（默认 top:0）。
-   全屏 Modal 从视口顶端 y=0 起，固定 top:0 会被状态栏/刘海遮挡；绝对定位不受
-   上方 padding-top 安全区影响，需单独把它推到安全区下。限定移动端（:not(.accounting-desktop)），
-   桌面窄面板的关闭按钮保持默认位置不变。
+/* Obsidian 1.13.4+ Modal 基类在 .modal-content 之前插入了一个流内 .modal-header 容器
+   （.modal 直接子元素，height:var(--modal-header-height)，移动端 .is-phone 另加 padding），
+   把 .modal-content 下推一个 header 高度。全屏页的账本胶囊是绝对定位、挂在 .modal、不参与流，
+   位置不变 → 「胶囊下沿到正文」的间距被凭空多撑出一个 header 高度（Obsidian 升级后四页明显；
+   设置页 sticky tab 体感弱；居中子弹窗/抽屉的 content 也整体偏下）。
+   该 .modal-header 对我们是纯占位空壳：关闭按钮 .modal-header-button 是 .modal 直接子元素
+   （在 .modal-header 之前创建），不依赖此容器；我们的 Modal 不用 Obsidian 默认 modal-title（自渲染/无标题）。
+   故整体隐藏，让 .modal-content 回贴 .modal 顶部、间距与居中恢复升级前。
+   特异性 (0,3,0) 胜过 Obsidian 的 .is-phone .modal-header (0,2,0)；旧版 Obsidian 无此元素，不匹配无副作用。 */
+.modal:is(.accounting-fullscreen, .accounting-sub-modal, .accounting-detail-sheet) .modal-header {
+  display: none;
+}
+
+/* Obsidian 给每个 Modal 自动塞的默认关闭按钮：1.13.4 起 class 由 .modal-close-button 改为
+   .modal-header-button（带 x 图标），故用 :is() 同时覆盖新旧，旧版回退与未来再变都不破。
+   全屏 Modal 从视口顶端 y=0 起，默认 top 会被状态栏/刘海遮挡；绝对定位不受上方 padding-top
+   安全区影响，需单独把它推到安全区下。限定移动端（:not(.accounting-desktop)），桌面窄面板的
+   关闭按钮保持默认位置不变。
    scale(0.85) 把默认 ✕ 整体等比缩小一档（origin top right 让右上角不动、向左下收），
    触控热区随之缩至约 85%，矢量 ✕ 缩放不糊。 */
-.modal.accounting-fullscreen:not(.accounting-desktop) .modal-close-button {
+.modal.accounting-fullscreen:not(.accounting-desktop) :is(.modal-close-button, .modal-header-button) {
   top: max(env(safe-area-inset-top), 24px);
   transform: scale(0.85);
   transform-origin: top right;
@@ -1911,7 +2044,7 @@
 
 /* drill-down 流水页（账户下钻/周期账查看，聚焦模式）：隐藏右上角默认 ✕——
    关闭走右下角「‹ 返回」回父页，避免与全屏页右上角 ✕（=退出记账视图）混淆。 */
-.modal.accounting-fullscreen.accounting-drilldown .modal-close-button {
+.modal.accounting-fullscreen.accounting-drilldown :is(.modal-close-button, .modal-header-button) {
   display: none;
 }
 
@@ -2068,10 +2201,6 @@
    极端情况下的残余溢出由 .accounting-balance-modal 的 overflow-x:hidden 兜底裁掉。 */
 .accounting-row-name {
   flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .accounting-row-amount {
@@ -2443,6 +2572,48 @@ details[open] > .accounting-collapsible-head::before {
   .accounting-collapsible-head:hover {
     color: var(--text-normal);
   }
+}
+
+/* 流水按月分组（transactionListModal 时间序视图）：复用 .accounting-collapsible-head 折叠头基线，
+   月份卡 details 清零 margin（间距靠父 .accounting-transaction-list 的 flex gap）；标题行=月份+笔数（左）
+   + 收入/支出/月末余额（右，margin-left:auto 顶到末端，窄屏 flex-wrap 换行）。金额色复用 positive/negative。 */
+.accounting-month-group {
+  margin: 0;
+}
+
+.accounting-month-head {
+  flex-wrap: wrap;
+}
+
+.accounting-month-label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ac-gap-sm);
+  color: var(--text-normal);
+}
+
+.accounting-month-count {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  font-weight: 400;
+}
+
+.accounting-month-totals {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--ac-gap-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.accounting-month-balance {
+  color: var(--text-muted);
+}
+
+.accounting-sort-hint {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
 }
 
 /* 分类管理：支出/收入两个自包含区块，每块包含新增入口、可见列表与自己的已隐藏折叠区。 */
