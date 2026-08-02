@@ -74,9 +74,9 @@
 
 /* 记一笔页 contentEl 自身即滚动容器，其 padding-top 不能再占顶部避让带——顶部带已改由 .modal 的
    padding-top 提供（见 .accounting-fullscreen:not(.accounting-desktop)）。保留 40px 内 padding 会与之叠加成
-   80px、且随滚动滚走。移动端把顶部内 padding 收到 8px（仅留小间隙），底部/横向 padding 不动。 */
+   80px、且随滚动滚走。移动端顶部内 padding 设 10px（类型 tab 行略下移、避开右上 ✕），底部/横向 padding 不动。 */
 .modal.accounting-fullscreen:not(.accounting-desktop) .accounting-entry-modal {
-  padding-top: 8px;
+  padding-top: 10px;
 }
 
 /* 顶部当前账本别名胶囊：accent 圆点 + 别名，居中、随明暗主题 */
@@ -179,45 +179,12 @@
 
 .accounting-entry-type {
   flex: 0 0 auto;
-  /* 绿色淡底卡片：呼应流水筛选区（.accounting-filter-box）的视觉语言。
-     先写实色 fallback（iOS WKWebView 可能不认 color-mix，退化为次级底色），
-     再叠一层 ~10% 绿色调，亮/暗主题自适应。 */
-  background: var(--background-secondary);
-  background: color-mix(in srgb, var(--color-green) 10%, var(--background-secondary));
-  padding: 8px 10px;
-  border-radius: 10px;
-  margin-bottom: 32px;
-}
-
-.accounting-entry-type-row {
+  /* 顶部类型 tab 栏：按钮复用设置页 .accounting-settings-tab（纯文字 + 底部 accent 下划线），
+     本容器只负责横向排列 + 底部 1px 分隔线；不吸顶 sticky（记账页表单不长，类型区常驻顶部即可）。
+     替代旧绿底卡片——进一步轻化，让底部主导航成为唯一强焦点。 */
   display: flex;
-  gap: 6px;
-}
-
-.accounting-entry-type-btn {
-  flex: 1 1 0;
-  padding: 8px 0;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--ac-radius-input);
-  background: var(--background-primary);
-  color: var(--text-normal);
-  font-size: var(--font-ui-small);
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
-  min-height: var(--ac-control-h);
-}
-
-@media (hover: hover) {
-  .accounting-entry-type-btn:hover {
-    background: var(--background-modifier-hover);
-  }
-}
-
-.accounting-entry-type-active {
-  background: var(--interactive-accent) !important;
-  color: var(--text-on-accent) !important;
-  border-color: var(--interactive-accent) !important;
-  font-weight: 600;
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin-bottom: 20px;
 }
 
 .accounting-entry-mini-btn.accounting-entry-toggle-active {
@@ -1994,19 +1961,22 @@
 .modal.accounting-fullscreen:not(.accounting-desktop) {
   transform: none !important;
   opacity: 1 !important;
-  /* 顶部避让带：在 .modal（不滚动）上预留 safe-area + 40px。滚动容器 .modal-content 的可见顶沿即落在此带下沿，
-     正文上划时被裁住、不再穿过胶囊/✕ 的透明缝隙。原由 .accounting-has-ledger-pill 在 contentEl 内给
-     padding-top:40px，会随滚动滚走 → 穿帮；挪到 .modal 的 padding-top 上即固定不滚。
+  /* 顶部避让带：在 .modal（不滚动）上预留 safe-area + 52px。滚动容器 .modal-content 的可见顶沿（上边缘）
+     即落在此带下沿——记账/流水/账户/统计/设置 5 个全屏页共用此值，上边缘统一。+52 让上边缘落到右上 ✕ 与
+     账本胶囊下沿之下（无刘海基准下约 8~14px 呼吸；有刘海机 safe-area 更大、间距自动更宽），与关闭按钮拉开间距。
+     各页 contentEl 自身的 padding-top 不同是各页内部设计、不在此统一。原由 .accounting-has-ledger-pill 在
+     contentEl 内给 padding-top，会随滚动滚走 → 穿帮；挪到 .modal 的 padding-top 上即固定不滚。
      特异性 (0,3,0) 覆盖基线 .modal.accounting-fullscreen 的 padding-top (0,2,0)；桌面窄面板沿用基线不动。 */
-  padding-top: calc(max(env(safe-area-inset-top), 10px) + 40px);
+  padding-top: calc(max(env(safe-area-inset-top), 10px) + 52px);
 }
 
-/* 设置页 sticky tab 栏（.accounting-settings-tabs）留在正文滚动区内、吸顶在避让带下沿（= 滚动区顶），
-   靠自身不透明底色遮住上划的正文（不穿帮）。把 contentEl（.accounting-settings-modal）顶部 padding 清零，
-   tab 栏紧贴滚动区顶不留隙——默认 .modal-content 的 padding:5px 会在 tab 栏上方留一条隙。
-   避让带仍由 .modal 的 padding-top(+40) 提供，✕ 在带内、高于 tab 栏，不与 tab 栏同行重合。仅移动端。
+/* 移动端全屏页 contentEl 顶部 padding：流水/账户/统计/设置四页清零——内容紧贴滚动区顶部（.modal 避让带
+   safe-area+52 已统一提供 .modal-content 上边缘与右上 ✕ 的间距，见上方 .accounting-fullscreen 规则），
+   各页内部元素自行设计离顶距离。设置页 sticky tab 栏（.accounting-settings-tabs）吸顶在滚动区顶，靠自身不透明
+   底色遮住上划的正文（不穿帮）；默认 .modal-content 的 padding:5px 会在 tab 栏上方留一条隙，故一并清零。
+   记账页另给 10px（见 .accounting-entry-modal）。仅移动端。
    特异性 (0,3,0) 覆盖 .modal.accounting-fullscreen .modal-content 的 padding:5px (0,2,0)。 */
-.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-settings-modal {
+.modal.accounting-fullscreen:not(.accounting-desktop) :is(.accounting-transaction-modal, .accounting-balance-modal, .accounting-report-modal, .accounting-settings-modal) {
   padding-top: 0;
 }
 
@@ -2242,7 +2212,12 @@
 
 .accounting-nav-btn {
   flex: 1 1 0;
-  padding: 8px 4px;
+  /* 纵向布局：图标(lucide svg)在上、文字在下，让主导航比页内控件更「导航感」、与顶部轻量分段拉开主次。 */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 4px;
   text-align: center;
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
@@ -2252,6 +2227,13 @@
   font-size: var(--font-ui-smaller);
   /* iOS/WebView 点击会留深色高亮块，像「被选中」残留——显式透明掉，只让真正的选中态显色。 */
   -webkit-tap-highlight-color: transparent;
+}
+
+/* setIcon 默认渲染 24×24 svg，此处缩到 18px 适配导航条；lucide 用 stroke=currentColor，
+   跟随按钮 color 自动变色（选中 .accounting-nav-current 蓝底白字→图标白）。 */
+.accounting-nav-btn svg {
+  width: 18px;
+  height: 18px;
 }
 
 /* hover 仅在真有指针的设备生效：触屏（iOS WebView）点击后 :hover 会粘住，
@@ -2279,6 +2261,7 @@
   color: var(--text-on-accent);
   border-color: var(--interactive-accent);
   opacity: 1;
+  font-weight: 600;
 }
 
 /* 底部导航条按钮不挂焦点环：Modal 打开时首个可聚焦元素会落到 nav 第二个按钮（记账
@@ -2582,6 +2565,10 @@ details[open] > .accounting-collapsible-head::before {
 }
 
 .accounting-month-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--background-primary); /* 不透明，遮住滚过的交易行；与列表区同色 */
   flex-wrap: wrap;
 }
 
