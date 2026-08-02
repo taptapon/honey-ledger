@@ -1144,13 +1144,6 @@ function extractAmountFromNote(text) {
   return null;
 }
 
-// ../../packages/core/src/tags.ts
-function parseTagsInput(raw) {
-  const trimmed = raw?.trim();
-  if (!trimmed) return void 0;
-  return trimmed.split(/\s+/);
-}
-
 // ../../packages/core/src/fold.ts
 function foldEvents(events, logger) {
   const latest = /* @__PURE__ */ new Map();
@@ -1288,7 +1281,7 @@ function filterAndSortTransactions(transactions, filters) {
     if (filters.from && isoToDateStr(t2.ts) < filters.from) return false;
     if (filters.to && isoToDateStr(t2.ts) > filters.to) return false;
     if (query) {
-      const hay = [t2.note, (t2.tags ?? []).join(" "), t2.category, t2.subcategory].filter(Boolean).join(" ").toLowerCase();
+      const hay = [t2.note, t2.category, t2.subcategory].filter(Boolean).join(" ").toLowerCase();
       const queryNum = Number(query);
       const amountMatch = query.trim() !== "" && Number.isFinite(queryNum) && t2.amount === queryNum;
       if (!hay.includes(query) && !amountMatch) return false;
@@ -1754,7 +1747,6 @@ function buildSettlementEvents(input) {
     account: collect.account,
     person: collect.person,
     direction: collect.direction,
-    tags: collect.tags,
     note: collect.note,
     linkId,
     createdAt: collectBase,
@@ -2183,7 +2175,6 @@ function generateDueRecurringEvents(rules, existingTxIds, asOfDate) {
       if (rule.toAccount) ev.toAccount = rule.toAccount;
       if (rule.person) ev.person = rule.person;
       if (rule.direction) ev.direction = rule.direction;
-      if (rule.tags && rule.tags.length > 0) ev.tags = [...rule.tags];
       if (note) ev.note = note;
       events.push(ev);
     }
@@ -2288,7 +2279,6 @@ function entryToRule(state, schedule, existing) {
     // 仅借贷写入方向，避免给收支/转账塞入多余 direction
     direction: state.type === "loan" ? state.direction : void 0,
     note: state.note?.trim() || void 0,
-    tags: state.tags && state.tags.length ? state.tags : void 0,
     period: schedule.period,
     dayOfMonth: schedule.period === "monthly" ? schedule.dayOfMonth : void 0,
     dayOfWeek: schedule.period === "weekly" ? schedule.dayOfWeek : void 0,
@@ -2582,7 +2572,6 @@ function applyBatchPatch(cur, patch) {
   }
   if (patch.amount !== void 0) next.amount = patch.amount;
   if (patch.ts !== void 0) next.ts = patch.ts;
-  if (patch.tags !== void 0) next.tags = patch.tags;
   if (patch.note !== void 0) next.note = patch.note;
   return next;
 }
@@ -2724,7 +2713,6 @@ var zh = {
   "txDetail.toAmount": "\u8F6C\u5165\u91D1\u989D",
   "txDetail.impliedRate": "\u9690\u542B\u6C47\u7387",
   "txDetail.counterparty": "\u5BF9\u65B9",
-  "txDetail.tags": "\u6807\u7B7E",
   "txDetail.balanceSuffix": "\uFF08\u4F59\u989D {{balance}}\uFF09",
   "txDetail.settlementEditBlock": "\u6536\u6B3E/\u8FD8\u6B3E\uFF08\u7ED3\u6E05\uFF09\u6D41\u6C34\u8BF7\u5728\u684C\u9762\u7AEF\u7F16\u8F91\uFF0C\u79FB\u52A8\u7AEF\u6682\u4E0D\u652F\u6301\u3002",
   "txDetail.settlementCopyBlock": "\u6536\u6B3E/\u8FD8\u6B3E\uFF08\u7ED3\u6E05\uFF09\u6D41\u6C34\u8BF7\u5728\u684C\u9762\u7AEF\u590D\u5236\uFF0C\u79FB\u52A8\u7AEF\u6682\u4E0D\u652F\u6301\u3002",
@@ -2747,7 +2735,7 @@ var zh = {
   "txList.rangeType": "\u4EA4\u6613\u7C7B\u578B",
   "txList.rangeAccountNote": "\u8D26\u6237/\u5907\u6CE8",
   "txList.allAccounts": "\u5168\u90E8\u8D26\u6237",
-  "txList.searchPlaceholder": "\u5907\u6CE8/\u6807\u7B7E\u641C\u7D22...",
+  "txList.searchPlaceholder": "\u5907\u6CE8\u641C\u7D22...",
   "txList.ariaClearKeyword": "\u6E05\u9664\u5907\u6CE8\u641C\u7D22",
   "txList.ariaClearAllFilters": "\u6E05\u9664\u6240\u6709\u7B5B\u9009",
   "txList.recurringDefault": "\u5468\u671F\u8D26\u89C4\u5219",
@@ -2823,7 +2811,6 @@ var zh = {
   "entry.add": "\u6DFB\u52A0",
   "entry.newPerson": "\u65B0\u5BF9\u65B9",
   "entry.personNamePlaceholder": "\u59D3\u540D",
-  "entry.tagsPlaceholder": "\u7A7A\u683C\u5206\u9694\uFF0C\u53EF\u9009",
   "entry.notePlaceholder": "\u53EF\u9009\uFF0C\u7C98\u8D34\u77ED\u4FE1/\u6587\u672C\u53EF\u81EA\u52A8\u63D0\u53D6\u91D1\u989D",
   "entry.receivable": "\u5E94\u6536",
   "entry.payable": "\u5E94\u4ED8",
@@ -2981,7 +2968,6 @@ var zh = {
   "batch.typeChangedWarn": "\u5DF2\u6539\u53D8\u7C7B\u578B\uFF0C\u76EE\u6807\u7C7B\u578B\u7684\u5FC5\u586B\u5B57\u6BB5\u5FC5\u987B\u586B\u5199\u3002",
   "batch.submitBtn": "\u6279\u91CF\u4FEE\u6539 {{n}} \u6761",
   "batch.field.personAccount": "\u5BF9\u65B9\uFF08\u4EBA\u8D26\u6237\uFF09",
-  "batch.field.tags": "\u6807\u7B7E\uFF08\u7A7A\u683C\u5206\u9694\uFF09",
   "batch.err.amount": "\u91D1\u989D\u9700\u4E3A\u5927\u4E8E 0 \u7684\u6570",
   "batch.err.tsFormat": "\u65F6\u95F4\u683C\u5F0F\u4E0D\u6B63\u786E",
   "batch.err.empty": "\u8BF7\u81F3\u5C11\u4FEE\u6539\u4E00\u9879",
@@ -3367,7 +3353,6 @@ var en = {
   "txDetail.toAmount": "Received",
   "txDetail.impliedRate": "Implied rate",
   "txDetail.counterparty": "Counterparty",
-  "txDetail.tags": "Tags",
   "txDetail.balanceSuffix": " (balance {{balance}})",
   "txDetail.settlementEditBlock": "Collect/repay (settlement) transactions can only be edited on desktop; not yet supported on mobile.",
   "txDetail.settlementCopyBlock": "Collect/repay (settlement) transactions can only be duplicated on desktop; not yet supported on mobile.",
@@ -3390,7 +3375,7 @@ var en = {
   "txList.rangeType": "Type",
   "txList.rangeAccountNote": "Account/Note",
   "txList.allAccounts": "All accounts",
-  "txList.searchPlaceholder": "Search note/tag...",
+  "txList.searchPlaceholder": "Search note...",
   "txList.ariaClearKeyword": "Clear note search",
   "txList.ariaClearAllFilters": "Clear all filters",
   "txList.recurringDefault": "Recurring rule",
@@ -3466,7 +3451,6 @@ var en = {
   "entry.add": "Add",
   "entry.newPerson": "New counterparty",
   "entry.personNamePlaceholder": "Name",
-  "entry.tagsPlaceholder": "space-separated, optional",
   "entry.notePlaceholder": "Optional \u2014 paste SMS/text to auto-extract amount",
   "entry.receivable": "receivable",
   "entry.payable": "payable",
@@ -3624,7 +3608,6 @@ var en = {
   "batch.typeChangedWarn": "Type changed \u2014 required fields for the new type must be filled.",
   "batch.submitBtn": "Batch edit {{n}} items",
   "batch.field.personAccount": "Counterparty (person acct)",
-  "batch.field.tags": "Tags (space-separated)",
   "batch.err.amount": "Amount must be a number greater than 0",
   "batch.err.tsFormat": "Invalid time format",
   "batch.err.empty": "Please change at least one field",
@@ -4825,7 +4808,6 @@ var BatchModifyModal = class extends import_obsidian2.Modal {
       person: "",
       direction: "",
       ts: "",
-      tags: "",
       note: ""
     };
   }
@@ -4988,17 +4970,6 @@ var BatchModifyModal = class extends import_obsidian2.Modal {
         }
       }));
     });
-    this.addField(fc, t("batch.field.tags"), (wrap) => {
-      const input = wrap.createEl("input", {
-        type: "text",
-        value: s.tags,
-        cls: "accounting-input",
-        attr: { placeholder: t("batch.keepHint") }
-      });
-      input.oninput = () => {
-        s.tags = input.value;
-      };
-    });
     this.addField(fc, t("entry.field.note"), (wrap) => {
       const ta = wrap.createEl("textarea", { cls: "accounting-input" });
       ta.value = s.note;
@@ -5045,8 +5016,6 @@ var BatchModifyModal = class extends import_obsidian2.Modal {
       }
       patch.ts = iso;
     }
-    const tags = parseTagsInput(s.tags);
-    if (tags) patch.tags = tags;
     if (s.note.trim() !== "") patch.note = s.note.trim();
     if (Object.keys(patch).length === 0) {
       this.showError(t("batch.err.empty"));
@@ -5558,7 +5527,6 @@ var EntryModal = class extends import_obsidian6.Modal {
       settle: false,
       ts: nowDatetimeLocal(),
       note: "",
-      tags: "",
       toAmount: "",
       rate: "",
       personCurrency: "CNY"
@@ -5616,7 +5584,6 @@ var EntryModal = class extends import_obsidian6.Modal {
       settle: false,
       ts: isoToDatetimeLocal(tx.ts),
       note: tx.note || "",
-      tags: tx.tags?.join(" ") || "",
       toAmount: tx.toAmount != null ? String(round2(tx.toAmount)) : "",
       rate: tx.rate != null ? String(tx.rate) : "",
       personCurrency: "CNY"
@@ -5635,7 +5602,6 @@ var EntryModal = class extends import_obsidian6.Modal {
       settle: false,
       ts: `${rule.startDate}T00:00`,
       note: rule.note || "",
-      tags: rule.tags?.join(" ") || "",
       toAmount: "",
       rate: rule.rate != null ? String(rule.rate) : "",
       personCurrency: "CNY"
@@ -5911,12 +5877,6 @@ var EntryModal = class extends import_obsidian6.Modal {
         this.renderSettleRow(wrap);
       }
     }
-    const tagsRow = wrap.createDiv({ cls: "accounting-entry-row" });
-    tagsRow.createEl("label", { text: t("txDetail.tags"), cls: "accounting-entry-label" });
-    const tagsInput = tagsRow.createEl("input", { cls: "accounting-entry-input" });
-    tagsInput.value = s.tags;
-    tagsInput.placeholder = t("entry.tagsPlaceholder");
-    tagsInput.addEventListener("input", () => s.tags = tagsInput.value);
     const noteRow = wrap.createDiv({ cls: "accounting-entry-row" });
     noteRow.createEl("label", { text: t("entry.field.note"), cls: "accounting-entry-label" });
     const noteTextarea = noteRow.createEl("textarea", { cls: "accounting-entry-input accounting-entry-textarea" });
@@ -6286,8 +6246,7 @@ var EntryModal = class extends import_obsidian6.Modal {
       person: s.person,
       direction,
       ts: datetimeLocalToISO(s.ts),
-      note: s.note.trim() || void 0,
-      tags: parseTagsInput(s.tags)
+      note: s.note.trim() || void 0
     };
     try {
       await saveSettlement(this.adapter, this.accounts, this.categories, {
@@ -6345,8 +6304,7 @@ var EntryModal = class extends import_obsidian6.Modal {
         toAccount: s.toAccount,
         person: s.person,
         direction: s.direction,
-        note: s.note,
-        tags: parseTagsInput(s.tags)
+        note: s.note
       },
       this.schedule,
       this.recurring?.editing
@@ -6395,8 +6353,7 @@ var EntryModal = class extends import_obsidian6.Modal {
       ts: datetimeLocalToISO(s.ts),
       amount,
       currency: entryCurrency,
-      note: s.note.trim() || void 0,
-      tags: parseTagsInput(s.tags)
+      note: s.note.trim() || void 0
     };
     if (s.type === "expense" || s.type === "income") {
       if (!s.account) return this.showError(t("entry.err.account"));
@@ -6560,9 +6517,6 @@ var TransactionDetailModal = class extends import_obsidian7.Modal {
       this.addRow(detailEl, t("entry.field.direction"), this.directionLabel(tx.direction));
       this.addRow(detailEl, t("entry.field.selfAccount"), this.accountNameWithBalance(tx.account));
       this.addRow(detailEl, t("txDetail.counterparty"), this.accountNameWithBalance(tx.person));
-    }
-    if (tx.tags && tx.tags.length > 0) {
-      this.addRow(detailEl, t("txDetail.tags"), tx.tags.map((tag) => `#${tag}`).join(" "));
     }
     if (tx.note) {
       this.addRow(detailEl, t("entry.field.note"), tx.note);
@@ -7363,9 +7317,6 @@ var TransactionListModal = class extends import_obsidian8.Modal {
     });
     const middle = row.createDiv({ cls: "accounting-tx-middle" });
     middle.createEl("div", { text: this.formatDetail(tx), cls: "accounting-tx-detail" });
-    if (tx.tags && tx.tags.length > 0) {
-      middle.createEl("div", { text: tx.tags.map((tag) => `#${tag}`).join(" "), cls: "accounting-tx-note" });
-    }
     if (tx.note) {
       middle.createEl("div", { text: tx.note, cls: "accounting-tx-note" });
     }
