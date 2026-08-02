@@ -4705,6 +4705,13 @@ function createDateField(opts) {
     opts.onChange(input.value);
   });
   input.addEventListener("input", render);
+  input.addEventListener("click", () => {
+    const el = input;
+    try {
+      el.showPicker?.();
+    } catch {
+    }
+  });
   return wrap;
 }
 

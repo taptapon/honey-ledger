@@ -654,7 +654,7 @@
      字号/高度：用 medium（§3「区块标题」归档）+ 10px padding——原 smaller/4px 比下方账户行（small/12px）
      还小还矮、层级反了；现标题条与账户行高度协调、字号大一档确立分组标题层级。 */
   background: var(--background-secondary);
-  background: color-mix(in srgb, var(--color-green) 15%, var(--background-secondary));
+  background: color-mix(in srgb, var(--color-green) 8%, var(--background-secondary));
   border: 1px solid var(--background-modifier-border);
   border-radius: 4px;
   padding: 10px 8px;
@@ -1375,6 +1375,21 @@
 
 .modal.accounting-fullscreen:not(.accounting-desktop) .accounting-filter-type-btn {
   flex: 1;
+}
+
+/* 桌面窄面板「流水页」：筛选行整行堆叠（label 独占一行、控件栈式左对齐），与移动端一致。
+   原因：date-range-wrap 已被下方规则 flex-basis:100% 强制换行（两端生效），但桌面带 .accounting-desktop
+   被上方 :not(.accounting-desktop) 行堆叠规则排除，grid 仍是 auto 1fr → label 留在左列、行高变 2 行后
+   label 垂直居中、3 个快捷按钮落在 controls 顶行，显成「按钮浮右上、与 label 不齐」的半换行。
+   这里补齐桌面侧的整行堆叠，让 label/快捷按钮/日期组各占一行。仅流水页（accounting-transaction-modal），
+   避开统计页（其时间段行另有居中布局，见 .accounting-report-modal 规则）。特异性 (0,5,0) 胜出基线与 @container。 */
+.modal.accounting-fullscreen.accounting-desktop .accounting-transaction-modal .accounting-filter-row {
+  grid-template-columns: 1fr;
+  column-gap: 0;
+  row-gap: 5px;
+}
+.modal.accounting-fullscreen.accounting-desktop .accounting-transaction-modal .accounting-filter-controls {
+  justify-content: flex-start;
 }
 
 /* 日期范围组独占一行，避免与快捷按钮挤在同一行被裁断。
@@ -3112,6 +3127,17 @@ details[open] > .accounting-collapsible-head::before {
 .modal.accounting-fullscreen:not(.accounting-desktop) .accounting-report-modal .accounting-filter-quick-btn {
   padding: 0 6px;
   flex: 0 1 auto;
+}
+
+/* 桌面窄面板「统计页」：时间段行纵向居中于绿块——对称 padding + 清零末行 margin-bottom。
+   与上方移动端同规则等价，补齐桌面侧：桌面经 presetModalChrome 打了 .accounting-desktop，被上方
+   :not(.accounting-desktop) 段排除，退回基线 padding 2px/6px + :last-child 6px margin → 下方留白 12px、
+   上方 2px，内容靠上。此处仅改纵向居中，横向 grid（label 左、按钮右）不动。特异性 (0,5,0)。 */
+.modal.accounting-fullscreen.accounting-desktop .accounting-report-modal .accounting-filter-box {
+  padding: 6px 12px;
+}
+.modal.accounting-fullscreen.accounting-desktop .accounting-report-modal .accounting-filter-row {
+  margin-bottom: 0;
 }
 
 /* 收支结余三数字卡 */
