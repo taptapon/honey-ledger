@@ -2750,6 +2750,21 @@ details[open] > .accounting-collapsible-head::before {
   min-width: 0;
 }
 
+/* label 输入 + 账户计数胶囊横向并排：input 自适应、胶囊不收缩 */
+.accounting-at-type-label-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ac-gap-sm);
+  min-width: 0;
+}
+.accounting-at-type-label-row .accounting-ledger-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.accounting-at-type-label-row .accounting-ledger-badge {
+  flex: 0 0 auto;
+}
+
 /* 分组卡内类型 label（只读 span）：对齐 .accounting-ledger-name 基线（font-ui-small + 600），
    不设则继承默认正文字号偏大，与「账户类型」卡的 input label 及分类项不一致。 */
 .accounting-at-type-label {

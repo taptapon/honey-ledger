@@ -3184,6 +3184,7 @@ var zh = {
   "settings.accountTypes.add": "\uFF0B \u65B0\u589E\u7C7B\u578B",
   "settings.accountTypes.delete": "\u5220\u9664",
   "settings.accountTypes.deleteConfirm": "\u5220\u9664\u81EA\u5B9A\u4E49\u7C7B\u578B\u300C{{label}}\u300D\uFF1F\u65E2\u6709\u8BE5\u7C7B\u578B\u8D26\u6237\u5C06\u663E\u793A\u4E3A\u672A\u77E5\u7C7B\u578B\uFF0C\u4F46\u4E0D\u4E22\u5931\u6570\u636E\u3002",
+  "settings.accountTypes.accountCountTip": "\u542F\u7528 {{active}} \u4E2A / \u5171 {{total}} \u4E2A\u8D26\u6237",
   "accountKind.asset": "\u8D44\u4EA7",
   "accountKind.liability": "\u8D1F\u503A",
   // err.* — core AppError 错误码（两端 catch 处 formatError → t(code) 翻译；code 见 packages/core/src/errors.ts）
@@ -3821,6 +3822,7 @@ var en = {
   "settings.accountTypes.add": "\uFF0B Add type",
   "settings.accountTypes.delete": "Delete",
   "settings.accountTypes.deleteConfirm": 'Delete custom type "{{label}}"? Accounts of this type will show as unknown type; data is preserved.',
+  "settings.accountTypes.accountCountTip": "{{active}} active / {{total}} total accounts",
   "accountKind.asset": "Asset",
   "accountKind.liability": "Liability",
   // err.* — core AppError error codes (both ends' formatError → t(code); codes in packages/core/src/errors.ts)
@@ -6386,20 +6388,13 @@ var EntryModal = class extends import_obsidian6.Modal {
     this.onSubmitted();
     this.close();
   }
-  /** 直接移除弹窗，绕过 Obsidian 默认的关闭动画（下滑消失），复刻 TransactionDetailModal 模式。 */
+  /** 走 Obsidian 原生关闭：pop 全局 keymap scope（Modal.open 时 push 的 Escape/Tab 捕获）并恢复焦点，
+   *  再由基类回调 onClose。默认关闭动画已被 inline animation/transition:none 中和，仍是即时摘除——
+   *  若绕过 super.close() 只 detach 容器，scope 不弹、焦点不恢复，会导致关闭后 Obsidian 笔记无法正常编辑。 */
   close() {
     if (this.closing) return;
     this.closing = true;
-    if (this.opened) {
-      try {
-        this.onClose();
-      } catch (e) {
-        console.error(e);
-      }
-      this.containerEl.detach();
-    } else {
-      super.close();
-    }
+    super.close();
   }
   onClose() {
     this.keyboardAvoidance?.dispose();
@@ -6448,7 +6443,9 @@ var TransactionDetailModal = class extends import_obsidian7.Modal {
       this.close();
     }
   };
-  /** 滑下后再摘除容器，与开启的滑上对称（div transform 在 WKWebView 可靠）。 */
+  /** 滑下后再走 Obsidian 原生关闭（与开启的滑上对称，div transform 在 WKWebView 可靠）。
+   *  走 super.close() 而非手搓 onClose()+detach：补 pop Modal.open 时 push 的全局 keymap scope +
+   *  恢复焦点，避免关闭后 Obsidian 笔记无法正常编辑。 */
   close() {
     if (this.closing) return;
     this.closing = true;
@@ -6460,11 +6457,10 @@ var TransactionDetailModal = class extends import_obsidian7.Modal {
     this.modalEl.addClass("accounting-detail-closing");
     setTimeout(() => {
       try {
-        this.onClose();
+        super.close();
       } catch (e) {
         console.error(e);
       }
-      this.containerEl.detach();
     }, 200);
   }
   renderView() {
@@ -7416,20 +7412,13 @@ var TransactionListModal = class extends import_obsidian8.Modal {
     if (tx.type === "income") return "accounting-amount-positive";
     return loanCashIn(tx.direction) ? "accounting-amount-positive" : "accounting-amount-negative";
   }
-  /** 直接移除弹窗，绕过 Obsidian 默认关闭动画（与 Entry/Detail 一致），保证导航切换即时无动画。 */
+  /** 走 Obsidian 原生关闭：pop 全局 keymap scope（Modal.open 时 push 的 Escape/Tab 捕获）并恢复焦点，
+   *  再由基类回调 onClose。默认关闭动画已被 inline animation/transition:none 中和，仍是即时摘除——
+   *  若绕过 super.close() 只 detach 容器，scope 不弹、焦点不恢复，会导致关闭后 Obsidian 笔记无法正常编辑。 */
   close() {
     if (this.closing) return;
     this.closing = true;
-    if (this.opened) {
-      try {
-        this.onClose();
-      } catch (e) {
-        console.error(e);
-      }
-      this.containerEl.detach();
-    } else {
-      super.close();
-    }
+    super.close();
   }
   onClose() {
     this.closeSortMenu();
@@ -8409,20 +8398,13 @@ var BalanceModal = class extends import_obsidian14.Modal {
     const meta = await this.adapter.readMeta();
     return { transactions, accounts: meta.accounts, categories: meta.categories };
   }
-  /** 直接移除弹窗，绕过 Obsidian 默认关闭动画（与流水/记一笔/详情一致），保证导航切换即时无动画。 */
+  /** 走 Obsidian 原生关闭：pop 全局 keymap scope（Modal.open 时 push 的 Escape/Tab 捕获）并恢复焦点，
+   *  再由基类回调 onClose。默认关闭动画已被 inline animation/transition:none 中和，仍是即时摘除——
+   *  若绕过 super.close() 只 detach 容器，scope 不弹、焦点不恢复，会导致关闭后 Obsidian 笔记无法正常编辑。 */
   close() {
     if (this.closing) return;
     this.closing = true;
-    if (this.opened) {
-      try {
-        this.onClose();
-      } catch (e) {
-        console.error(e);
-      }
-      this.containerEl.detach();
-    } else {
-      super.close();
-    }
+    super.close();
   }
   onClose() {
     this.contentEl.empty();
@@ -9001,20 +8983,13 @@ var ReportModal = class extends import_obsidian15.Modal {
     }
     parent.appendChild(svg);
   }
-  /** 直接移除弹窗，绕过 Obsidian 默认关闭动画（与流水/记一笔/余额一致），保证导航切换即时无动画。 */
+  /** 走 Obsidian 原生关闭：pop 全局 keymap scope（Modal.open 时 push 的 Escape/Tab 捕获）并恢复焦点，
+   *  再由基类回调 onClose。默认关闭动画已被 inline animation/transition:none 中和，仍是即时摘除——
+   *  若绕过 super.close() 只 detach 容器，scope 不弹、焦点不恢复，会导致关闭后 Obsidian 笔记无法正常编辑。 */
   close() {
     if (this.closing) return;
     this.closing = true;
-    if (this.opened) {
-      try {
-        this.onClose();
-      } catch (e) {
-        console.error(e);
-      }
-      this.containerEl.detach();
-    } else {
-      super.close();
-    }
+    super.close();
   }
   onClose() {
     this.contentEl.empty();
@@ -9064,20 +9039,13 @@ var SettingsModal = class extends import_obsidian16.Modal {
       onPrev: () => this.settingsTab.switchTab(-1)
     });
   }
-  /** 直接移除弹窗，绕过 Obsidian 默认关闭动画（与流水 / 余额 / 记一笔 / 详情一致），保证导航切换即时无动画。 */
+  /** 走 Obsidian 原生关闭：pop 全局 keymap scope（Modal.open 时 push 的 Escape/Tab 捕获）并恢复焦点，
+   *  再由基类回调 onClose。默认关闭动画已被 inline animation/transition:none 中和，仍是即时摘除——
+   *  若绕过 super.close() 只 detach 容器，scope 不弹、焦点不恢复，会导致关闭后 Obsidian 笔记无法正常编辑。 */
   close() {
     if (this.closing) return;
     this.closing = true;
-    if (this.opened) {
-      try {
-        this.onClose();
-      } catch (e) {
-        console.error(e);
-      }
-      this.containerEl.detach();
-    } else {
-      super.close();
-    }
+    super.close();
   }
   onClose() {
     this.swipeTabs?.dispose();
@@ -9360,6 +9328,10 @@ function createCurrencyPicker(parent, opts) {
     }
   });
   const onFollow = () => {
+    if (!input.isConnected) {
+      destroy();
+      return;
+    }
     if (open) position();
   };
   const onDoc = (e) => {
@@ -10503,6 +10475,17 @@ var AccountingSettings = class {
       typesCardEl.classList.toggle("accounting-cat-collapsed");
     });
     let draft = defaultAccountTypeSettings();
+    let accountsCache = [];
+    const countByType = (type) => {
+      let active = 0;
+      let total = 0;
+      for (const a of accountsCache) {
+        if (a.type !== type) continue;
+        total++;
+        if (a.active) active++;
+      }
+      return { active, total };
+    };
     const persist = async (next, withBackup = false) => {
       try {
         if (withBackup) await this.saveAccountTypeDraft(next);
@@ -10518,7 +10501,8 @@ var AccountingSettings = class {
         const row = parent.createDiv("accounting-at-type");
         const info = row.createDiv("accounting-at-type-info");
         const isSys = isSystemAccountType(at.type);
-        const labelIn = info.createEl("input", { cls: "accounting-ledger-input" });
+        const labelRow = info.createDiv("accounting-at-type-label-row");
+        const labelIn = labelRow.createEl("input", { cls: "accounting-ledger-input" });
         labelIn.value = isSys ? displayTypeLabel2(at.type, at.label) : at.label;
         labelIn.addEventListener("blur", () => {
           const raw = labelIn.value.trim();
@@ -10531,6 +10515,12 @@ var AccountingSettings = class {
         labelIn.addEventListener("keydown", (e) => {
           if (e.key === "Enter") labelIn.blur();
         });
+        const { active: active2, total } = countByType(at.type);
+        const accCount = labelRow.createEl("span", {
+          text: `${active2}/${total}`,
+          cls: "accounting-ledger-badge accounting-ledger-badge-muted"
+        });
+        accCount.title = t("settings.accountTypes.accountCountTip", { active: active2, total });
         const actions = row.createDiv("accounting-ledger-actions");
         if (isSys) {
           const kindSpan = actions.createEl("span", { text: kindOfLabel(at.type), cls: "accounting-at-kind" });
@@ -10624,7 +10614,12 @@ var AccountingSettings = class {
     };
     const refresh = async () => {
       try {
-        draft = await this.loadAccountTypeDraft();
+        const [draftRaw, meta] = await Promise.all([
+          this.loadAccountTypeDraft(),
+          this.currentAdapter().readMeta()
+        ]);
+        draft = draftRaw;
+        accountsCache = meta.accounts;
         renderList();
       } catch (error) {
         bodyEl.empty();
