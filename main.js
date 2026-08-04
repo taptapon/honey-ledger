@@ -2654,15 +2654,6 @@ function selectAutoBackupsToPrune(entries, keep) {
   return sorted.slice(keep);
 }
 
-// ../../packages/core/src/changelog.ts
-var MOBILE_RECENT_UPDATES = [
-  { i18nKey: "settings.about.update.m1" },
-  { i18nKey: "settings.about.update.m2" },
-  { i18nKey: "settings.about.update.m3" },
-  { i18nKey: "settings.about.update.m4" },
-  { i18nKey: "settings.about.update.m5" }
-];
-
 // src/i18n/zh.ts
 var zh = {
   "settings.tab.general": "\u901A\u7528",
@@ -3007,15 +2998,9 @@ var zh = {
   "settings.about.appName": "\u5B8F\u5229\u8BB0\u8D26 \xB7 Honey Ledger \xB7 Obsidian \u63D2\u4EF6",
   "settings.about.version": "\u7248\u672C",
   "settings.about.feedback": "\u53CD\u9988",
-  "settings.about.recentUpdates": "\u6700\u8FD1\u66F4\u65B0",
   "settings.about.diaglog": "\u8BCA\u65AD\u65E5\u5FD7",
   "settings.about.diaglogDesc": "\u8BB0\u5F55\u8FD0\u884C\u9519\u8BEF\u4E0E\u64CD\u4F5C\u65E5\u5FD7\uFF08\u5DF2\u8131\u654F\uFF0C\u4E0D\u542B\u91D1\u989D / \u8D26\u6237\u540D / \u5907\u6CE8\uFF09",
   "settings.about.diaglogBtn": "\u67E5\u770B\u8BCA\u65AD\u65E5\u5FD7",
-  "settings.about.update.m1": "\u62A5\u8868\u5206\u7C7B\u4E0B\u94BB\uFF1A\u70B9\u5F00\u62A5\u8868\u5206\u7C7B\u76F4\u8FBE\u6D41\u6C34\u660E\u7EC6\uFF0C\u79FB\u52A8\u7AEF\u4E5F\u80FD\u9010\u7B14\u8FFD\u6EAF",
-  "settings.about.update.m2": "\u6279\u91CF\u5220\u9664\u6D41\u6C34\uFF1A\u591A\u9009\u5220\u9664\uFF0C\u7ED3\u6E05\u4EA4\u6613\u8054\u52A8\u5220\u9664\u5BF9\u7AEF\uFF0C\u6E05\u7406\u66F4\u7701\u4E8B",
-  "settings.about.update.m3": "\u591A\u5E01\u79CD\u8BB0\u8D26\uFF1A\u6BCF\u7B14\u5E26\u5E01\u79CD\u4E0E\u6C47\u7387\u5FEB\u7167\uFF0C\u8DE8\u5E01\u79CD\u8F6C\u8D26\u652F\u6301\u53CC\u91D1\u989D\uFF0C\u4F59\u989D\u62A5\u8868\u6309\u672C\u4F4D\u5E01\u6298\u7B97",
-  "settings.about.update.m4": "\u8D26\u6237\u7BA1\u7406\u8865\u9F50\uFF1A\u8D26\u6237\u652F\u6301\u9690\u85CF / \u542F\u7528 / \u5C5E\u6027\u7F16\u8F91 / \u5408\u5E76\uFF0C\u79FB\u52A8\u7AEF\u64CD\u4F5C\u4E0D\u8F93\u684C\u9762",
-  "settings.about.update.m5": "\u793A\u4F8B\u8D26\u672C\u5F15\u5BFC\uFF1A\u9996\u6B21\u4F7F\u7528\u81EA\u5E26\u793A\u4F8B\u6570\u636E\uFF0C\u5FEB\u901F\u4E0A\u624B\u5404\u7C7B\u8BB0\u8D26\u573A\u666F",
   "settings.refreshBtn": "\u21BB \u5237\u65B0",
   "settings.ledger.title": "\u8D26\u672C",
   "settings.ledger.createBtn": "+ \u65B0\u5EFA\u8D26\u672C",
@@ -3169,6 +3154,7 @@ var zh = {
   // KR7/task4: settings — 账户类型管理（卡片/分组/停用区/footer + RegroupTypeModal）
   "settings.accountType.title": "\u8D26\u6237\u7C7B\u578B\u5206\u7EC4",
   "settings.accountType.resetBtn": "\u6062\u590D\u9ED8\u8BA4",
+  "settings.accountType.createTitle": "\u65B0\u5EFA\u5206\u7EC4",
   "settings.accountType.deleteGroupConfirm": "\u5220\u9664\u5206\u7EC4\u300C{{label}}\u300D\uFF1F\u5176\u4E0B\u7C7B\u578B\u5C06\u8FC1\u79FB\u5230\u300C{{fallback}}\u300D\u3002",
   "settings.accountType.firstRemainingGroup": "\u9996\u4E2A\u5269\u4F59\u5206\u7EC4",
   "settings.accountType.newGroupPlaceholder": "\u65B0\u5206\u7EC4\u540D\u79F0",
@@ -3178,7 +3164,7 @@ var zh = {
   "settings.accountType.savedNotice": "\u5DF2\u4FDD\u5B58\u8D26\u6237\u7C7B\u578B",
   "settings.accountType.loadFailed": "\u52A0\u8F7D\u8D26\u6237\u7C7B\u578B\u5931\u8D25\uFF1A{{msg}}",
   "settings.accountType.refreshedNotice": "\u8D26\u6237\u7C7B\u578B\u5DF2\u5237\u65B0",
-  "settings.accountType.resetConfirm": "\u6062\u590D\u4E3A\u9ED8\u8BA4\u8D26\u6237\u7C7B\u578B\u914D\u7F6E\uFF1F\u5F53\u524D\u7684\u81EA\u5B9A\u4E49\u5206\u7EC4\u3001\u6807\u7B7E\u4E0E\u987A\u5E8F\u5C06\u88AB\u8986\u76D6\u3002",
+  "settings.accountType.resetConfirm": "\u53EA\u6062\u590D\u5206\u7EC4\u4E3A\u9ED8\u8BA4\uFF1F\u81EA\u5B9A\u4E49\u5206\u7EC4\u5C06\u88AB\u79FB\u9664\uFF0C\u5176\u4E2D\u7684\u7C7B\u578B\u8FC1\u79FB\u5230\u9996\u4E2A\u9ED8\u8BA4\u5206\u7EC4\uFF0C\u8D26\u6237\u7C7B\u578B\u4FDD\u6301\u4E0D\u53D8\u3002",
   "settings.accountType.moveUpGroupAria": "\u4E0A\u79FB\u5206\u7EC4",
   "settings.accountType.moveDownGroupAria": "\u4E0B\u79FB\u5206\u7EC4",
   "settings.accountType.deleteGroupBtn": "\u5220\u9664\u5206\u7EC4",
@@ -3192,6 +3178,8 @@ var zh = {
   "settings.accountType.regroupIntro": "\u5C06\u300C{{label}}\u300D\u79FB\u52A8\u5230\uFF1A",
   // KR7-扩展: settings — 账户类型（重命名 + 自定义类型）
   "settings.accountTypes.title": "\u8D26\u6237\u7C7B\u578B",
+  "settings.accountTypes.createTitle": "\u65B0\u5EFA\u8D26\u6237\u7C7B\u578B",
+  "settings.accountTypes.resetConfirm": "\u53EA\u6062\u590D\u8D26\u6237\u7C7B\u578B\u4E3A\u9ED8\u8BA4\uFF1F\u81EA\u5B9A\u4E49\u7C7B\u578B\u5C06\u88AB\u79FB\u9664\uFF0C\u5206\u7EC4\u4FDD\u6301\u4E0D\u53D8\u3002",
   "settings.accountTypes.newPlaceholder": "\u65B0\u7C7B\u578B\u540D\u79F0",
   "settings.accountTypes.add": "\uFF0B \u65B0\u589E\u7C7B\u578B",
   "settings.accountTypes.delete": "\u5220\u9664",
@@ -3647,15 +3635,9 @@ var en = {
   "settings.about.appName": "Honey Ledger \xB7 Obsidian Plugin",
   "settings.about.version": "Version",
   "settings.about.feedback": "Feedback",
-  "settings.about.recentUpdates": "Recent updates",
   "settings.about.diaglog": "Diagnostic logs",
   "settings.about.diaglogDesc": "Records runtime errors and operations (redacted: no amounts, account names, or notes)",
   "settings.about.diaglogBtn": "View diagnostic logs",
-  "settings.about.update.m1": "Report drill-down: tap a report category to jump straight to its transactions \u2014 trace every entry on mobile too",
-  "settings.about.update.m2": "Bulk delete: multi-select to delete; settlement transactions auto-delete their counterpart \u2014 cleanup is effortless",
-  "settings.about.update.m3": "Multi-currency bookkeeping: each entry carries currency + rate snapshot; cross-currency transfers support dual amounts; balance reports convert to the base currency",
-  "settings.about.update.m4": "Account management rounded out: accounts support hide / enable / property edit / merge \u2014 mobile matches the desktop",
-  "settings.about.update.m5": "Sample-ledger onboarding: first run ships with sample data to quickly explore every bookkeeping scenario",
   "settings.refreshBtn": "\u21BB Refresh",
   "settings.ledger.title": "Ledgers",
   "settings.ledger.createBtn": "+ New ledger",
@@ -3809,6 +3791,7 @@ var en = {
   // KR7/task4: settings — account-type management (card/group/disabled-area/footer + RegroupTypeModal)
   "settings.accountType.title": "Account type groups",
   "settings.accountType.resetBtn": "Reset to default",
+  "settings.accountType.createTitle": "New group",
   "settings.accountType.deleteGroupConfirm": 'Delete group "{{label}}"? Its types move to "{{fallback}}".',
   "settings.accountType.firstRemainingGroup": "first remaining group",
   "settings.accountType.newGroupPlaceholder": "New group name",
@@ -3818,7 +3801,7 @@ var en = {
   "settings.accountType.savedNotice": "Account types saved",
   "settings.accountType.loadFailed": "Failed to load account types: {{msg}}",
   "settings.accountType.refreshedNotice": "Account types refreshed",
-  "settings.accountType.resetConfirm": "Reset to the default account-type config? Current custom groups, labels, and order will be overwritten.",
+  "settings.accountType.resetConfirm": "Reset groups to default only? Custom groups will be removed; their types move to the first default group. Account types are unchanged.",
   "settings.accountType.moveUpGroupAria": "Move group up",
   "settings.accountType.moveDownGroupAria": "Move group down",
   "settings.accountType.deleteGroupBtn": "Delete group",
@@ -3832,6 +3815,8 @@ var en = {
   "settings.accountType.regroupIntro": 'Move "{{label}}" to:',
   // Account types card: rename + custom types
   "settings.accountTypes.title": "Account Types",
+  "settings.accountTypes.createTitle": "New account type",
+  "settings.accountTypes.resetConfirm": "Reset account types to default only? Custom types will be removed. Groups are unchanged.",
   "settings.accountTypes.newPlaceholder": "New type name",
   "settings.accountTypes.add": "\uFF0B Add type",
   "settings.accountTypes.delete": "Delete",
@@ -9561,15 +9546,6 @@ var AccountingSettings = class {
     row(t("settings.about.app"), t("settings.about.appName"));
     row(t("settings.about.version"), `v${this.plugin.manifest.version}`);
     row(t("settings.about.feedback"), FEEDBACK_EMAIL, true);
-    const recentCardEl = panel.createDiv("accounting-ledger-card");
-    const recentHeadEl = recentCardEl.createDiv("accounting-ledger-card-head");
-    recentHeadEl.createEl("span", { text: t("settings.about.recentUpdates"), cls: "accounting-ledger-card-title" });
-    const recentBodyEl = recentCardEl.createDiv("accounting-ledger-list");
-    MOBILE_RECENT_UPDATES.forEach((entry, i) => {
-      const item = recentBodyEl.createDiv("accounting-about-row");
-      item.createEl("span", { text: `${i + 1}.`, cls: "accounting-about-label" });
-      item.createEl("span", { text: t(entry.i18nKey), cls: "accounting-about-value" });
-    });
     const diagCardEl = panel.createDiv("accounting-ledger-card");
     const diagHeadEl = diagCardEl.createDiv("accounting-ledger-card-head");
     diagHeadEl.createEl("span", { text: t("settings.about.diaglog"), cls: "accounting-ledger-card-title" });
@@ -10505,6 +10481,9 @@ var AccountingSettings = class {
     typesHeadEl.createEl("span", { cls: "accounting-cat-toggle" });
     typesHeadEl.createEl("span", { text: t("settings.accountTypes.title"), cls: "accounting-ledger-card-title" });
     const typesBadgeEl = typesHeadEl.createEl("span", { cls: "accounting-ledger-badge accounting-ledger-badge-muted" });
+    const typesHeadActions = typesHeadEl.createDiv("accounting-ledger-head-actions");
+    const addTypeBtn = typesHeadActions.createEl("button", { text: t("settings.accountTypes.add"), cls: "accounting-ledger-create" });
+    const resetTypesBtn = typesHeadActions.createEl("button", { text: t("settings.accountType.resetBtn"), cls: "accounting-ledger-refresh" });
     const typesBodyEl = typesCardEl.createDiv("accounting-ledger-list");
     const cardEl = containerEl.createDiv("accounting-ledger-card accounting-cat-flow-card accounting-cat-collapsed");
     const headEl = cardEl.createDiv("accounting-ledger-card-head");
@@ -10512,7 +10491,8 @@ var AccountingSettings = class {
     headEl.createEl("span", { text: t("settings.accountType.title"), cls: "accounting-ledger-card-title" });
     const badgeEl = headEl.createEl("span", { cls: "accounting-ledger-badge accounting-ledger-badge-muted" });
     const headActions = headEl.createDiv("accounting-ledger-head-actions");
-    const resetBtn = headActions.createEl("button", { text: t("settings.accountType.resetBtn"), cls: "accounting-ledger-refresh" });
+    const addGroupBtn = headActions.createEl("button", { text: t("settings.accountType.addGroupBtn"), cls: "accounting-ledger-create" });
+    const resetGroupsBtn = headActions.createEl("button", { text: t("settings.accountType.resetBtn"), cls: "accounting-ledger-refresh" });
     const bodyEl = cardEl.createDiv("accounting-ledger-list");
     headEl.addEventListener("click", (e) => {
       if (e.target.closest("button")) return;
@@ -10534,8 +10514,8 @@ var AccountingSettings = class {
     const renderTypesBody = () => {
       typesBodyEl.empty();
       typesBadgeEl.setText(String(draft.types.length));
-      const renderRow = (at, inactive2) => {
-        const row = typesBodyEl.createDiv("accounting-at-type");
+      const renderRow = (at, inactive2, parent = typesBodyEl) => {
+        const row = parent.createDiv("accounting-at-type");
         const info = row.createDiv("accounting-at-type-info");
         const isSys = isSystemAccountType(at.type);
         const labelIn = info.createEl("input", { cls: "accounting-ledger-input" });
@@ -10545,6 +10525,7 @@ var AccountingSettings = class {
           if (raw && raw !== labelIn.defaultValue) {
             draft = setTypeLabel(draft, at.type, raw);
             void persist(draft);
+            renderGroupsBody();
           }
         });
         labelIn.addEventListener("keydown", (e) => {
@@ -10554,12 +10535,12 @@ var AccountingSettings = class {
         if (isSys) {
           const kindSpan = actions.createEl("span", { text: kindOfLabel(at.type), cls: "accounting-at-kind" });
         } else {
-          const kindSel2 = actions.createEl("select", { cls: "accounting-ledger-input accounting-at-kind-select" });
-          kindSel2.createEl("option", { text: t("accountKind.asset"), value: "asset" });
-          kindSel2.createEl("option", { text: t("accountKind.liability"), value: "liability" });
-          kindSel2.value = at.kind ?? "asset";
-          kindSel2.addEventListener("change", () => {
-            draft = setTypeKind(draft, at.type, kindSel2.value);
+          const kindSel = actions.createEl("select", { cls: "accounting-ledger-input accounting-at-kind-select" });
+          kindSel.createEl("option", { text: t("accountKind.asset"), value: "asset" });
+          kindSel.createEl("option", { text: t("accountKind.liability"), value: "liability" });
+          kindSel.value = at.kind ?? "asset";
+          kindSel.addEventListener("change", () => {
+            draft = setTypeKind(draft, at.type, kindSel.value);
             void persist(draft);
           });
         }
@@ -10597,32 +10578,8 @@ var AccountingSettings = class {
       if (inactive.length > 0) {
         const details = typesBodyEl.createEl("details");
         details.createEl("summary", { text: t("settings.accountType.inactiveSummary", { n: inactive.length }), cls: "accounting-collapsible-head" });
-        for (const at of inactive) renderRow(at, true);
+        for (const at of inactive) renderRow(at, true, details);
       }
-      const addRow = typesBodyEl.createDiv("accounting-at-add-group");
-      const nameInput = addRow.createEl("input", { cls: "accounting-ledger-input" });
-      nameInput.type = "text";
-      nameInput.placeholder = t("settings.accountTypes.newPlaceholder");
-      const kindSel = addRow.createEl("select", { cls: "accounting-ledger-input accounting-at-kind-select" });
-      kindSel.createEl("option", { text: t("accountKind.asset"), value: "asset" });
-      kindSel.createEl("option", { text: t("accountKind.liability"), value: "liability" });
-      const groupSel = addRow.createEl("select", { cls: "accounting-ledger-input" });
-      for (const g of draft.groups) groupSel.createEl("option", { text: g.label, value: g.id });
-      const addBtn = addRow.createEl("button", { text: t("settings.accountTypes.add"), cls: "accounting-ledger-create" });
-      addBtn.disabled = true;
-      nameInput.addEventListener("input", () => {
-        addBtn.disabled = !nameInput.value.trim();
-      });
-      addBtn.onclick = () => {
-        const label = nameInput.value.trim();
-        if (!label) return;
-        draft = addType(draft, { label, kind: kindSel.value, groupId: groupSel.value });
-        void persist(draft, true);
-        nameInput.value = "";
-        addBtn.disabled = true;
-        renderTypesBody();
-        renderGroupsBody();
-      };
     };
     const renderGroupsBody = () => {
       bodyEl.empty();
@@ -10660,24 +10617,6 @@ var AccountingSettings = class {
           }
         });
       }
-      const addRow = bodyEl.createDiv("accounting-at-add-group");
-      const nameInput = addRow.createEl("input", { cls: "accounting-ledger-input" });
-      nameInput.type = "text";
-      nameInput.placeholder = t("settings.accountType.newGroupPlaceholder");
-      const addBtn = addRow.createEl("button", { text: t("settings.accountType.addGroupBtn"), cls: "accounting-ledger-create" });
-      addBtn.disabled = true;
-      nameInput.addEventListener("input", () => {
-        addBtn.disabled = !nameInput.value.trim();
-      });
-      addBtn.onclick = () => {
-        const label = nameInput.value.trim();
-        if (!label) return;
-        draft = addGroup(draft, label);
-        void persist(draft, true);
-        nameInput.value = "";
-        addBtn.disabled = true;
-        renderGroupsBody();
-      };
     };
     const renderList = () => {
       renderGroupsBody();
@@ -10692,9 +10631,31 @@ var AccountingSettings = class {
         bodyEl.createEl("p", { text: t("settings.accountType.loadFailed", { msg: formatError(error) }), cls: "accounting-ledger-empty" });
       }
     };
-    resetBtn.onclick = () => {
+    addTypeBtn.onclick = () => {
+      new CreateAccountTypeModal(this.app, draft.groups, async (label, kind, groupId) => {
+        draft = addType(draft, { label, kind, groupId });
+        void persist(draft, true);
+        renderTypesBody();
+        renderGroupsBody();
+      }).open();
+    };
+    addGroupBtn.onclick = () => {
+      new CreateAccountTypeGroupModal(this.app, async (label) => {
+        draft = addGroup(draft, label);
+        void persist(draft, true);
+        renderGroupsBody();
+        renderTypesBody();
+      }).open();
+    };
+    resetTypesBtn.onclick = () => {
+      if (!confirm(t("settings.accountTypes.resetConfirm"))) return;
+      draft = normalizeAccountTypeSettings({ groups: draft.groups, types: defaultAccountTypeSettings().types });
+      void persist(draft, true);
+      renderList();
+    };
+    resetGroupsBtn.onclick = () => {
       if (!confirm(t("settings.accountType.resetConfirm"))) return;
-      draft = defaultAccountTypeSettings();
+      draft = normalizeAccountTypeSettings({ groups: defaultAccountTypeSettings().groups, types: draft.types });
       void persist(draft, true);
       renderList();
     };
@@ -11024,6 +10985,85 @@ var RegroupTypeModal = class extends import_obsidian18.Modal {
     const closeWrap = contentEl.createDiv("accounting-modal-close");
     const closeBtn = closeWrap.createEl("button", { text: t("common.close"), cls: "accounting-btn-secondary" });
     closeBtn.onclick = () => this.close();
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+var CreateAccountTypeModal = class extends import_obsidian18.Modal {
+  constructor(app, groups, onSubmit) {
+    super(app);
+    this.groups = groups;
+    this.onSubmit = onSubmit;
+  }
+  labelInput;
+  kindSelect;
+  groupSelect;
+  submitBtn;
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.modalEl.addClass("accounting-sub-modal");
+    if (!import_obsidian18.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    contentEl.createEl("h2", { text: t("settings.accountTypes.createTitle") });
+    this.labelInput = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
+    this.labelInput.placeholder = t("settings.accountTypes.newPlaceholder");
+    this.kindSelect = contentEl.createEl("select", { cls: "accounting-ledger-input" });
+    this.kindSelect.createEl("option", { text: t("accountKind.asset"), value: "asset" });
+    this.kindSelect.createEl("option", { text: t("accountKind.liability"), value: "liability" });
+    this.groupSelect = contentEl.createEl("select", { cls: "accounting-ledger-input" });
+    for (const g of this.groups) this.groupSelect.createEl("option", { text: g.label || g.id, value: g.id });
+    if (this.groups[0]) this.groupSelect.value = this.groups[0].id;
+    const actions = contentEl.createDiv("accounting-modal-actions");
+    const cancelBtn = actions.createEl("button", { text: t("common.cancel"), cls: "accounting-btn-secondary" });
+    cancelBtn.onclick = () => this.close();
+    this.submitBtn = actions.createEl("button", { text: t("ledger.create.submitBtn"), cls: "accounting-btn-primary" });
+    this.submitBtn.disabled = true;
+    this.submitBtn.onclick = async () => {
+      const label = this.labelInput.value.trim();
+      if (!label) return;
+      this.close();
+      await this.onSubmit(label, this.kindSelect.value, this.groupSelect.value);
+    };
+    this.labelInput.oninput = () => {
+      this.submitBtn.disabled = !this.labelInput.value.trim();
+    };
+    setTimeout(() => this.labelInput.focus(), 0);
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+var CreateAccountTypeGroupModal = class extends import_obsidian18.Modal {
+  constructor(app, onSubmit) {
+    super(app);
+    this.onSubmit = onSubmit;
+  }
+  nameInput;
+  submitBtn;
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.modalEl.addClass("accounting-sub-modal");
+    if (!import_obsidian18.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    contentEl.createEl("h2", { text: t("settings.accountType.createTitle") });
+    this.nameInput = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
+    this.nameInput.placeholder = t("settings.accountType.newGroupPlaceholder");
+    const actions = contentEl.createDiv("accounting-modal-actions");
+    const cancelBtn = actions.createEl("button", { text: t("common.cancel"), cls: "accounting-btn-secondary" });
+    cancelBtn.onclick = () => this.close();
+    this.submitBtn = actions.createEl("button", { text: t("ledger.create.submitBtn"), cls: "accounting-btn-primary" });
+    this.submitBtn.disabled = true;
+    this.submitBtn.onclick = async () => {
+      const label = this.nameInput.value.trim();
+      if (!label) return;
+      this.close();
+      await this.onSubmit(label);
+    };
+    this.nameInput.oninput = () => {
+      this.submitBtn.disabled = !this.nameInput.value.trim();
+    };
+    setTimeout(() => this.nameInput.focus(), 0);
   }
   onClose() {
     this.contentEl.empty();

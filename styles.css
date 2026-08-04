@@ -51,6 +51,10 @@
   --ac-card-action-gap: 16px;
   --ac-focus-ring: 0 0 0 3px rgba(16, 185, 129, 0.24);
   --ac-focus-ring: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 35%, transparent);
+  /* 数据可视化专用字号（趋势/净值条微标签）与 Hero 大数字：单点维护，避免魔法 px 散落。 */
+  --ac-font-chart-xs: 9px;
+  --ac-font-chart-sm: 10px;
+  --ac-font-hero: 28px;
 }
 
 /* 全局焦点环：插件内任意控件获键盘焦点时统一 accent 光晕（移动端触屏不触发 :focus-visible，
@@ -146,14 +150,10 @@
   z-index: 2;
 }
 
-/* 顶部避让（胶囊 + 右上角 ✕）改由 .modal 自身的 padding-top 顶部带承担（见下方
-   .accounting-fullscreen:not(.accounting-desktop) 的 padding-top）。原先在 .modal-content（滚动容器）
-   内给 padding-top:40px，会随滚动滚走 → 正文上划时从胶囊/✕ 的透明缝隙穿帮。挪到不滚动的 .modal 上后，
-   正文可见顶沿固定落在带子下沿、被裁住，不再穿帮。移动端四页（记账/流水/账户/统计）共用此带。
-   桌面窄面板沿用 contentEl 内 padding（该区不滚动，无此问题）。 */
-.modal.accounting-fullscreen.accounting-desktop .accounting-has-ledger-pill {
-  padding-top: 30px;
-}
+/* 顶部避让（账本胶囊 + 右上角 ✕）改由 .modal 自身的 padding-top 承担（不滚动，固定不穿帮）。
+   原先在 .modal-content（滚动容器）内给 padding-top，长页（统计/流水/余额）滚动时该 padding 随内容
+   滚走 → 正文从胶囊/✕ 的透明缝里穿帮。移动端带值见下方 :not(.accounting-desktop) 规则；
+   桌面窄面板带值见 .accounting-fullscreen.accounting-desktop 基座（约 38px，对齐桌面 ✕ 位置）。 */
 
 /* 记一笔顶部账本切换浮层（复用设置页 .accounting-ledger-* 列表样式） */
 .modal.accounting-ledger-switch-modal {
@@ -572,7 +572,7 @@
 }
 
 .accounting-nw-hero-value {
-  font-size: 28px;
+  font-size: var(--ac-font-hero);
   font-weight: 700;
   line-height: 1.15;
   margin-top: 2px;
@@ -618,10 +618,12 @@
 
 .accounting-nw-hero-asset {
   color: var(--color-green);
+  font-size: var(--font-ui-smaller);
 }
 
 .accounting-nw-hero-liab {
   color: var(--color-red);
+  font-size: var(--font-ui-smaller);
 }
 
 .accounting-summary {
@@ -785,6 +787,7 @@
 
 .accounting-empty {
   color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
   padding: 24px;
   text-align: center;
 }
@@ -1943,6 +1946,7 @@
 }
 
 .accounting-action-item-text {
+  font-size: var(--font-ui-small);
   font-weight: 500;
 }
 
@@ -1957,8 +1961,11 @@
   border-radius: 0 !important;
   margin: 0 !important;
   box-sizing: border-box;
-  /* 顶缓冲：优先系统安全区(状态栏/刘海)，兜底 30px。 */
-  padding-top: max(env(safe-area-inset-top), 10px);
+  /* 顶避让带：在 .modal（不滚动）上预留 safe-area + 52px。滚动容器 .modal-content 的可见顶沿落在此带下沿
+     ——记账/流水/账户/统计/设置 5 个全屏页共用此值，两端一致。+52 让上边缘落到右上 ✕ 与账本胶囊下沿之下
+     （无刘海基准下约 8~14px 呼吸；有刘海机 safe-area 更大、间距自动更宽）。桌面 env 取不到值，回退 62px。
+     原由 .accounting-has-ledger-pill 在 contentEl 内给 padding-top，会随滚动滚走 → 穿帮；挪到 .modal 即固定不滚。 */
+  padding-top: calc(max(env(safe-area-inset-top), 10px) + 52px);
   /* 底缓冲：底部固定导航条高度(~52px) + home 指示条/兜底，保证内容与底部按钮不被导航条遮挡。 */
   padding-bottom: calc(max(env(safe-area-inset-bottom), 10px) + 52px);
   /* 关闭 Obsidian 默认的打开动画（上浮/淡入），改由 contentEl 的左右滑入承担；overflow 裁掉滑入时的横向溢出。 */
@@ -1976,22 +1983,18 @@
 .modal.accounting-fullscreen:not(.accounting-desktop) {
   transform: none !important;
   opacity: 1 !important;
-  /* 顶部避让带：在 .modal（不滚动）上预留 safe-area + 52px。滚动容器 .modal-content 的可见顶沿（上边缘）
-     即落在此带下沿——记账/流水/账户/统计/设置 5 个全屏页共用此值，上边缘统一。+52 让上边缘落到右上 ✕ 与
-     账本胶囊下沿之下（无刘海基准下约 8~14px 呼吸；有刘海机 safe-area 更大、间距自动更宽），与关闭按钮拉开间距。
-     各页 contentEl 自身的 padding-top 不同是各页内部设计、不在此统一。原由 .accounting-has-ledger-pill 在
-     contentEl 内给 padding-top，会随滚动滚走 → 穿帮；挪到 .modal 的 padding-top 上即固定不滚。
-     特异性 (0,3,0) 覆盖基线 .modal.accounting-fullscreen 的 padding-top (0,2,0)；桌面窄面板沿用基线不动。 */
-  padding-top: calc(max(env(safe-area-inset-top), 10px) + 52px);
+  /* 顶避让带已统一提到基座 .modal.accounting-fullscreen 的 padding-top（两端同值，见上方基座注释），
+     此处仅保留移动端专属的 transform/opacity 钉住（反压 Obsidian JS 逐帧开/关动画）。 */
 }
 
 /* 移动端全屏页 contentEl 顶部 padding：流水/账户/统计/设置四页清零——内容紧贴滚动区顶部（.modal 避让带
    safe-area+52 已统一提供 .modal-content 上边缘与右上 ✕ 的间距，见上方 .accounting-fullscreen 规则），
    各页内部元素自行设计离顶距离。设置页 sticky tab 栏（.accounting-settings-tabs）吸顶在滚动区顶，靠自身不透明
    底色遮住上划的正文（不穿帮）；默认 .modal-content 的 padding:5px 会在 tab 栏上方留一条隙，故一并清零。
-   记账页另给 10px（见 .accounting-entry-modal）。仅移动端。
+   记账页另给 10px（见 .accounting-entry-modal）。
+   桌面端同理：设置页 sticky tab 栏上方若留 padding 缝，滚动正文同样从缝漏出；四页一并清零。
    特异性 (0,3,0) 覆盖 .modal.accounting-fullscreen .modal-content 的 padding:5px (0,2,0)。 */
-.modal.accounting-fullscreen:not(.accounting-desktop) :is(.accounting-transaction-modal, .accounting-balance-modal, .accounting-report-modal, .accounting-settings-modal) {
+.modal.accounting-fullscreen .modal-content:is(.accounting-transaction-modal, .accounting-balance-modal, .accounting-report-modal, .accounting-settings-modal) {
   padding-top: 0;
 }
 
@@ -2045,6 +2048,7 @@
   max-width: var(--accounting-panel-width) !important;
   margin: 0 auto !important;
   contain: layout;
+  /* 顶避让带已统一提到基座（两端同值 safe-area+52），此处不再单独设 padding-top。 */
 }
 
 .accounting-entry-modal {
@@ -2493,13 +2497,16 @@
 .accounting-about-label {
   flex: 0 0 3.5em;
   color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
 }
 .accounting-about-value {
   color: var(--text-normal);
+  font-size: var(--font-ui-small);
   word-break: break-all;
 }
 .accounting-about-link {
   color: var(--text-accent, var(--interactive-accent));
+  font-size: var(--font-ui-small);
   text-decoration: none;
 }
 .accounting-about-link:hover {
@@ -2592,6 +2599,8 @@ details[open] > .accounting-collapsible-head::before {
   align-items: baseline;
   gap: var(--ac-gap-sm);
   color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-weight: 600;
 }
 
 .accounting-month-count {
@@ -2611,6 +2620,7 @@ details[open] > .accounting-collapsible-head::before {
 
 .accounting-month-balance {
   color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
 }
 
 .accounting-sort-hint {
@@ -2740,6 +2750,23 @@ details[open] > .accounting-collapsible-head::before {
   min-width: 0;
 }
 
+/* 分组卡内类型 label（只读 span）：对齐 .accounting-ledger-name 基线（font-ui-small + 600），
+   不设则继承默认正文字号偏大，与「账户类型」卡的 input label 及分类项不一致。 */
+.accounting-at-type-label {
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 系统类型只读 kind 标注（资产/负债）：次要信息，对齐 .accounting-ledger-folder 副文本口径。 */
+.accounting-at-kind {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+}
+
 .accounting-at-add-group {
   display: flex;
   align-items: center;
@@ -2774,6 +2801,7 @@ details[open] > .accounting-collapsible-head::before {
 
 .accounting-ledger-next-date {
   color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -3174,10 +3202,12 @@ details[open] > .accounting-collapsible-head::before {
 
 .accounting-stat-income {
   color: var(--color-green);
+  font-size: var(--font-ui-small);
 }
 
 .accounting-stat-expense {
   color: var(--color-red);
+  font-size: var(--font-ui-small);
 }
 
 /* 区块间距 */
@@ -3223,16 +3253,19 @@ details[open] > .accounting-collapsible-head::before {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
 }
 
 .accounting-bar-amount {
   flex: 0 0 auto;
   white-space: nowrap;
+  font-size: var(--font-ui-small);
   font-weight: 600;
 }
 
 .accounting-bar-percent {
   color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
   font-weight: 400;
 }
 
@@ -3314,7 +3347,7 @@ details[open] > .accounting-collapsible-head::before {
 
 .accounting-trend-value {
   fill: var(--text-muted);
-  font-size: 9px;
+  font-size: var(--ac-font-chart-xs);
 }
 
 .accounting-trend-value-neg {
@@ -3323,7 +3356,7 @@ details[open] > .accounting-collapsible-head::before {
 
 .accounting-trend-axis-label {
   fill: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--ac-font-chart-sm);
 }
 
 .accounting-trend-line-income {
@@ -3362,6 +3395,7 @@ details[open] > .accounting-collapsible-head::before {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  font-size: var(--font-ui-smaller);
 }
 
 .accounting-trend-leg-surplus::before {
@@ -3498,7 +3532,7 @@ details[open] > .accounting-collapsible-head::before {
 
 .accounting-nw-bar-label {
   fill: var(--color-blue);
-  font-size: 9px;
+  font-size: var(--ac-font-chart-xs);
   font-weight: 600;
 }
 
