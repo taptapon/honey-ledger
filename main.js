@@ -3096,15 +3096,15 @@ var zh = {
   "settings.about.diaglog": "\u8BCA\u65AD\u65E5\u5FD7",
   "settings.about.diaglogDesc": "\u8BB0\u5F55\u8FD0\u884C\u9519\u8BEF\u4E0E\u64CD\u4F5C\u65E5\u5FD7\uFF08\u5DF2\u8131\u654F\uFF0C\u4E0D\u542B\u91D1\u989D / \u8D26\u6237\u540D / \u5907\u6CE8\uFF09",
   "settings.about.diaglogBtn": "\u67E5\u770B\u8BCA\u65AD\u65E5\u5FD7",
-  "settings.refreshBtn": "\u21BB \u5237\u65B0",
+  "settings.refreshBtn": "\u5237\u65B0",
   "settings.ledger.title": "\u8D26\u672C",
-  "settings.ledger.createBtn": "+ \u65B0\u5EFA\u8D26\u672C",
+  "settings.ledger.createBtn": "\u65B0\u5EFA\u8D26\u672C",
   "settings.ledger.empty": "\u5C1A\u65E0\u8D26\u672C",
-  "settings.ledger.switchBtn": "\u21C4 \u5207\u6362",
+  "settings.ledger.switchBtn": "\u5207\u6362",
   "settings.ledger.switchedNotice": "\u5DF2\u5207\u6362\u5230\u300C{{alias}}\u300D\uFF0C\u8BF7\u5173\u95ED\u5E76\u91CD\u65B0\u6253\u5F00\u8BB0\u8D26\u754C\u9762",
   "settings.ledger.switchFailed": "\u5207\u6362\u8D26\u672C\u5931\u8D25\uFF1A{{msg}}",
-  "settings.ledger.renameBtn": "\u270E \u6539\u540D",
-  "settings.ledger.deleteBtn": "\u{1F5D1} \u5220\u9664",
+  "settings.ledger.renameBtn": "\u6539\u540D",
+  "settings.ledger.deleteBtn": "\u5220\u9664",
   "settings.ledger.loadFailed": "\u52A0\u8F7D\u8D26\u672C\u5217\u8868\u5931\u8D25\uFF1A{{msg}}",
   "settings.ledger.createdSwitchedNotice": "\u5DF2\u65B0\u5EFA\u5E76\u5207\u6362\u5230\u300C{{alias}}\u300D\uFF0C\u8BF7\u5173\u95ED\u5E76\u91CD\u65B0\u6253\u5F00\u8BB0\u8D26\u754C\u9762",
   "settings.ledger.refreshedNotice": "\u8D26\u672C\u5217\u8868\u5DF2\u5237\u65B0",
@@ -3116,14 +3116,14 @@ var zh = {
   "settings.ledger.deletedNotice": "\u5DF2\u5220\u9664\u8D26\u672C\uFF1A{{alias}}",
   "settings.ledger.deleteFailed": "\u5220\u9664\u5931\u8D25\uFF1A{{msg}}",
   "settings.ledger.renameAliasTitle": "\u6539\u8D26\u672C\u522B\u540D",
-  "settings.password.setBtn": "\u{1F512} \u8BBE\u7F6E\u5BC6\u7801",
-  "settings.password.changeBtn": "\u{1F512} \u6539\u5BC6\u7801",
-  "settings.password.removeBtn": "\u79FB\u9664\u5BC6\u7801",
+  "settings.password.setBtn": "\u8BBE\u5BC6\u7801",
+  "settings.password.changeBtn": "\u6539\u5BC6\u7801",
+  "settings.password.removeBtn": "\u5220\u5BC6\u7801",
   "settings.password.setTitle": "\u8BBE\u7F6E\u8D26\u672C\u5BC6\u7801",
   "settings.password.changeTitle": "\u4FEE\u6539\u8D26\u672C\u5BC6\u7801",
   "settings.password.removeTitle": "\u79FB\u9664\u8D26\u672C\u5BC6\u7801",
   "settings.password.setHint": "\u4E3A\u6B64\u8D26\u672C\u8BBE\u7F6E\u8BBF\u95EE\u5BC6\u7801\uFF0C\u4E4B\u540E\u8FDB\u5165\u9700\u5148\u8F93\u5165\u5BC6\u7801\u3002",
-  "settings.password.changeHint": "\u4FEE\u6539\u300C{{name}}\u300D\u7684\u8BBF\u95EE\u5BC6\u7801\u3002",
+  "settings.password.changeHint": "\u4FEE\u6539\u300C{{name}}\u300D\u7684\u8BBF\u95EE\u5BC6\u7801\u3002\u65B0\u5BC6\u7801\u7559\u7A7A\u8868\u793A\u5220\u9664\u5BC6\u7801\u3002",
   "settings.password.removeHint": "\u8F93\u5165\u300C{{name}}\u300D\u7684\u5F53\u524D\u5BC6\u7801\u4EE5\u79FB\u9664\u5BC6\u7801\u9501\u3002",
   "settings.password.oldPlaceholder": "\u5F53\u524D\u5BC6\u7801",
   "settings.password.newPlaceholder": "\u65B0\u5BC6\u7801",
@@ -3760,15 +3760,15 @@ var en = {
   "settings.about.diaglog": "Diagnostic logs",
   "settings.about.diaglogDesc": "Records runtime errors and operations (redacted: no amounts, account names, or notes)",
   "settings.about.diaglogBtn": "View diagnostic logs",
-  "settings.refreshBtn": "\u21BB Refresh",
+  "settings.refreshBtn": "Refresh",
   "settings.ledger.title": "Ledgers",
-  "settings.ledger.createBtn": "+ New ledger",
+  "settings.ledger.createBtn": "New ledger",
   "settings.ledger.empty": "No ledgers yet",
-  "settings.ledger.switchBtn": "\u21C4 Switch",
+  "settings.ledger.switchBtn": "Switch",
   "settings.ledger.switchedNotice": 'Switched to "{{alias}}"; please close and reopen the accounting view',
   "settings.ledger.switchFailed": "Switch ledger failed: {{msg}}",
-  "settings.ledger.renameBtn": "\u270E Rename",
-  "settings.ledger.deleteBtn": "\u{1F5D1} Delete",
+  "settings.ledger.renameBtn": "Rename",
+  "settings.ledger.deleteBtn": "Delete",
   "settings.ledger.loadFailed": "Failed to load ledger list: {{msg}}",
   "settings.ledger.createdSwitchedNotice": 'Created and switched to "{{alias}}"; please close and reopen the accounting view',
   "settings.ledger.refreshedNotice": "Ledger list refreshed",
@@ -3780,14 +3780,14 @@ var en = {
   "settings.ledger.deletedNotice": "Deleted ledger: {{alias}}",
   "settings.ledger.deleteFailed": "Delete failed: {{msg}}",
   "settings.ledger.renameAliasTitle": "Rename ledger alias",
-  "settings.password.setBtn": "\u{1F512} Set password",
-  "settings.password.changeBtn": "\u{1F512} Change password",
+  "settings.password.setBtn": "Set password",
+  "settings.password.changeBtn": "Change password",
   "settings.password.removeBtn": "Remove password",
   "settings.password.setTitle": "Set ledger password",
   "settings.password.changeTitle": "Change ledger password",
   "settings.password.removeTitle": "Remove ledger password",
   "settings.password.setHint": "Set an access password for this ledger. Entering it will require the password from now on.",
-  "settings.password.changeHint": 'Change the access password of "{{name}}".',
+  "settings.password.changeHint": 'Change the access password of "{{name}}". Leave the new password blank to remove it.',
   "settings.password.removeHint": 'Enter the current password of "{{name}}" to remove the password lock.',
   "settings.password.oldPlaceholder": "Current password",
   "settings.password.newPlaceholder": "New password",
@@ -4460,7 +4460,8 @@ var ObsidianDataAdapter = class _ObsidianDataAdapter {
       updatedAt: now
     };
   }
-  /** 扫描 vault 根目录，列出所有包含 transactions.jsonl 的账本子目录。
+  /** 扫描 vault 根目录，列出所有账本子目录。账本标记文件 4 选 1（与桌面端 scan_ledgers 对齐）：
+   *  transactions.jsonl / accounts.json / categories.json / account-types.json。
    *  注意：必须用 vault.adapter.list 而非 getAbstractFileByPath/TFolder.children——
    *  Obsidian 的 vault 索引会过滤掉以 `.` 开头的隐藏目录（与 .obsidian 同类），遍历索引树看不到隐藏账本。 */
   async listLedgers() {
@@ -4471,11 +4472,14 @@ var ObsidianDataAdapter = class _ObsidianDataAdapter {
     } catch {
       return [];
     }
+    const MARKERS = ["transactions.jsonl", "accounts.json", "categories.json", "account-types.json"];
     for (const folder of result.folders) {
       if (folder.includes("/")) continue;
       if (folder === "." || folder === ".." || folder === "backups" || folder.includes("\\")) continue;
-      const txPath = `${folder}/transactions.jsonl`;
-      if (await this.vault.adapter.exists(txPath)) {
+      const isLedger = await Promise.all(
+        MARKERS.map((f) => this.vault.adapter.exists(`${folder}/${f}`))
+      );
+      if (isLedger.some(Boolean)) {
         ledgers.push(folder);
       }
     }
@@ -9489,11 +9493,17 @@ var LedgerPasswordModal = class extends import_obsidian18.Modal {
   async handleSubmit(submitBtn) {
     const mode = this.props.mode;
     const newPwd = this.readField("new");
-    if (mode === "set" || mode === "change") {
+    if (mode === "set") {
       if (newPwd.trim().length === 0) {
         this.showError(t("settings.password.empty"));
         return;
       }
+      const confirm2 = this.readField("confirm");
+      if (newPwd !== confirm2) {
+        this.showError(t("settings.password.mismatch"));
+        return;
+      }
+    } else if (mode === "change") {
       const confirm2 = this.readField("confirm");
       if (newPwd !== confirm2) {
         this.showError(t("settings.password.mismatch"));
@@ -9936,12 +9946,6 @@ var AccountingSettings = class {
           pwdBtn.onclick = () => {
             void this.openLedgerPasswordModal(name, alias, hasPassword ? "change" : "set", refreshLedgerList);
           };
-          if (hasPassword) {
-            const removePwdBtn = actions.createEl("button", { text: t("settings.password.removeBtn"), cls: "accounting-ledger-delete" });
-            removePwdBtn.onclick = () => {
-              void this.openLedgerPasswordModal(name, alias, "remove", refreshLedgerList);
-            };
-          }
           if (!isCurrent) {
             const deleteBtn = actions.createEl("button", { text: t("settings.ledger.deleteBtn"), cls: "accounting-ledger-delete" });
             deleteBtn.onclick = () => {
@@ -10302,7 +10306,7 @@ var AccountingSettings = class {
     });
     modal.open();
   }
-  /** 账本密码：设置/修改/移除（经自定义 Modal，禁用 prompt）。移除须验证当前密码（防无验证清除）。 */
+  /** 账本密码：设置/修改（经自定义 Modal，禁用 prompt）。change 模式新密码留空=删除密码（须先验证当前密码，防无验证清除）。 */
   async openLedgerPasswordModal(folder, alias, mode, onDone) {
     const adapter = this.currentAdapter();
     const modal = new LedgerPasswordModal(
@@ -10313,22 +10317,19 @@ var AccountingSettings = class {
           if (mode === "set") {
             await adapter.writeLedgerPasswordMetaAt(folder, await buildLedgerPasswordMeta(values.new));
             new import_obsidian19.Notice(t("settings.password.toastSet"));
-          } else if (mode === "change") {
-            const meta = await adapter.readLedgerPasswordMetaAt(folder);
-            if (!meta) return t("settings.password.toastFailed", { msg: "" });
-            if (!await verifyLedgerPassword(values.old ?? "", meta.passwordHash)) {
-              return t("settings.password.wrongOld");
-            }
-            await adapter.writeLedgerPasswordMetaAt(folder, await buildLedgerPasswordMeta(values.new));
-            new import_obsidian19.Notice(t("settings.password.toastChanged"));
           } else {
             const meta = await adapter.readLedgerPasswordMetaAt(folder);
             if (!meta) return t("settings.password.toastFailed", { msg: "" });
             if (!await verifyLedgerPassword(values.old ?? "", meta.passwordHash)) {
               return t("settings.password.wrongOld");
             }
-            await adapter.writeLedgerPasswordMetaAt(folder, null);
-            new import_obsidian19.Notice(t("settings.password.toastRemoved"));
+            if (values.new.trim().length === 0) {
+              await adapter.writeLedgerPasswordMetaAt(folder, null);
+              new import_obsidian19.Notice(t("settings.password.toastRemoved"));
+            } else {
+              await adapter.writeLedgerPasswordMetaAt(folder, await buildLedgerPasswordMeta(values.new));
+              new import_obsidian19.Notice(t("settings.password.toastChanged"));
+            }
           }
           await onDone();
           return null;
@@ -11583,9 +11584,9 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
     this.addCommand({
       id: "open",
       name: t("cmd.open"),
-      callback: () => this.openEntry()
+      callback: () => this.openEntryFresh()
     });
-    this.addRibbonIcon("coins", t("cmd.open"), () => this.openEntry());
+    this.addRibbonIcon("coins", t("cmd.open"), () => this.openEntryFresh());
     this.app.workspace.onLayoutReady(() => {
       void (async () => {
         try {
@@ -11601,7 +11602,7 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
         if (!this.settings.onboardingCompleted) {
           this.showOnboardingModal();
         } else if (this.settings.autoOpenOnStartup) {
-          void this.openEntry();
+          void this.openEntryFresh();
         }
       })();
     });
@@ -11710,6 +11711,12 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
       openSettings: (slide, onOpened) => openSettings(this.app, this.settingsTab, this.navCtx(adapter), slide, this.switchLedgerAndReopenSettings, onOpened)
     };
   }
+  /** 从外部入口（命令/ribbon/启动/引导完成）打开记账界面：清会话级解锁态后走门禁，
+   *  确保关闭记账界面再进设密账本会重新弹密码（design 选 A：记账界面退出即算离开，回账本必重输）。 */
+  async openEntryFresh(onOpened) {
+    this.unlockedLedger = null;
+    await this.openEntry(onOpened);
+  }
   async openEntry(onOpened) {
     if (!await this.ensureCurrentUnlocked()) return;
     const adapter = this.adapter();
@@ -11783,8 +11790,10 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
     this.unlockedLedger = newSubdir;
     void this.saveSettings();
   }
-  /** 解锁弹窗（含失败退避）。成功返回 true。 */
-  async promptUnlock(alias, passwordHash) {
+  /** 解锁弹窗（含失败退避）。成功返回 true；取消返回 false。
+   *  fromEntry=true 表示从入口（openEntry/启动）进入、无已加载业务页 → 取消时打开账本选择 Modal 让用户换账本（对齐桌面 cancelUnlock）；
+   *  fromEntry=false 表示切换途中、底层已有业务页 → 取消时停留原账本。 */
+  async promptUnlock(alias, passwordHash, fromEntry = false) {
     if (this.unlockFailures > 0) {
       const delay = Math.min(this.unlockFailures, 5) * 1e3;
       await new Promise((r) => setTimeout(r, delay));
@@ -11806,9 +11815,33 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
         () => resolve(null)
       ).open();
     });
+    if (result === null && fromEntry) {
+      this.openLedgerPickerAfterUnlockCancel();
+    }
     return result !== null;
   }
-  /** 当前账本若设密且本会话未解锁 → 弹解锁框；返回是否可继续访问。 */
+  /** 解锁取消后（入口场景）打开账本选择 Modal：选定账本后走 gateAndSwitch（设密则再弹密码），不切换则停留。
+   *  复用 LedgerSwitchModal（与顶部账本胶囊同一选择浮层）。 */
+  openLedgerPickerAfterUnlockCancel() {
+    const adapter = this.adapter();
+    void (async () => {
+      try {
+        const names = await adapter.listLedgers();
+        if (names.length === 0) return;
+        const ledgers = await Promise.all(
+          names.map(async (name) => ({ name, alias: await adapter.readLedgerAlias(name) }))
+        );
+        new LedgerSwitchModal(this.app, adapter.activeLedger, ledgers, (name) => {
+          void this.gateAndSwitch(name).then((ok2) => {
+            if (ok2) void this.openEntry();
+          });
+        }).open();
+      } catch {
+      }
+    })();
+  }
+  /** 当前账本若设密且本会话未解锁 → 弹解锁框；返回是否可继续访问。
+   *  由入口 openEntry/启动调用，取消时打开账本选择（对齐桌面 cancelUnlock）。 */
   async ensureCurrentUnlocked() {
     const cur = this.settings.dataSubdir;
     if (this.unlockedLedger === cur) return true;
@@ -11819,7 +11852,7 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
       return true;
     }
     const alias = await adapter.readLedgerAlias(cur);
-    const ok2 = await this.promptUnlock(alias, meta.passwordHash);
+    const ok2 = await this.promptUnlock(alias, meta.passwordHash, true);
     if (ok2) this.unlockedLedger = cur;
     return ok2;
   }
