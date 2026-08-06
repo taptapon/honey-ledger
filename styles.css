@@ -1466,7 +1466,6 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 100px;
   flex: 0 0 auto;
 }
 
@@ -1498,13 +1497,6 @@
   color: var(--text-on-accent);
 }
 
-.accounting-tx-time {
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
-  /* 数字等宽：时间行宽度恒定 → 左列列宽恒定 → 类型徽章 stretch 后不再长短不一 */
-  font-variant-numeric: tabular-nums;
-}
-
 .accounting-tx-middle {
   flex: 1 1 auto;
   min-width: 0;
@@ -1518,6 +1510,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 收支行内分类弱化（账户正常色，分类次要），对齐桌面 text-neutral-500 */
+.accounting-tx-cat {
+  color: var(--text-muted);
+  font-weight: 400;
 }
 
 .accounting-tx-note {
@@ -2832,6 +2830,12 @@ details[open] > .accounting-collapsible-head::before {
   width: 50px;
   padding: 0;
   text-align: center;
+}
+
+/* setIcon 默认 24×24，缩到 16px 适配紧凑按钮；lucide stroke=currentColor 跟随按钮变色 */
+.accounting-ledger-next .accounting-ledger-actions button svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* 分类管理行操作按钮同样等宽（与周期账列表对齐；不影响账本/备份等其它 .accounting-ledger-actions） */

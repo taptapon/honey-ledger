@@ -7506,15 +7506,20 @@ var TransactionListModal = class extends import_obsidian8.Modal {
         attr: { title: t("tiedConflict.badgeTip"), "aria-label": t("tiedConflict.badgeTip") }
       });
     }
-    left.createEl("div", {
-      text: this.formatTime(tx.ts),
-      cls: "accounting-tx-time"
-    });
     const middle = row.createDiv({ cls: "accounting-tx-middle" });
-    middle.createEl("div", { text: this.formatDetail(tx), cls: "accounting-tx-detail" });
-    if (tx.note) {
-      middle.createEl("div", { text: tx.note, cls: "accounting-tx-note" });
+    const detail = middle.createDiv({ cls: "accounting-tx-detail" });
+    if (tx.type === "expense" || tx.type === "income") {
+      const acc = tx.account ? this.accountById.get(tx.account) : void 0;
+      detail.appendText(acc ? acc.name : tx.account ?? "");
+      detail.appendText(" \xB7 ");
+      detail.createEl("span", { text: tx.category || "", cls: "accounting-tx-cat" });
+    } else {
+      detail.appendText(this.formatDetail(tx));
     }
+    middle.createEl("div", {
+      text: this.formatTime(tx.ts),
+      cls: "accounting-tx-note"
+    });
     const right = row.createDiv({ cls: "accounting-tx-right" });
     right.createEl("span", {
       text: formatMoney(tx.amount, tx.currency),
@@ -10479,10 +10484,8 @@ var AccountingSettings = class {
     }
     const detailEl = infoEl.createDiv("accounting-ledger-folder");
     detailEl.createEl("span", { text: `${this.periodText(rule)} \xB7 ${formatMoney(rule.amount, rule.currency || "CNY")}` });
-    if (rule.account) {
-      const accountInfo = await this.getAccountName(adapter, rule.account);
-      if (accountInfo) detailEl.createEl("span", { text: `\xB7 ${accountInfo}` });
-    }
+    const accountInfo = await this.ruleAccountInfo(adapter, rule);
+    if (accountInfo) detailEl.createEl("span", { text: `\xB7 ${accountInfo}` });
     if (rule.category) {
       detailEl.createEl("span", { text: `\xB7 ${rule.category}` });
     }
@@ -10496,17 +10499,17 @@ var AccountingSettings = class {
     }
     const actionsEl = bottomEl.createDiv("accounting-ledger-actions");
     const viewBtn = actionsEl.createEl("button", {
-      text: "\u{1F441}",
       cls: "accounting-ledger-switch"
     });
+    (0, import_obsidian19.setIcon)(viewBtn, "eye");
     viewBtn.setAttribute("aria-label", t("settings.recurring.viewTxAria"));
     viewBtn.onclick = () => {
       openList(this.app, adapter, this.plugin.navCtx(adapter), void 0, void 0, rule.id, true);
     };
     const toggleBtn = actionsEl.createEl("button", {
-      text: rule.active ? "\u23F8" : "\u25B6",
       cls: "accounting-ledger-switch"
     });
+    (0, import_obsidian19.setIcon)(toggleBtn, rule.active ? "pause" : "play");
     toggleBtn.onclick = async () => {
       try {
         const rules = await adapter.readRecurringRules();
@@ -10519,18 +10522,18 @@ var AccountingSettings = class {
       }
     };
     const editBtn = actionsEl.createEl("button", {
-      text: "\u270E",
       cls: "accounting-ledger-rename"
     });
+    (0, import_obsidian19.setIcon)(editBtn, "pencil");
     editBtn.onclick = () => {
       void openEntryRecurring(this.app, this.currentAdapter(), { editing: rule }, () => {
         this.showRecurring();
       });
     };
     const deleteBtn = actionsEl.createEl("button", {
-      text: "\u{1F5D1}",
       cls: "accounting-ledger-delete"
     });
+    (0, import_obsidian19.setIcon)(deleteBtn, "trash-2");
     deleteBtn.onclick = async () => {
       if (!confirm(t("settings.recurring.deleteConfirm", { name: rule.name }))) return;
       try {
@@ -10575,6 +10578,21 @@ var AccountingSettings = class {
     } catch {
       return accountId;
     }
+  }
+  /** 按规则类型解析账户显示文本：转账/借贷显示「来源 → 去向」，收支显示单个账户名。 */
+  async ruleAccountInfo(adapter, rule) {
+    if (rule.type === "transfer") {
+      const from = rule.fromAccount ? await this.getAccountName(adapter, rule.fromAccount) : "";
+      const to = rule.toAccount ? await this.getAccountName(adapter, rule.toAccount) : "";
+      return [from, to].filter(Boolean).join(" \u2192 ");
+    }
+    if (rule.type === "loan") {
+      const a = rule.account ? await this.getAccountName(adapter, rule.account) : "";
+      const p = rule.person ? await this.getAccountName(adapter, rule.person) : "";
+      const [from, to] = loanCashIn(rule.direction) ? [p, a] : [a, p];
+      return [from, to].filter(Boolean).join(" \u2192 ");
+    }
+    return rule.account ? await this.getAccountName(adapter, rule.account) : "";
   }
   /** 渲染分类管理列表视图：支出/收入各自独立成块（每块自己的新增入口、可见列表、已隐藏折叠区）。复用 core planRename/planMerge 规划。 */
   renderCategoryListView(containerEl) {
