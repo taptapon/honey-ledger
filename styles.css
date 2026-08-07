@@ -2440,6 +2440,16 @@
   }
 }
 
+/* 非当前账本：点击信息区直接切换（取消独立「切换」按钮） */
+.accounting-ledger-switchable {
+  cursor: pointer;
+}
+
+/* 触屏按下即时反馈（hover 仅 hover 设备生效，触摸靠 :active） */
+.accounting-ledger-item:not(.accounting-ledger-current):active {
+  background: var(--background-modifier-hover);
+}
+
 .accounting-ledger-current {
   /* 实色 fallback 在前：color-mix 不可用时降级为纯卡片底（竖条仍标识当前项） */
   background: var(--background-primary);
@@ -2843,26 +2853,6 @@ details[open] > .accounting-collapsible-head::before {
   width: 50px;
   padding: 0;
   text-align: center;
-}
-
-.accounting-ledger-switch {
-  flex: 0 0 auto;
-  height: var(--ac-control-h-compact);
-  padding: 0 10px;
-  border: 1px solid var(--interactive-accent);
-  border-radius: var(--ac-radius-btn);
-  background: transparent;
-  color: var(--interactive-accent);
-  font-size: var(--font-ui-smaller);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-@media (hover: hover) {
-  .accounting-ledger-switch:hover {
-    background: var(--interactive-accent);
-    color: var(--text-on-accent);
-  }
 }
 
 .accounting-ledger-empty {

@@ -3100,7 +3100,6 @@ var zh = {
   "settings.ledger.title": "\u8D26\u672C",
   "settings.ledger.createBtn": "\u65B0\u5EFA\u8D26\u672C",
   "settings.ledger.empty": "\u5C1A\u65E0\u8D26\u672C",
-  "settings.ledger.switchBtn": "\u5207\u6362",
   "settings.ledger.switchedNotice": "\u5DF2\u5207\u6362\u5230\u300C{{alias}}\u300D\uFF0C\u8BF7\u5173\u95ED\u5E76\u91CD\u65B0\u6253\u5F00\u8BB0\u8D26\u754C\u9762",
   "settings.ledger.switchFailed": "\u5207\u6362\u8D26\u672C\u5931\u8D25\uFF1A{{msg}}",
   "settings.ledger.renameBtn": "\u6539\u540D",
@@ -3764,7 +3763,6 @@ var en = {
   "settings.ledger.title": "Ledgers",
   "settings.ledger.createBtn": "New ledger",
   "settings.ledger.empty": "No ledgers yet",
-  "settings.ledger.switchBtn": "Switch",
   "settings.ledger.switchedNotice": 'Switched to "{{alias}}"; please close and reopen the accounting view',
   "settings.ledger.switchFailed": "Switch ledger failed: {{msg}}",
   "settings.ledger.renameBtn": "Rename",
@@ -4375,6 +4373,17 @@ var ObsidianDataAdapter = class _ObsidianDataAdapter {
   async readLedgerPasswordMetaAt(subdir) {
     const data = await this.readLedgerJson(subdir);
     return parseLedgerPasswordMeta(data);
+  }
+  /** 一次读 ledger.json 同时取密码元数据与别名（切换门禁用）。
+   *  readLedgerPasswordMetaAt + readLedgerAlias 各自读一次同一文件，门禁串行调用会读两次——
+   *  iCloud 同步下若文件被 iOS 回收，首次读取触发下载，读两次即把延迟翻倍（切换到设密账本偶发卡顿来源）。
+   *  合并成单次读取，meta 与别名同源派生。 */
+  async readLedgerUnlockInfo(subdir) {
+    const data = await this.readLedgerJson(subdir);
+    return {
+      meta: parseLedgerPasswordMeta(data),
+      alias: data.alias || _ObsidianDataAdapter.formatLedgerName(subdir)
+    };
   }
   async writeLedgerPasswordMeta(meta) {
     const existing = await this.readLedgerJson(this.dataSubdir);
@@ -9924,8 +9933,8 @@ var AccountingSettings = class {
           if (isCurrent) {
             actions.createEl("span", { text: t("entry.switchLedgerCurrent"), cls: "accounting-ledger-badge" });
           } else {
-            const switchBtn = actions.createEl("button", { text: t("settings.ledger.switchBtn"), cls: "accounting-ledger-switch" });
-            switchBtn.onclick = async () => {
+            info.classList.add("accounting-ledger-switchable");
+            info.onclick = async () => {
               try {
                 if (onSwitchLedger) {
                   onSwitchLedger(name);
@@ -11864,12 +11873,11 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
     const cur = this.settings.dataSubdir;
     if (this.unlockedLedger === cur) return true;
     const adapter = this.adapter();
-    const meta = await adapter.readLedgerPasswordMeta();
+    const { meta, alias } = await adapter.readLedgerUnlockInfo(cur);
     if (!meta) {
       this.unlockedLedger = cur;
       return true;
     }
-    const alias = await adapter.readLedgerAlias(cur);
     const ok2 = await this.promptUnlock(alias, meta.passwordHash, true);
     if (ok2) this.unlockedLedger = cur;
     return ok2;
@@ -11878,13 +11886,12 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
   async gateAndSwitch(newSubdir) {
     if (newSubdir === this.settings.dataSubdir) return true;
     const adapter = this.adapter();
-    const meta = await adapter.readLedgerPasswordMetaAt(newSubdir);
+    const { meta, alias } = await adapter.readLedgerUnlockInfo(newSubdir);
     if (!meta) {
       this.doSwitchLedger(newSubdir);
       return true;
     }
     if (this.unlockedLedger === newSubdir) return true;
-    const alias = await adapter.readLedgerAlias(newSubdir);
     const ok2 = await this.promptUnlock(alias, meta.passwordHash);
     if (!ok2) return false;
     this.doSwitchLedger(newSubdir);
