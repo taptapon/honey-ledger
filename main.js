@@ -1796,9 +1796,18 @@ function buildSettlementEvents(input) {
 }
 
 // ../../packages/core/src/ledgerSeed.ts
-function seedDefaultRates() {
+function seedDefaultRates(baseCurrency = "CNY") {
   const asOf = nowISO();
   const e = (rate) => ({ rate: round2(rate), asOf });
+  if (baseCurrency === "USD") {
+    return {
+      CNY: e(0.14),
+      EUR: e(1.09),
+      GBP: e(1.27),
+      CAD: e(0.74),
+      AUD: e(0.66)
+    };
+  }
   return {
     USD: e(7.2),
     EUR: e(7.85),
@@ -1809,7 +1818,7 @@ function seedDefaultRates() {
 }
 var SAMPLE_LEDGER_NAME = "sample-ledger";
 var DEFAULT_SEED_LABELS = {
-  accounts: { cash: "\u73B0\u91D1", savings: "\u62DB\u884C\u50A8\u84C4", ewallet: "\u5FAE\u4FE1\u96F6\u94B1\u901A", credit: "\u62DB\u884C\u4FE1\u7528\u5361", person: "\u5F20\u4E09\uFF08\u5F80\u6765\uFF09" },
+  accounts: { cash: "\u73B0\u91D1", savings: "\u62DB\u884C\u50A8\u84C4", ewallet: "\u5FAE\u4FE1\u96F6\u94B1\u901A", credit: "\u62DB\u884C\u4FE1\u7528\u5361", person: "\u5F20\u4E09\uFF08\u5F80\u6765\uFF09", foreign: "\u7F8E\u5143\u6D3B\u671F" },
   categories: {
     dining: "\u9910\u996E",
     shopping: "\u8D2D\u7269",
@@ -1834,26 +1843,95 @@ var DEFAULT_SEED_LABELS = {
     repayCard: "\u8FD8\u4FE1\u7528\u5361",
     lendFriend: "\u501F\u7ED9\u5F20\u4E09",
     investmentGain: "\u96F6\u94B1\u901A\u6536\u76CA",
-    taxi: "\u6253\u8F66\u56DE\u5BB6"
+    taxi: "\u6253\u8F66\u56DE\u5BB6",
+    rent: "\u4EA4\u623F\u79DF",
+    movie: "\u770B\u7535\u5F71",
+    pharmacy: "\u836F\u5E97\u4E70\u836F",
+    redPacket: "\u670B\u53CB\u7ED3\u5A5A\u7EA2\u5305",
+    snacks: "\u4FBF\u5229\u5E97\u96F6\u98DF",
+    refund: "\u7F51\u8D2D\u9000\u8D27\u9000\u6B3E",
+    borrowFriend: "\u5411\u5F20\u4E09\u501F\u6B3E",
+    foreignBook: "\u6D77\u5916\u8D2D\u4E66",
+    foreignTransfer: "\u6362\u6C47\u8F6C\u7F8E\u5143\u50A8\u84C4"
   }
 };
 var SAMPLE_ANCHOR = "2026-01-01T00:00:00.000Z";
-function seedSampleLedger(labels = DEFAULT_SEED_LABELS) {
+var SAMPLE_AMOUNT_CN = {
+  openCash: 1e3,
+  openSavings: 5e4,
+  openEwallet: 5e3,
+  openCredit: 0,
+  openPerson: 0,
+  openForeign: 500,
+  groceries: 35.5,
+  salary: 15e3,
+  transfer: 2e3,
+  shopping: 299,
+  repay: 299,
+  lend: 5e3,
+  invest: 320.5,
+  taxi: 28,
+  rent: 3500,
+  movie: 80,
+  pharmacy: 156.8,
+  redPacket: 1e3,
+  snacks: 23.5,
+  refund: 88,
+  borrow: 3e3,
+  foreignBook: 50,
+  foreignRate: 7.2,
+  fxFrom: 3600,
+  fxTo: 500
+};
+var SAMPLE_AMOUNT_US = {
+  openCash: 200,
+  openSavings: 8e3,
+  openEwallet: 500,
+  openCredit: 0,
+  openPerson: 0,
+  openForeign: 500,
+  groceries: 60,
+  salary: 5e3,
+  transfer: 800,
+  shopping: 120,
+  repay: 120,
+  lend: 800,
+  invest: 80,
+  taxi: 25,
+  rent: 1500,
+  movie: 30,
+  pharmacy: 40,
+  redPacket: 100,
+  snacks: 12,
+  refund: 30,
+  borrow: 500,
+  foreignBook: 50,
+  foreignRate: 1.09,
+  fxFrom: 1500,
+  fxTo: 1400
+};
+function seedSampleLedger(labels = DEFAULT_SEED_LABELS, baseCurrency = "CNY") {
   const L = labels;
+  const usd = baseCurrency === "USD";
+  const cur = usd ? "USD" : "CNY";
+  const fcur = usd ? "EUR" : "USD";
+  const A = usd ? SAMPLE_AMOUNT_US : SAMPLE_AMOUNT_CN;
   const now = SAMPLE_ANCHOR;
   const later = "2026-06-15T12:00:00.000Z";
-  const acc = (id, name, type, opening, currency = "CNY") => ({ id, name, type, openingBalance: opening, currency, active: true, createdAt: now, updatedAt: now });
+  const acc = (id, name, type, opening, currency = cur) => ({ id, name, type, openingBalance: opening, currency, active: true, createdAt: now, updatedAt: now });
   const cashId = newAccountId();
   const savingsId = newAccountId();
   const ewalletId = newAccountId();
   const creditId = newAccountId();
   const personId = newAccountId();
+  const foreignId = newAccountId();
   const accounts = [
-    acc(cashId, L.accounts.cash, "cash", 1e3),
-    acc(savingsId, L.accounts.savings, "savings", 5e4),
-    acc(ewalletId, L.accounts.ewallet, "ewallet", 5e3),
-    acc(creditId, L.accounts.credit, "credit", 0, "CNY"),
-    acc(personId, L.accounts.person, "person", 0)
+    acc(cashId, L.accounts.cash, "cash", A.openCash),
+    acc(savingsId, L.accounts.savings, "savings", A.openSavings),
+    acc(ewalletId, L.accounts.ewallet, "ewallet", A.openEwallet),
+    acc(creditId, L.accounts.credit, "credit", A.openCredit),
+    acc(personId, L.accounts.person, "person", A.openPerson),
+    acc(foreignId, L.accounts.foreign, "savings", A.openForeign, fcur)
   ];
   const cat = (flow, name) => ({ id: newCategoryId(), name, flow });
   const categories = [
@@ -1873,7 +1951,7 @@ function seedSampleLedger(labels = DEFAULT_SEED_LABELS) {
     cat("income", L.categories.other),
     cat("income", L.adjustCategory)
   ];
-  const rates = seedDefaultRates();
+  const rates = seedDefaultRates(baseCurrency);
   const tx = (id, type, fields) => ({
     op: "upsert",
     id,
@@ -1886,8 +1964,8 @@ function seedSampleLedger(labels = DEFAULT_SEED_LABELS) {
     // 1. 支出：现金买菜
     tx(newTxId(), "expense", {
       ts: "2026-01-05T08:30:00.000Z",
-      amount: round2(35.5),
-      currency: "CNY",
+      amount: round2(A.groceries),
+      currency: cur,
       account: cashId,
       category: L.categories.dining,
       note: L.sampleNotes.groceries
@@ -1895,17 +1973,17 @@ function seedSampleLedger(labels = DEFAULT_SEED_LABELS) {
     // 2. 收入：工资存入储蓄
     tx(newTxId(), "income", {
       ts: "2026-01-10T10:00:00.000Z",
-      amount: round2(15e3),
-      currency: "CNY",
+      amount: round2(A.salary),
+      currency: cur,
       account: savingsId,
       category: L.categories.salary,
       note: L.sampleNotes.salaryMonth
     }),
-    // 3. 转账：储蓄转到微信
+    // 3. 转账：储蓄转到电子钱包
     tx(newTxId(), "transfer", {
       ts: "2026-01-15T14:00:00.000Z",
-      amount: round2(2e3),
-      currency: "CNY",
+      amount: round2(A.transfer),
+      currency: cur,
       fromAccount: savingsId,
       toAccount: ewalletId,
       note: L.sampleNotes.transfer
@@ -1913,8 +1991,8 @@ function seedSampleLedger(labels = DEFAULT_SEED_LABELS) {
     // 4. 信用卡消费
     tx(newTxId(), "expense", {
       ts: "2026-02-01T19:00:00.000Z",
-      amount: round2(299),
-      currency: "CNY",
+      amount: round2(A.shopping),
+      currency: cur,
       account: creditId,
       category: L.categories.shopping,
       note: L.sampleNotes.shoppingClothes
@@ -1922,17 +2000,17 @@ function seedSampleLedger(labels = DEFAULT_SEED_LABELS) {
     // 5. 还款：储蓄还信用卡
     tx(newTxId(), "transfer", {
       ts: "2026-02-10T10:00:00.000Z",
-      amount: round2(299),
-      currency: "CNY",
+      amount: round2(A.repay),
+      currency: cur,
       fromAccount: savingsId,
       toAccount: creditId,
       note: L.sampleNotes.repayCard
     }),
-    // 6. 借贷：借出给张三
+    // 6. 借贷：借出给朋友
     tx(newTxId(), "loan", {
       ts: "2026-03-01T12:00:00.000Z",
-      amount: round2(5e3),
-      currency: "CNY",
+      amount: round2(A.lend),
+      currency: cur,
       account: savingsId,
       person: personId,
       direction: "lend",
@@ -1941,8 +2019,8 @@ function seedSampleLedger(labels = DEFAULT_SEED_LABELS) {
     // 7. 收入：投资收益
     tx(newTxId(), "income", {
       ts: "2026-04-01T09:00:00.000Z",
-      amount: round2(320.5),
-      currency: "CNY",
+      amount: round2(A.invest),
+      currency: cur,
       account: ewalletId,
       category: L.categories.investment,
       note: L.sampleNotes.investmentGain
@@ -1950,22 +2028,107 @@ function seedSampleLedger(labels = DEFAULT_SEED_LABELS) {
     // 8. 支出：交通打车
     tx(newTxId(), "expense", {
       ts: "2026-05-10T20:00:00.000Z",
-      amount: round2(28),
-      currency: "CNY",
+      amount: round2(A.taxi),
+      currency: cur,
       account: cashId,
       category: L.categories.transport,
       note: L.sampleNotes.taxi
+    }),
+    // 9. 支出：交房租（居家）
+    tx(newTxId(), "expense", {
+      ts: "2026-01-25T10:00:00.000Z",
+      amount: round2(A.rent),
+      currency: cur,
+      account: savingsId,
+      category: L.categories.home,
+      note: L.sampleNotes.rent
+    }),
+    // 10. 支出：看电影（娱乐）
+    tx(newTxId(), "expense", {
+      ts: "2026-02-08T20:30:00.000Z",
+      amount: round2(A.movie),
+      currency: cur,
+      account: ewalletId,
+      category: L.categories.fun,
+      note: L.sampleNotes.movie
+    }),
+    // 11. 支出：药店买药（医教）
+    tx(newTxId(), "expense", {
+      ts: "2026-02-20T09:15:00.000Z",
+      amount: round2(A.pharmacy),
+      currency: cur,
+      account: cashId,
+      category: L.categories.medEdu,
+      note: L.sampleNotes.pharmacy
+    }),
+    // 12. 支出：朋友结婚红包/礼金（人情）
+    tx(newTxId(), "expense", {
+      ts: "2026-03-15T18:00:00.000Z",
+      amount: round2(A.redPacket),
+      currency: cur,
+      account: cashId,
+      category: L.categories.gift,
+      note: L.sampleNotes.redPacket
+    }),
+    // 13. 支出：便利店零食（零用）
+    tx(newTxId(), "expense", {
+      ts: "2026-04-05T14:00:00.000Z",
+      amount: round2(A.snacks),
+      currency: cur,
+      account: ewalletId,
+      category: L.categories.misc,
+      note: L.sampleNotes.snacks
+    }),
+    // 14. 收入：网购退货退款（退款返款）
+    tx(newTxId(), "income", {
+      ts: "2026-04-18T11:00:00.000Z",
+      amount: round2(A.refund),
+      currency: cur,
+      account: ewalletId,
+      category: L.categories.refund,
+      note: L.sampleNotes.refund
+    }),
+    // 15. 借贷：向朋友借款（借入方向，与 lend 对称，演示 borrow）
+    tx(newTxId(), "loan", {
+      ts: "2026-05-08T15:00:00.000Z",
+      amount: round2(A.borrow),
+      currency: cur,
+      account: savingsId,
+      person: personId,
+      direction: "borrow",
+      note: L.sampleNotes.borrowFriend
+    }),
+    // 16. 支出：跨境消费（外币，演示多币种 + rate 快照）
+    tx(newTxId(), "expense", {
+      ts: "2026-06-02T13:00:00.000Z",
+      amount: round2(A.foreignBook),
+      currency: fcur,
+      rate: A.foreignRate,
+      account: foreignId,
+      category: L.categories.shopping,
+      note: L.sampleNotes.foreignBook
+    }),
+    // 17. 转账：换汇转外币储蓄（跨币种转账，演示 toAmount）
+    tx(newTxId(), "transfer", {
+      ts: "2026-06-20T16:00:00.000Z",
+      amount: round2(A.fxFrom),
+      currency: cur,
+      toAmount: round2(A.fxTo),
+      fromAccount: savingsId,
+      toAccount: foreignId,
+      note: L.sampleNotes.foreignTransfer
     })
   ];
   return { accounts, categories, rates, events };
 }
-function seedDefaults(labels = DEFAULT_SEED_LABELS) {
+function seedDefaults(labels = DEFAULT_SEED_LABELS, baseCurrency = "CNY") {
   const L = labels;
+  const cur = baseCurrency === "USD" ? "USD" : "CNY";
   const now = nowISO();
   const accounts = [
-    { id: newAccountId(), name: L.accounts.cash, type: "cash", openingBalance: 0, currency: "CNY", active: true, createdAt: now, updatedAt: now },
-    { id: newAccountId(), name: L.accounts.savings, type: "savings", openingBalance: 0, currency: "CNY", active: true, createdAt: now, updatedAt: now },
-    { id: newAccountId(), name: L.accounts.ewallet, type: "ewallet", openingBalance: 0, currency: "CNY", active: true, createdAt: now, updatedAt: now }
+    { id: newAccountId(), name: L.accounts.cash, type: "cash", openingBalance: 0, currency: cur, active: true, createdAt: now, updatedAt: now },
+    { id: newAccountId(), name: L.accounts.savings, type: "savings", openingBalance: 0, currency: cur, active: true, createdAt: now, updatedAt: now },
+    { id: newAccountId(), name: L.accounts.ewallet, type: "ewallet", openingBalance: 0, currency: cur, active: true, createdAt: now, updatedAt: now }
   ];
   const cat = (flow, name) => ({ id: newCategoryId(), name, flow });
   const categories = [
@@ -1985,7 +2148,7 @@ function seedDefaults(labels = DEFAULT_SEED_LABELS) {
     cat("income", L.categories.other),
     cat("income", L.adjustCategory)
   ];
-  return { accounts, categories, rates: seedDefaultRates() };
+  return { accounts, categories, rates: seedDefaultRates(baseCurrency) };
 }
 function validateLedgerName(name, existing) {
   const n = name.trim();
@@ -3370,6 +3533,7 @@ var zh = {
   "seed.account.ewallet": "\u5FAE\u4FE1\u96F6\u94B1\u901A",
   "seed.account.credit": "\u62DB\u884C\u4FE1\u7528\u5361",
   "seed.account.person": "\u5F20\u4E09\uFF08\u5F80\u6765\uFF09",
+  "seed.account.foreign": "\u7F8E\u5143\u6D3B\u671F",
   "seed.category.dining": "\u9910\u996E",
   "seed.category.shopping": "\u8D2D\u7269",
   "seed.category.transport": "\u4EA4\u901A",
@@ -3392,6 +3556,15 @@ var zh = {
   "seed.note.lendFriend": "\u501F\u7ED9\u5F20\u4E09",
   "seed.note.investmentGain": "\u96F6\u94B1\u901A\u6536\u76CA",
   "seed.note.taxi": "\u6253\u8F66\u56DE\u5BB6",
+  "seed.note.rent": "\u4EA4\u623F\u79DF",
+  "seed.note.movie": "\u770B\u7535\u5F71",
+  "seed.note.pharmacy": "\u836F\u5E97\u4E70\u836F",
+  "seed.note.redPacket": "\u670B\u53CB\u7ED3\u5A5A\u7EA2\u5305",
+  "seed.note.snacks": "\u4FBF\u5229\u5E97\u96F6\u98DF",
+  "seed.note.refund": "\u7F51\u8D2D\u9000\u8D27\u9000\u6B3E",
+  "seed.note.borrowFriend": "\u5411\u5F20\u4E09\u501F\u6B3E",
+  "seed.note.foreignBook": "\u6D77\u5916\u8D2D\u4E66",
+  "seed.note.foreignTransfer": "\u6362\u6C47\u8F6C\u7F8E\u5143\u50A8\u84C4",
   // KR8/task28: loanSettle 派生分类名 + 差额 note 前缀（按写入时 locale 快照生成，对齐桌面 settle.*）
   "settle.cat.badDebt": "\u574F\u8D26",
   "settle.cat.interest": "\u5229\u606F",
@@ -4029,10 +4202,11 @@ var en = {
   "adapter.err.folderExists": 'A directory named "{{name}}" already exists',
   "adapter.err.cannotDeleteActive": "Cannot delete the current ledger. Switch to another first.",
   "seed.account.cash": "Cash",
-  "seed.account.savings": "Savings",
-  "seed.account.ewallet": "E-Wallet",
+  "seed.account.savings": "Checking",
+  "seed.account.ewallet": "Venmo",
   "seed.account.credit": "Credit Card",
   "seed.account.person": "Friend",
+  "seed.account.foreign": "EUR Savings",
   "seed.category.dining": "Dining",
   "seed.category.shopping": "Shopping",
   "seed.category.transport": "Transport",
@@ -4055,6 +4229,15 @@ var en = {
   "seed.note.lendFriend": "Lent to friend",
   "seed.note.investmentGain": "Investment gain",
   "seed.note.taxi": "Taxi home",
+  "seed.note.rent": "Rent",
+  "seed.note.movie": "Movie ticket",
+  "seed.note.pharmacy": "Pharmacy",
+  "seed.note.redPacket": "Wedding gift",
+  "seed.note.snacks": "Convenience store snacks",
+  "seed.note.refund": "Online return refund",
+  "seed.note.borrowFriend": "Borrowed from friend",
+  "seed.note.foreignBook": "Overseas books",
+  "seed.note.foreignTransfer": "FX transfer to EUR savings",
   // KR8/task28: loanSettle derived category names + writeoff note prefix (snapshot by locale at write time, mirrors desktop settle.*)
   "settle.cat.badDebt": "Bad Debt",
   "settle.cat.interest": "Interest",
@@ -4110,7 +4293,8 @@ function seedLabels() {
       savings: t("seed.account.savings"),
       ewallet: t("seed.account.ewallet"),
       credit: t("seed.account.credit"),
-      person: t("seed.account.person")
+      person: t("seed.account.person"),
+      foreign: t("seed.account.foreign")
     },
     categories: {
       dining: t("seed.category.dining"),
@@ -4136,7 +4320,16 @@ function seedLabels() {
       repayCard: t("seed.note.repayCard"),
       lendFriend: t("seed.note.lendFriend"),
       investmentGain: t("seed.note.investmentGain"),
-      taxi: t("seed.note.taxi")
+      taxi: t("seed.note.taxi"),
+      rent: t("seed.note.rent"),
+      movie: t("seed.note.movie"),
+      pharmacy: t("seed.note.pharmacy"),
+      redPacket: t("seed.note.redPacket"),
+      snacks: t("seed.note.snacks"),
+      refund: t("seed.note.refund"),
+      borrowFriend: t("seed.note.borrowFriend"),
+      foreignBook: t("seed.note.foreignBook"),
+      foreignTransfer: t("seed.note.foreignTransfer")
     }
   };
 }
@@ -4623,7 +4816,7 @@ var ObsidianDataAdapter = class _ObsidianDataAdapter {
    * 自动添加 `.` 前缀使目录隐藏，防止用户意外修改。
    * 返回实际创建的 folder 名（带 `.` 前缀），调用方应据此设置 dataSubdir。
    */
-  async createLedger(name, alias) {
+  async createLedger(name, alias, baseCurrency) {
     const existing = await this.listLedgers();
     const err = validateLedgerName(name, existing);
     if (err) throw new Error(t(err));
@@ -4634,7 +4827,7 @@ var ObsidianDataAdapter = class _ObsidianDataAdapter {
     await this.vault.adapter.mkdir(folder);
     await this.vault.adapter.mkdir(`${folder}/backups`);
     await this.vault.adapter.write(`${folder}/transactions.jsonl`, "");
-    const seed = seedDefaults(seedLabels());
+    const seed = seedDefaults(seedLabels(), baseCurrency ?? "CNY");
     await this.vault.adapter.write(
       `${folder}/accounts.json`,
       JSON.stringify(seed.accounts, null, 2)
@@ -4647,20 +4840,22 @@ var ObsidianDataAdapter = class _ObsidianDataAdapter {
       `${folder}/rates.json`,
       JSON.stringify(seed.rates, null, 2)
     );
-    if (alias && alias.trim()) {
+    const ledgerMeta = {};
+    if (alias && alias.trim()) ledgerMeta.alias = alias.trim();
+    if (baseCurrency) ledgerMeta.baseCurrency = baseCurrency;
+    if (Object.keys(ledgerMeta).length > 0) {
       await this.vault.adapter.write(
         `${folder}/ledger.json`,
-        JSON.stringify({ alias: alias.trim() }, null, 2)
+        JSON.stringify(ledgerMeta, null, 2)
       );
     }
     return folder;
   }
   /**
-   * 新建示例账本：建目录 + backups/ + 写 seed 数据 + 写入示例交易事件。
-   * 与桌面端 createSampleLedger 行为对齐。
-   * 自动添加 `.` 前缀使目录隐藏，防止用户意外修改。
+   * 新建示例账本：建目录 + backups/ + 按 baseCurrency 预设写 seed 数据 + 落本位币 + 写示例交易事件。
+   * 与桌面端 createSampleLedger 行为对齐。自动添加 `.` 前缀使目录隐藏，防止用户意外修改。
    */
-  async createSampleLedger(name, alias) {
+  async createSampleLedger(name, alias, baseCurrency) {
     const folder = name.startsWith(".") ? name : `.${name}`;
     if (await this.vault.adapter.exists(folder)) {
       throw new Error(t("adapter.err.folderExists", { name: _ObsidianDataAdapter.formatLedgerName(folder) }));
@@ -4668,7 +4863,7 @@ var ObsidianDataAdapter = class _ObsidianDataAdapter {
     await this.vault.adapter.mkdir(folder);
     await this.vault.adapter.mkdir(`${folder}/backups`);
     await this.vault.adapter.write(`${folder}/transactions.jsonl`, "");
-    const seed = seedSampleLedger(seedLabels());
+    const seed = seedSampleLedger(seedLabels(), baseCurrency);
     await this.vault.adapter.write(
       `${folder}/accounts.json`,
       JSON.stringify(seed.accounts, null, 2)
@@ -4687,12 +4882,9 @@ var ObsidianDataAdapter = class _ObsidianDataAdapter {
         seed.events.map((e) => JSON.stringify(e)).join("\n") + "\n"
       );
     }
-    if (alias && alias.trim()) {
-      await this.vault.adapter.write(
-        `${folder}/ledger.json`,
-        JSON.stringify({ alias: alias.trim() }, null, 2)
-      );
-    }
+    const meta = { baseCurrency };
+    if (alias && alias.trim()) meta.alias = alias.trim();
+    await this.vault.adapter.write(`${folder}/ledger.json`, JSON.stringify(meta, null, 2));
     return folder;
   }
   /** 写账本别名（仅改 ledger.json，不改文件夹名）。合并写入以保留 baseCurrency；空 alias 由 readLedgerAlias 回退到文件夹名。 */
@@ -4777,6 +4969,161 @@ function fillAccountOptions(sel, accounts, value, includeHidden, settings, typeF
   }
 }
 
+// src/currencyPicker.ts
+function createCurrencyPicker(parent, opts) {
+  const wrap = parent.createDiv({ cls: "accounting-currency-picker" });
+  const input = wrap.createEl("input", { cls: "accounting-ledger-input accounting-currency-picker-input" });
+  input.type = "text";
+  input.placeholder = opts.placeholder ?? t("settings.currency.searchPlaceholder");
+  input.value = opts.value ? `${currencyDisplayName(opts.value, getLocale())} ${opts.value}` : "";
+  input.setAttribute("autocomplete", "off");
+  const dropdown = createDiv({ cls: "accounting-currency-picker-dropdown" });
+  document.body.appendChild(dropdown);
+  dropdown.style.display = "none";
+  const excludeSet = new Set((opts.exclude ?? []).map((c) => c.toUpperCase()));
+  const currentUpper = (opts.value ?? "").toUpperCase();
+  let open = false;
+  let flat = [];
+  let hi = 0;
+  function sections(text) {
+    const term = text.trim();
+    if (term) {
+      const items = filterCurrencies(term, getLocale()).filter((c) => !excludeSet.has(c.code));
+      return [{ label: t("settings.currency.searchResults", { n: items.length }), items }];
+    }
+    return orderedCurrencyCatalog(getLocale()).map((g) => ({ label: t(g.labelKey, { count: g.count }), items: g.items.filter((c) => !excludeSet.has(c.code)) })).filter((g) => g.items.length > 0);
+  }
+  function paint() {
+    dropdown.querySelectorAll("[data-idx]").forEach((el) => {
+      const he = el;
+      he.classList.toggle("is-active", Number(he.dataset.idx) === hi);
+    });
+    const active = dropdown.querySelector(`[data-idx="${hi}"]`);
+    active?.scrollIntoView({ block: "nearest" });
+  }
+  function render() {
+    dropdown.empty();
+    const gs = sections(input.value);
+    flat = gs.flatMap((g) => g.items);
+    if (flat.length === 0) {
+      dropdown.createEl("div", { text: t("settings.currency.noMatch"), cls: "accounting-currency-picker-empty" });
+      return;
+    }
+    for (const g of gs) {
+      dropdown.createEl("div", { text: g.label, cls: "accounting-currency-picker-group" });
+      for (const c of g.items) {
+        const idx = flat.indexOf(c);
+        const item = dropdown.createDiv({ cls: "accounting-currency-picker-item" });
+        item.dataset.idx = String(idx);
+        item.createEl("span", { text: c.name, cls: "accounting-currency-picker-cn" });
+        item.createEl("span", { text: c.code, cls: "accounting-currency-picker-code" });
+        if (c.code === currentUpper) item.createEl("span", { text: "\u2713", cls: "accounting-currency-picker-check" });
+        item.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          pick(c.code);
+        });
+        item.addEventListener("mouseenter", () => {
+          hi = idx;
+          paint();
+        });
+      }
+    }
+    paint();
+  }
+  function position() {
+    const r = input.getBoundingClientRect();
+    dropdown.style.left = `${r.left}px`;
+    dropdown.style.top = `${r.bottom + 4}px`;
+    dropdown.style.width = `${r.width}px`;
+  }
+  const displayValue = () => opts.value ? `${currencyDisplayName(opts.value, getLocale())} ${opts.value}` : "";
+  function openPanel() {
+    if (open) return;
+    open = true;
+    hi = 0;
+    input.value = "";
+    render();
+    position();
+    dropdown.style.display = "block";
+  }
+  function close() {
+    if (!open) return;
+    open = false;
+    dropdown.style.display = "none";
+    input.value = displayValue();
+  }
+  function pick(code) {
+    input.value = `${currencyDisplayName(code, getLocale())} ${code}`;
+    close();
+    opts.onPick(code);
+  }
+  input.addEventListener("focus", openPanel);
+  input.addEventListener("input", () => {
+    if (!open) openPanel();
+    else {
+      render();
+      position();
+    }
+    hi = 0;
+    paint();
+  });
+  input.addEventListener("keydown", (e) => {
+    if (!open) {
+      if (e.key === "ArrowDown" || e.key === "Enter") {
+        e.preventDefault();
+        openPanel();
+      }
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      hi = Math.min(hi + 1, flat.length - 1);
+      paint();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      hi = Math.max(hi - 1, 0);
+      paint();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const c = flat[hi];
+      if (c) pick(c.code);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+      opts.onDismiss?.();
+    }
+  });
+  const onFollow = () => {
+    if (!input.isConnected) {
+      destroy();
+      return;
+    }
+    if (open) position();
+  };
+  const onDoc = (e) => {
+    if (!input.isConnected) {
+      destroy();
+      return;
+    }
+    const node = e.target;
+    if (!wrap.contains(node) && !dropdown.contains(node)) {
+      close();
+      opts.onDismiss?.();
+    }
+  };
+  document.addEventListener("mousedown", onDoc);
+  window.addEventListener("scroll", onFollow, true);
+  window.addEventListener("resize", onFollow);
+  function destroy() {
+    document.removeEventListener("mousedown", onDoc);
+    window.removeEventListener("scroll", onFollow, true);
+    window.removeEventListener("resize", onFollow);
+    dropdown.remove();
+    wrap.remove();
+  }
+  return { input, destroy };
+}
+
 // src/helpDisclosure.ts
 var activeHeaderHelp = null;
 var headerHelpIdSeq = 0;
@@ -4827,10 +5174,23 @@ function renderCreateLedgerForm(container, existing, handlers, opts = {}) {
   nameInput.autofocus = true;
   const aliasInput = container.createEl("input", { type: "text", cls: "accounting-ledger-input" });
   aliasInput.placeholder = t("ledger.create.aliasPlaceholder");
+  container.createEl("div", { text: t("settings.currency.baseLabel"), cls: "accounting-ledger-card-title" });
+  const baseHolder = container.createDiv();
+  const defaultBase = getLocale().toLowerCase().startsWith("zh") ? "CNY" : "USD";
+  let baseCurrency = defaultBase;
+  const basePicker = createCurrencyPicker(baseHolder, {
+    value: defaultBase,
+    onPick: (code) => {
+      baseCurrency = code;
+    }
+  });
   const errorEl = container.createEl("div", { cls: "accounting-ledger-error" });
   const actions = container.createDiv("accounting-modal-actions");
   const cancelBtn = actions.createEl("button", { text: opts.cancelText ?? t("common.cancel"), cls: "accounting-btn-secondary" });
-  cancelBtn.onclick = () => handlers.onCancel();
+  cancelBtn.onclick = () => {
+    basePicker.destroy();
+    handlers.onCancel();
+  };
   const submitBtn = actions.createEl("button", { text: opts.submitText ?? t("ledger.create.submitBtn"), cls: "accounting-btn-primary" });
   submitBtn.disabled = true;
   const update = () => {
@@ -4842,8 +5202,10 @@ function renderCreateLedgerForm(container, existing, handlers, opts = {}) {
   submitBtn.onclick = async () => {
     const name = nameInput.value.trim();
     const alias = aliasInput.value.trim();
-    const ok2 = await handlers.onSubmit(name, alias);
-    if (!ok2) {
+    const ok2 = await handlers.onSubmit(name, alias, baseCurrency);
+    if (ok2) {
+      basePicker.destroy();
+    } else {
       update();
     }
   };
@@ -8351,10 +8713,13 @@ var AccountCreateModal = class extends import_obsidian13.Modal {
   toggleCredit() {
     this.creditBlockEl.style.display = this.typeEl.value === "credit" ? "" : "none";
   }
-  /** 初始化默认值：币种=本位币，类型=第一个启用类型，其他为空 */
+  /** 初始化默认值：币种按界面语言（中文→CNY，其他→USD，偏好不在可选集时回落本位币），类型=第一个启用类型，其他为空 */
   initializeDefaults() {
+    const pref = getLocale().toLowerCase().startsWith("zh") ? "CNY" : "USD";
+    const opts = Array.from(this.currencyEl.options).map((o) => o.value);
+    const defaultCur = opts.includes(pref) ? pref : this.baseCurrency;
     for (const opt of Array.from(this.currencyEl.options)) {
-      opt.selected = opt.value === this.baseCurrency;
+      opt.selected = opt.value === defaultCur;
     }
     const firstEnabled = this.accountTypeSettings.types.find((at) => at.active !== false);
     if (firstEnabled) {
@@ -9556,159 +9921,6 @@ var FEEDBACK_EMAIL = "honeyledger@163.com";
 function kindOfLabel(type) {
   return type === "credit" || type === "loan" ? t("accountKind.liability") : t("accountKind.asset");
 }
-function createCurrencyPicker(parent, opts) {
-  const wrap = parent.createDiv({ cls: "accounting-currency-picker" });
-  const input = wrap.createEl("input", { cls: "accounting-ledger-input accounting-currency-picker-input" });
-  input.type = "text";
-  input.placeholder = opts.placeholder ?? t("settings.currency.searchPlaceholder");
-  input.value = opts.value ? `${currencyDisplayName(opts.value, getLocale())} ${opts.value}` : "";
-  input.setAttribute("autocomplete", "off");
-  const dropdown = createDiv({ cls: "accounting-currency-picker-dropdown" });
-  document.body.appendChild(dropdown);
-  dropdown.style.display = "none";
-  const excludeSet = new Set((opts.exclude ?? []).map((c) => c.toUpperCase()));
-  const currentUpper = (opts.value ?? "").toUpperCase();
-  let open = false;
-  let flat = [];
-  let hi = 0;
-  function sections(text) {
-    const term = text.trim();
-    if (term) {
-      const items = filterCurrencies(term, getLocale()).filter((c) => !excludeSet.has(c.code));
-      return [{ label: t("settings.currency.searchResults", { n: items.length }), items }];
-    }
-    return orderedCurrencyCatalog(getLocale()).map((g) => ({ label: t(g.labelKey, { count: g.count }), items: g.items.filter((c) => !excludeSet.has(c.code)) })).filter((g) => g.items.length > 0);
-  }
-  function paint() {
-    dropdown.querySelectorAll("[data-idx]").forEach((el) => {
-      const he = el;
-      he.classList.toggle("is-active", Number(he.dataset.idx) === hi);
-    });
-    const active = dropdown.querySelector(`[data-idx="${hi}"]`);
-    active?.scrollIntoView({ block: "nearest" });
-  }
-  function render() {
-    dropdown.empty();
-    const gs = sections(input.value);
-    flat = gs.flatMap((g) => g.items);
-    if (flat.length === 0) {
-      dropdown.createEl("div", { text: t("settings.currency.noMatch"), cls: "accounting-currency-picker-empty" });
-      return;
-    }
-    for (const g of gs) {
-      dropdown.createEl("div", { text: g.label, cls: "accounting-currency-picker-group" });
-      for (const c of g.items) {
-        const idx = flat.indexOf(c);
-        const item = dropdown.createDiv({ cls: "accounting-currency-picker-item" });
-        item.dataset.idx = String(idx);
-        item.createEl("span", { text: c.name, cls: "accounting-currency-picker-cn" });
-        item.createEl("span", { text: c.code, cls: "accounting-currency-picker-code" });
-        if (c.code === currentUpper) item.createEl("span", { text: "\u2713", cls: "accounting-currency-picker-check" });
-        item.addEventListener("mousedown", (e) => {
-          e.preventDefault();
-          pick(c.code);
-        });
-        item.addEventListener("mouseenter", () => {
-          hi = idx;
-          paint();
-        });
-      }
-    }
-    paint();
-  }
-  function position() {
-    const r = input.getBoundingClientRect();
-    dropdown.style.left = `${r.left}px`;
-    dropdown.style.top = `${r.bottom + 4}px`;
-    dropdown.style.width = `${r.width}px`;
-  }
-  const displayValue = () => opts.value ? `${currencyDisplayName(opts.value, getLocale())} ${opts.value}` : "";
-  function openPanel() {
-    if (open) return;
-    open = true;
-    hi = 0;
-    input.value = "";
-    render();
-    position();
-    dropdown.style.display = "block";
-  }
-  function close() {
-    if (!open) return;
-    open = false;
-    dropdown.style.display = "none";
-    input.value = displayValue();
-  }
-  function pick(code) {
-    input.value = `${currencyDisplayName(code, getLocale())} ${code}`;
-    close();
-    opts.onPick(code);
-  }
-  input.addEventListener("focus", openPanel);
-  input.addEventListener("input", () => {
-    if (!open) openPanel();
-    else {
-      render();
-      position();
-    }
-    hi = 0;
-    paint();
-  });
-  input.addEventListener("keydown", (e) => {
-    if (!open) {
-      if (e.key === "ArrowDown" || e.key === "Enter") {
-        e.preventDefault();
-        openPanel();
-      }
-      return;
-    }
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      hi = Math.min(hi + 1, flat.length - 1);
-      paint();
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      hi = Math.max(hi - 1, 0);
-      paint();
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      const c = flat[hi];
-      if (c) pick(c.code);
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      close();
-      opts.onDismiss?.();
-    }
-  });
-  const onFollow = () => {
-    if (!input.isConnected) {
-      destroy();
-      return;
-    }
-    if (open) position();
-  };
-  const onDoc = (e) => {
-    if (!input.isConnected) {
-      destroy();
-      return;
-    }
-    const node = e.target;
-    if (!wrap.contains(node) && !dropdown.contains(node)) {
-      close();
-      opts.onDismiss?.();
-    }
-  };
-  document.addEventListener("mousedown", onDoc);
-  window.addEventListener("scroll", onFollow, true);
-  window.addEventListener("resize", onFollow);
-  function destroy() {
-    document.removeEventListener("mousedown", onDoc);
-    window.removeEventListener("scroll", onFollow, true);
-    window.removeEventListener("resize", onFollow);
-    dropdown.remove();
-    wrap.remove();
-  }
-  return { input, destroy };
-}
 var AccountingSettings = class {
   constructor(app, plugin, adapter) {
     this.app = app;
@@ -10296,9 +10508,9 @@ var AccountingSettings = class {
   async openCreateLedgerModal(onDone) {
     const adapter = this.currentAdapter();
     const existing = await adapter.listLedgers();
-    const modal = new CreateLedgerModal(this.app, existing, async (name, alias) => {
+    const modal = new CreateLedgerModal(this.app, existing, async (name, alias, baseCurrency) => {
       try {
-        const folder = await adapter.createLedger(name, alias || void 0);
+        const folder = await adapter.createLedger(name, alias || void 0, baseCurrency);
         await onDone(folder, alias);
       } catch (error) {
         new import_obsidian19.Notice(t("settings.ledger.createFailed", { msg: formatError(error) }));
@@ -11072,7 +11284,7 @@ var AccountingSettings = class {
     const head = block.createDiv("accounting-at-group-head");
     const nameInput = head.createEl("input", { cls: "accounting-ledger-input accounting-at-group-name" });
     nameInput.type = "text";
-    nameInput.value = group.label;
+    nameInput.value = displayGroupLabel2(group.id, group.label);
     nameInput.addEventListener("blur", () => {
       const raw = nameInput.value.trim();
       if (raw && raw !== nameInput.defaultValue) cb.onGroupLabel(raw);
@@ -11128,9 +11340,9 @@ var CreateLedgerModal = class extends import_obsidian19.Modal {
     this.modalEl.addClass("accounting-sub-modal");
     if (!import_obsidian19.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     renderCreateLedgerForm(this.contentEl, this.existing, {
-      onSubmit: async (name, alias) => {
+      onSubmit: async (name, alias, baseCurrency) => {
         try {
-          await this.onSubmit(name, alias);
+          await this.onSubmit(name, alias, baseCurrency);
         } finally {
           this.close();
         }
@@ -11415,7 +11627,7 @@ var CreateAccountTypeModal = class extends import_obsidian19.Modal {
     this.kindSelect.createEl("option", { text: t("accountKind.asset"), value: "asset" });
     this.kindSelect.createEl("option", { text: t("accountKind.liability"), value: "liability" });
     this.groupSelect = contentEl.createEl("select", { cls: "accounting-ledger-input" });
-    for (const g of this.groups) this.groupSelect.createEl("option", { text: g.label || g.id, value: g.id });
+    for (const g of this.groups) this.groupSelect.createEl("option", { text: displayGroupLabel2(g.id, g.label) || g.id, value: g.id });
     if (this.groups[0]) this.groupSelect.value = this.groups[0].id;
     const actions = contentEl.createDiv("accounting-modal-actions");
     const cancelBtn = actions.createEl("button", { text: t("common.cancel"), cls: "accounting-btn-secondary" });
@@ -11475,15 +11687,21 @@ var CreateAccountTypeGroupModal = class extends import_obsidian19.Modal {
 
 // src/onboardingModal.ts
 var import_obsidian20 = require("obsidian");
+function defaultBaseCurrency() {
+  return getLocale().toLowerCase().startsWith("zh") ? "CNY" : "USD";
+}
 var OnboardingModal = class extends import_obsidian20.Modal {
-  constructor(app, adapter, onComplete) {
+  constructor(app, adapter, onComplete, onLocaleChange) {
     super(app);
     this.adapter = adapter;
     this.onComplete = onComplete;
+    this.onLocaleChange = onLocaleChange;
   }
   currentStep = "main";
   /** 用户在关闭前的选择；null 表示未做选择（直接关闭→跳过）。onClose 据此单点回调，避免重复触发。 */
   result = null;
+  /** 步骤内容容器；render 方法只清空/填充此容器，保留顶部语言下拉。 */
+  bodyEl;
   async onOpen() {
     const { contentEl } = this;
     contentEl.empty();
@@ -11491,12 +11709,40 @@ var OnboardingModal = class extends import_obsidian20.Modal {
     this.modalEl.addClass("accounting-onboarding");
     contentEl.addClass("accounting-modal");
     if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
-    this.renderMainStep();
+    this.renderLangSelect(contentEl);
+    this.bodyEl = contentEl.createDiv("accounting-onboarding-body");
+    await this.renderMainStep();
+  }
+  /** 语言下拉：setLocale + onLocaleChange 持久化 + 用新 locale 重渲染当前步骤与下拉文案。 */
+  renderLangSelect(el) {
+    const wrap = el.createDiv("accounting-onboarding-lang");
+    const select = wrap.createEl("select", { cls: "accounting-input" });
+    const fillOptions = () => {
+      select.empty();
+      select.appendChild(new Option(t("settings.language.zh"), "zh"));
+      select.appendChild(new Option(t("settings.language.en"), "en"));
+      select.value = getLocale();
+    };
+    fillOptions();
+    select.onchange = async () => {
+      const next = select.value;
+      setLocale(next);
+      try {
+        await this.onLocaleChange(next);
+      } catch {
+      }
+      this.bodyEl.empty();
+      if (this.currentStep === "create") {
+        await this.renderCreateForm();
+      } else {
+        await this.renderMainStep();
+      }
+      fillOptions();
+    };
   }
   /** 渲染主步骤：根据是否有现有账本显示不同界面 */
   async renderMainStep() {
-    const { contentEl } = this;
-    contentEl.empty();
+    this.bodyEl.empty();
     this.currentStep = "main";
     const existing = await this.adapter.listLedgers();
     if (existing.length === 0) {
@@ -11505,32 +11751,33 @@ var OnboardingModal = class extends import_obsidian20.Modal {
       await this.renderLedgerSelection(existing);
     }
   }
+  /** 创建示例账本并关闭：空状态与有账本列表共用，避免逻辑重复 */
+  async createSampleAndClose() {
+    try {
+      const folder = await this.adapter.createSampleLedger(SAMPLE_LEDGER_NAME, t("seed.sampleAlias"), defaultBaseCurrency());
+      this.result = { action: "selected", ledger: folder };
+      this.close();
+    } catch (e) {
+      new import_obsidian20.Notice(t("onboarding.createSampleFailed", { msg: formatError(e) }));
+    }
+  }
   /** 无账本时：提供示例账本创建和手动创建两个选项 */
   renderEmptyState() {
-    const { contentEl } = this;
-    contentEl.empty();
+    this.bodyEl.empty();
     this.currentStep = "main";
-    const titleEl = contentEl.createEl("h2", { text: t("onboarding.welcome") });
+    const titleEl = this.bodyEl.createEl("h2", { text: t("onboarding.welcome") });
     titleEl.addClass("accounting-modal-title");
-    contentEl.createEl("p", {
+    this.bodyEl.createEl("p", {
       text: t("onboarding.emptyDesc"),
       cls: "accounting-onboarding-desc"
     });
-    const sampleBtn = contentEl.createEl("button", {
+    const sampleBtn = this.bodyEl.createEl("button", {
       text: t("onboarding.createSample"),
       cls: "accounting-btn accounting-btn-primary accounting-btn-block"
     });
-    sampleBtn.onclick = async () => {
-      try {
-        const folder = await this.adapter.createSampleLedger(SAMPLE_LEDGER_NAME, t("seed.sampleAlias"));
-        this.result = { action: "selected", ledger: folder };
-        this.close();
-      } catch (e) {
-        new import_obsidian20.Notice(t("onboarding.createSampleFailed", { msg: formatError(e) }));
-      }
-    };
-    contentEl.createEl("p", { text: t("onboarding.or"), cls: "accounting-onboarding-sep" });
-    const createBtn = contentEl.createEl("button", {
+    sampleBtn.onclick = () => this.createSampleAndClose();
+    this.bodyEl.createEl("p", { text: t("onboarding.or"), cls: "accounting-onboarding-sep" });
+    const createBtn = this.bodyEl.createEl("button", {
       text: t("onboarding.createNew"),
       cls: "accounting-btn accounting-btn-secondary accounting-btn-block"
     });
@@ -11538,12 +11785,11 @@ var OnboardingModal = class extends import_obsidian20.Modal {
   }
   /** 渲染现有账本选择列表 */
   async renderLedgerSelection(existing) {
-    const { contentEl } = this;
-    contentEl.empty();
+    this.bodyEl.empty();
     this.currentStep = "main";
-    const titleEl = contentEl.createEl("h2", { text: t("onboarding.selectLedger") });
+    const titleEl = this.bodyEl.createEl("h2", { text: t("onboarding.selectLedger") });
     titleEl.addClass("accounting-modal-title");
-    const listEl = contentEl.createDiv("accounting-onboarding-folder-list");
+    const listEl = this.bodyEl.createDiv("accounting-onboarding-folder-list");
     for (const folder of existing.sort()) {
       const label = await this.adapter.readLedgerAlias(folder);
       const itemEl = listEl.createEl("button", {
@@ -11555,23 +11801,28 @@ var OnboardingModal = class extends import_obsidian20.Modal {
         this.close();
       };
     }
-    const createBtn = contentEl.createEl("button", {
+    const createBtn = this.bodyEl.createEl("button", {
       text: "+ " + t("onboarding.createNew"),
       cls: "accounting-btn accounting-btn-primary accounting-btn-block"
     });
     createBtn.onclick = () => this.renderCreateForm();
+    const sampleBtn = this.bodyEl.createEl("button", {
+      text: t("onboarding.createSample"),
+      cls: "accounting-btn accounting-btn-secondary accounting-btn-block"
+    });
+    sampleBtn.onclick = () => this.createSampleAndClose();
   }
   /** 渲染创建新账本表单：复用 renderCreateLedgerForm（与设置页一致：名称 + 别名 + 即时校验） */
   async renderCreateForm() {
     this.currentStep = "create";
     const existing = await this.adapter.listLedgers();
     renderCreateLedgerForm(
-      this.contentEl,
+      this.bodyEl,
       existing,
       {
-        onSubmit: async (name, alias) => {
+        onSubmit: async (name, alias, baseCurrency) => {
           try {
-            const folder = await this.adapter.createLedger(name, alias || void 0);
+            const folder = await this.adapter.createLedger(name, alias || void 0, baseCurrency);
             new import_obsidian20.Notice(t("onboarding.createdNotif", { name: alias || ObsidianDataAdapter.formatLedgerName(folder) }));
             this.result = { action: "created", ledger: folder };
             this.close();
@@ -11649,9 +11900,19 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
     const adapter = this.adapter();
     this.onboardingBackdrop = this.openSettings();
     try {
-      new OnboardingModal(this.app, adapter, (result) => {
-        void this.handleOnboardingResult(result);
-      }).open();
+      new OnboardingModal(
+        this.app,
+        adapter,
+        (result) => {
+          void this.handleOnboardingResult(result);
+        },
+        // 语言切换：setLocale（幂等，onboardingModal 内已先调）+ 持久化到 settings
+        async (locale) => {
+          this.settings.locale = locale;
+          setLocale(locale);
+          await this.saveSettings();
+        }
+      ).open();
     } catch (error) {
       pluginLogger.error("onboarding", "\u663E\u793A\u5F15\u5BFC Modal \u5931\u8D25", { err: String(error) });
     }
@@ -11664,7 +11925,7 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
       if (result.action === "skipped") {
         const adapter = this.adapter();
         try {
-          await adapter.createLedger(DEFAULT_LEDGER_NAME, t("ledger.defaultAlias"));
+          await adapter.createLedger(DEFAULT_LEDGER_NAME, t("ledger.defaultAlias"), getLocale().toLowerCase().startsWith("zh") ? "CNY" : "USD");
         } catch {
         }
         result = { action: "created", ledger: DEFAULT_LEDGER_NAME };
