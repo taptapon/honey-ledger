@@ -3241,9 +3241,8 @@ var zh = {
   "onboarding.createFailed": "\u521B\u5EFA\u5931\u8D25\uFF1A{{msg}}",
   "onboarding.back": "\u8FD4\u56DE",
   "onboarding.createSubmit": "\u521B\u5EFA",
-  // KR6/task5: main.ts — 命令/ribbon 名 + 默认账本别名 + 迁移/自愈 Notice
+  // KR6/task5: main.ts — 命令/ribbon 名 + 迁移/自愈 Notice
   "cmd.open": "\u5B8F\u5229\u8BB0\u8D26",
-  "ledger.defaultAlias": "\u4E2A\u4EBA\u8D26\u672C",
   "notice.migratedN": "\u5DF2\u81EA\u52A8\u8FC1\u79FB {{n}} \u4E2A\u8D26\u672C\u5230\u9690\u85CF\u76EE\u5F55",
   "notice.migrateFailed": "\u6709 {{n}} \u4E2A\u8D26\u672C\u672A\u80FD\u8FC1\u79FB\uFF08\u53EF\u80FD\u6B63\u88AB\u5360\u7528\uFF09\uFF0C\u8BF7\u91CD\u542F Obsidian \u91CD\u8BD5\uFF1A{{list}}",
   "notice.selfHealed": "\u5F53\u524D\u8D26\u672C\u4E0D\u53EF\u7528\uFF0C\u5DF2\u5207\u6362\u5230\u300C{{alias}}\u300D",
@@ -3914,9 +3913,8 @@ var en = {
   "onboarding.createFailed": "Create failed: {{msg}}",
   "onboarding.back": "Back",
   "onboarding.createSubmit": "Create",
-  // KR6/task5: main.ts — command/ribbon name + default ledger alias + migrate/self-heal notices
+  // KR6/task5: main.ts — command/ribbon name + migrate/self-heal notices
   "cmd.open": "Honey Ledger",
-  "ledger.defaultAlias": "Personal ledger",
   "notice.migratedN": "Auto-migrated {{n}} ledger(s) to hidden folders",
   "notice.migrateFailed": "{{n}} ledger(s) failed to migrate (may be in use); restart Obsidian and retry: {{list}}",
   "notice.selfHealed": 'Current ledger unavailable; switched to "{{alias}}"',
@@ -9597,6 +9595,18 @@ var SettingsModal = class extends import_obsidian16.Modal {
   closing = false;
   /** 移动端左右轻扫切顶部设置 tab；onOpen 绑定、onClose 解绑。 */
   swipeTabs;
+  /** 是否处于打开态（main.ts 切账本就地 reattach 前判定：关闭后回退到重开）。 */
+  get isOpen() {
+    return this.opened;
+  }
+  /** 切账本就地刷新：重绑 navCtx（底部导航条用新 adapter）+ 各 panel refreshAllPanels 就地刷新数据。
+   *  不 empty contentEl、不重建 Modal 容器，避免账本列表整页消失再重绘的闪屏。
+   *  替代原先「关旧设置页 + new SettingsModal 重开」路径——仅设置页内部切账本走此就地路径。 */
+  reattach(navCtx) {
+    this.navCtx = navCtx;
+    renderNavBar(this.modalEl, "settings", this.navCtx, () => this.close());
+    this.settingsTab.refreshAllPanels();
+  }
   /** 在挂载到 DOM 前就预设全屏类与禁用 Obsidian 默认 modal-pop 动画，避免「先上跳再滑入」。 */
   open() {
     presetModalChrome(this.modalEl, this.containerEl);
@@ -9932,6 +9942,10 @@ var AccountingSettings = class {
   activeTab = "ledger";
   /** renderInto 内 setActiveTab 闭包的句柄，供 switchTab（移动端轻扫）复用同一套切 tab 逻辑。 */
   applyActiveTab;
+  /** 各 panel 的就地刷新闭包（renderInto 时按 panel 注册）。
+   *  切账本时不再整页重开 Modal：调 refreshAllPanels() 让各 panel 用最新 dataSubdir（currentAdapter 实时读）
+   *  就地重新加载，保留 DOM 骨架、避免列表空窗闪屏。 */
+  refreshers = [];
   /** 优先用最新的 dataSubdir 重建 adapter（切换账本后立即生效），
    *  无 vault（测试环境）则回退到构造时注入的 adapter。 */
   currentAdapter() {
@@ -9948,6 +9962,7 @@ var AccountingSettings = class {
    *  与记账页 `LedgerSwitchModal→close→onSwitchLedger` 同一模式。省略时回退到仅改设置 + 提示重开。 */
   renderInto(containerEl, onSwitchLedger) {
     containerEl.empty();
+    this.refreshers = [];
     const tabsEl = containerEl.createDiv("accounting-settings-tabs");
     const panelsEl = containerEl.createDiv("accounting-settings-panels");
     const setActiveTab = (tab) => {
@@ -10007,6 +10022,13 @@ var AccountingSettings = class {
     const nextTab = order[next];
     if (!nextTab || nextTab === this.activeTab) return;
     this.applyActiveTab?.(nextTab);
+  }
+  /** 切账本就地刷新：遍历各 panel 的 refresh 闭包（currentAdapter 实时读最新 dataSubdir），
+   *  不重建 DOM 骨架、不重开 Modal——避免账本列表整页消失再重绘的闪屏。
+   *  与 renderInto 的区别：renderInto 重建整个 contentEl（empty + 5 panel 骨架），用于首次挂载/重开；
+   *  本方法只让各 panel 用新 adapter 重新加载自己的数据，保留 tab 结构与各 panel 容器。 */
+  refreshAllPanels() {
+    for (const r of this.refreshers) void r();
   }
   /** 创建一个 panel 容器（带 data-tab 标识 + 显隐类钩子）。 */
   createPanel(parent, tab) {
@@ -10203,6 +10225,7 @@ var AccountingSettings = class {
       await refreshLedgerList();
       new import_obsidian19.Notice(t("settings.ledger.refreshedNotice"));
     };
+    this.refreshers.push(refreshLedgerList);
     void refreshLedgerList();
   }
   /** 备份管理 panel：备份卡片（立即备份 / 查看备份）。 */
@@ -10229,15 +10252,17 @@ var AccountingSettings = class {
       void this.showBackupList();
     };
     const autoSectionEl = backupBodyEl.createDiv("accounting-backup-auto");
-    void (async () => {
+    const loadBackupCfg = async () => {
       const adapter = this.currentAdapter();
       let cfg;
       try {
         cfg = await adapter.readBackupConfig();
       } catch (error) {
+        autoSectionEl.empty();
         autoSectionEl.createEl("p", { text: t("settings.backup.loadFailed", { msg: formatError(error) }), cls: "accounting-ledger-empty" });
         return;
       }
+      autoSectionEl.empty();
       const enableRow = autoSectionEl.createDiv("accounting-settings-row");
       const enableCb = enableRow.createEl("input", { cls: "accounting-checkbox" });
       enableCb.type = "checkbox";
@@ -10269,7 +10294,9 @@ var AccountingSettings = class {
       enableCb.onchange = () => void persist({ ...cfg, backupEnabled: enableCb.checked });
       intervalSel.onchange = () => void persist({ ...cfg, backupIntervalDays: Number(intervalSel.value) });
       keepSel.onchange = () => void persist({ ...cfg, backupKeep: Number(keepSel.value) });
-    })();
+    };
+    this.refreshers.push(loadBackupCfg);
+    void loadBackupCfg();
   }
   /** 币种 panel：本位币下拉 + 汇率表编辑器（手动维护「1 外币 = rate 本位币」，随 iCloud 与桌面端同步）。 */
   renderCurrencyPanel(panel) {
@@ -10294,6 +10321,7 @@ var AccountingSettings = class {
         bodyEl.createEl("p", { text: t("settings.currency.loadFailed", { msg: formatError(error) }), cls: "accounting-ledger-empty" });
       }
     };
+    this.refreshers.push(refresh);
     void refresh();
   }
   renderCurrencyBody(bodyEl, adapter, baseCurrency, rates, accountCurrencies, refresh) {
@@ -10688,6 +10716,7 @@ var AccountingSettings = class {
       await refreshRules();
       new import_obsidian19.Notice(t("settings.recurring.refreshedNotice"));
     };
+    this.refreshers.push(refreshRules);
     void refreshRules();
   }
   /** 渲染单个周期账规则项 */
@@ -10861,6 +10890,7 @@ var AccountingSettings = class {
         rootEl.createEl("p", { text: t("settings.category.loadFailed", { msg: formatError(error) }), cls: "accounting-ledger-empty" });
       }
     };
+    this.refreshers.push(refreshCategories);
     void refreshCategories();
   }
   /** 单个 flow 分类区块：新增入口 + 可见列表 + 该 flow 的已隐藏折叠区。 */
@@ -11274,6 +11304,7 @@ var AccountingSettings = class {
       void persist(draft, true);
       renderList();
     };
+    this.refreshers.push(refresh);
     void refresh();
   }
   /** 渲染单个类型分组区块：改名 + 类型计数 + 上移/下移 + 删除分组，组内类型行（label + 重分组/上移/下移）。 */
@@ -11706,12 +11737,13 @@ var OnboardingModal = class extends import_obsidian20.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    this.modalEl.addClass("accounting-onboarding");
     contentEl.addClass("accounting-modal");
     if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     this.renderLangSelect(contentEl);
     this.bodyEl = contentEl.createDiv("accounting-onboarding-body");
     await this.renderMainStep();
+    const closeWrap = contentEl.createDiv("accounting-modal-close");
+    closeWrap.createEl("button", { text: t("common.close"), cls: "accounting-btn-secondary" }).onclick = () => this.close();
   }
   /** 语言下拉：setLocale + onLocaleChange 持久化 + 用新 locale 重渲染当前步骤与下拉文案。 */
   renderLangSelect(el) {
@@ -11846,11 +11878,12 @@ var OnboardingModal = class extends import_obsidian20.Modal {
 
 // src/main.ts
 var DEFAULT_SETTINGS = { dataSubdir: ".data", autoOpenOnStartup: true, onboardingCompleted: false, locale: defaultLocale };
-var DEFAULT_LEDGER_NAME = ".myledger";
 var AccountingPlugin = class extends import_obsidian21.Plugin {
   settingsTab;
   /** 引导期间的背景设置页（应用主界面）；引导完成后按需刷新/关闭，避免双 Modal 堆叠。 */
   onboardingBackdrop = null;
+  /** 当前已打开的设置页实例（设置页同时只存一个）。切账本时优先就地 reattach 它而非重开，消除整页闪屏。 */
+  currentSettingsModal = null;
   /** 账本密码门禁：会话级已解锁账本（仅内存，切离即失效、不落盘不同步）。null=未解锁设密账本。 */
   unlockedLedger = null;
   /** 解锁失败退避计数（仅内存，会话内累计）。 */
@@ -11918,18 +11951,17 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
     }
   }
   /** 引导完成：落盘标记与所选账本，并重建 settingsTab。
-   *  账本变更时刷新背景设置页（新页叠在上层、旧背景页在下层 detach，无闪屏）；未变更（跳过）则沿用背景设置页。 */
+   *  账本变更时刷新背景设置页（新页叠在上层、旧背景页在下层 detach，无闪屏）。
+   *  skipped（用户「关闭」引导）= 退出记账程序：不标完成、不建账本、不进主界面，
+   *  只关背景设置页回 Obsidian，下次启动或点 ribbon 会重新引导。 */
   async handleOnboardingResult(result) {
+    if (result.action === "skipped") {
+      this.onboardingBackdrop?.close();
+      this.onboardingBackdrop = null;
+      return;
+    }
     let ledgerChanged = false;
     try {
-      if (result.action === "skipped") {
-        const adapter = this.adapter();
-        try {
-          await adapter.createLedger(DEFAULT_LEDGER_NAME, t("ledger.defaultAlias"), getLocale().toLowerCase().startsWith("zh") ? "CNY" : "USD");
-        } catch {
-        }
-        result = { action: "created", ledger: DEFAULT_LEDGER_NAME };
-      }
       this.settings.onboardingCompleted = true;
       if (result.ledger && result.ledger !== this.settings.dataSubdir) {
         this.settings.dataSubdir = result.ledger;
@@ -11996,12 +12028,19 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
       },
       openBalance: (slide, onOpened) => openBalance(this.app, adapter, this.navCtx(adapter), slide, this.switchLedgerAndReopenBalance, onOpened),
       openReport: (slide, onOpened) => openReport(this.app, adapter, this.navCtx(adapter), slide, this.switchLedgerAndReopenReport, onOpened),
-      openSettings: (slide, onOpened) => openSettings(this.app, this.settingsTab, this.navCtx(adapter), slide, this.switchLedgerAndReopenSettings, onOpened)
+      openSettings: (slide, onOpened) => {
+        const modal = openSettings(this.app, this.settingsTab, this.navCtx(adapter), slide, this.switchLedgerAndReopenSettings, onOpened);
+        this.currentSettingsModal = modal;
+      }
     };
   }
   /** 从外部入口（命令/ribbon/启动/引导完成）打开记账界面：清会话级解锁态后走门禁，
    *  确保关闭记账界面再进设密账本会重新弹密码（design 选 A：记账界面退出即算离开，回账本必重输）。 */
   async openEntryFresh(onOpened) {
+    if (!this.settings.onboardingCompleted) {
+      this.showOnboardingModal();
+      return;
+    }
     this.unlockedLedger = null;
     await this.openEntry(onOpened);
   }
@@ -12185,17 +12224,25 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
     const adapter = this.adapter();
     openReport(this.app, adapter, this.navCtx(adapter), void 0, this.switchLedgerAndReopenReport, onOpened);
   };
-  /** 设置页切换账本：用新 dataSubdir 重开设置页（新 adapter、新 navCtx），整个记账界面上下文立即刷新到新账本。
-   *  关旧设置页推迟到新设置页 onOpen（onOpened 由胶囊路径传入），避免底层闪现。 */
+  /** 设置页切换账本：在场则就地 reattach（重绑 navBar + 各 panel refresh），消除整页重开闪屏；
+   *  无在场设置页才回退到重开。dataSubdir 已由 gateAndSwitch→doSwitchLedger 落盘，reattach 用最新 adapter。
+   *  onOpened（关旧页回调）是「重开」模式语义，就地 reattach 下同一 Modal 不需要关自己，忽略。 */
   switchLedgerAndReopenSettings = async (newSubdir, onOpened) => {
     if (!await this.gateAndSwitch(newSubdir)) return;
+    const modal = this.currentSettingsModal;
+    if (modal?.isOpen) {
+      modal.reattach(this.navCtx(this.adapter()));
+      return;
+    }
     this.openSettings(onOpened);
   };
   /** 打开设置页（全屏 Modal）：每次用最新 dataSubdir 重建 adapter，导航条与切换账本回调均绑定到该新 adapter。
    *  返回实例，供引导背景页按需 close。 */
   openSettings(onOpened) {
     const adapter = this.adapter();
-    return openSettings(this.app, this.settingsTab, this.navCtx(adapter), void 0, this.switchLedgerAndReopenSettings, onOpened);
+    const modal = openSettings(this.app, this.settingsTab, this.navCtx(adapter), void 0, this.switchLedgerAndReopenSettings, onOpened);
+    this.currentSettingsModal = modal;
+    return modal;
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());

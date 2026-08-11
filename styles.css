@@ -1655,7 +1655,7 @@
 
 /* 移动端：居中子弹窗「直接出现 / 直接关闭」——.modal 本身无定位（靠 .modal-container 的
    flex 居中）、无 transform/opacity；Obsidian 开/关动画是 JS 逐帧给 .modal 设 inline
-   style.transform（translateY 位移）再清空。故用 !important 把 transform/opacity 钉在静态值，
+   style.transform（translateY 位移）再清空。故用 !important 把 transform/opacity 钉在静态值,
    逐帧 inline（无 !important）被压住 → 瞬间出现/消失（外部 !important 高于 inline 普通）。
    桌面端（.accounting-desktop）保留 Obsidian 原生淡入不动；流水详情底部抽屉
    （.accounting-detail-sheet）走自有滑上/滑下动画，不在此列。 */
@@ -1663,12 +1663,6 @@
   transform: none !important;
   opacity: 1 !important;
   animation: none !important;
-}
-
-/* 账本引导（accounting-onboarding）：放行被 sub-modal 隐藏的默认右上角 ✕——引导需可跳过/关闭，
-   故单独恢复 Obsidian 原生关闭按钮。特异性 (0,4,0) 高于上方 .accounting-sub-modal 的 (0,2,0)，胜出。 */
-.modal.accounting-sub-modal.accounting-onboarding :is(.modal-close-button, .modal-header-button) {
-  display: block;
 }
 
 @keyframes accounting-sheet-up {
@@ -2921,7 +2915,7 @@ details[open] > .accounting-collapsible-head::before {
 .accounting-modal-close {
   display: flex;
   justify-content: flex-end;
-  margin-top: 16px;
+  margin-top: 24px;
   padding-top: 12px;
   border-top: 1px solid var(--background-modifier-border);
 }
@@ -3856,6 +3850,21 @@ details[open] > .accounting-collapsible-head::before {
   font-size: var(--font-ui-small);
   line-height: 1.5;
   margin: 0 0 16px 0;
+}
+
+/* 引导顶部语言栏：右对齐（与底部「跳过」同轴线）+ 底部细分隔线，与下方正文标题拉开层级，
+   避免语言下拉紧贴「选择账本/欢迎」标题。 */
+.accounting-onboarding-lang {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+/* 引导正文区：顶部补 4px 与语言栏分隔线后的留白协同，避免标题顶得太死 */
+.accounting-onboarding-body {
+  padding-top: 4px;
 }
 
 /* 引导分隔线（「— 或 —」）：居中、更弱一档 */
