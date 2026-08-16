@@ -23,8 +23,6 @@ __export(main_exports, {
   default: () => AccountingPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian21 = require("obsidian");
-var import_obsidian22 = require("obsidian");
 
 // ../../packages/core/src/types/account.ts
 function kindOfType(type) {
@@ -171,6 +169,115 @@ function displayTypeLabel(type, storedLabel, translate) {
 }
 function displayGroupLabel(id, storedLabel, translate) {
   return DEFAULT_GROUP_LABEL[id] != null && storedLabel === DEFAULT_GROUP_LABEL[id] ? translate(`accountGroup.${id}`) : storedLabel;
+}
+
+// ../../packages/core/src/accountGrouping.ts
+var ACCOUNT_GROUPING_MODES = [
+  "type-group",
+  "type",
+  "currency",
+  "tag"
+];
+var DEFAULT_ACCOUNT_GROUPING_MODE = "type-group";
+function isAccountGroupingMode(x) {
+  return typeof x === "string" && ACCOUNT_GROUPING_MODES.includes(x);
+}
+var UNTAGGED_GROUP_ID = "__untagged__";
+var byNameZh = (a, b) => a.name.localeCompare(b.name, "zh");
+function toGroups(accounts, keyOf, order, makeGroup) {
+  const byKey = /* @__PURE__ */ new Map();
+  for (const a of accounts) {
+    const key = keyOf(a);
+    const arr = byKey.get(key);
+    if (arr) arr.push(a);
+    else byKey.set(key, [a]);
+  }
+  const out = [];
+  for (const key of order) {
+    const items = byKey.get(key);
+    if (!items || items.length === 0) continue;
+    out.push(makeGroup(key, items.slice().sort(byNameZh)));
+  }
+  return out;
+}
+function groupAccounts(mode, accounts, options) {
+  const { settings, baseCurrency = "CNY" } = options;
+  switch (mode) {
+    case "type-group": {
+      const resolved = resolveTypeGroups(settings);
+      const config = new Map(resolved.map((g) => [g.id, g]));
+      return toGroups(
+        accounts,
+        (a) => settings.types.find((at) => at.type === a.type)?.groupId ?? "",
+        resolved.map((g) => g.id),
+        (key, items) => {
+          const g = config.get(key);
+          return {
+            id: key,
+            label: { kind: "type-group", id: key, stored: g?.label ?? key },
+            hasLiability: (g?.types ?? []).some((at) => accountKindOf(settings, at.type) === "liability"),
+            items
+          };
+        }
+      );
+    }
+    case "type": {
+      const labelOf = new Map(settings.types.map((t2) => [t2.type, t2.label]));
+      return toGroups(
+        accounts,
+        (a) => a.type,
+        settings.types.map((t2) => t2.type),
+        (key, items) => ({
+          id: key,
+          label: { kind: "type", type: key, stored: labelOf.get(key) ?? key },
+          // 单类型组：按该类型配置判定（含停用类型——有历史账户即成组，与停用仅影响新建选择的语义一致）
+          hasLiability: accountKindOf(settings, key) === "liability",
+          items
+        })
+      );
+    }
+    case "currency": {
+      const upper = (a) => (a.currency ?? "CNY").toUpperCase();
+      const keys = [...new Set(accounts.map(upper))].sort((x, y) => x.localeCompare(y));
+      const base = baseCurrency.toUpperCase();
+      const order = keys.includes(base) ? [base, ...keys.filter((k) => k !== base)] : keys;
+      return toGroups(accounts, upper, order, (key, items) => ({
+        id: key,
+        label: { kind: "raw", text: items[0]?.currency ?? key },
+        hasLiability: items.some((a) => accountKindOf(settings, a.type) === "liability"),
+        items
+      }));
+    }
+    case "tag": {
+      const tags = [...new Set(accounts.map((a) => a.tag).filter((x) => !!x))].sort((x, y) => x.localeCompare(y, "zh"));
+      const untagged = accounts.some((a) => !a.tag);
+      const order = untagged ? [...tags, UNTAGGED_GROUP_ID] : tags;
+      return toGroups(
+        accounts,
+        (a) => a.tag ?? UNTAGGED_GROUP_ID,
+        order,
+        (key, items) => ({
+          id: key,
+          label: key === UNTAGGED_GROUP_ID ? { kind: "i18n", key: "accountGrouping.untagged" } : { kind: "raw", text: key },
+          hasLiability: items.some((a) => accountKindOf(settings, a.type) === "liability"),
+          items
+        })
+      );
+    }
+  }
+}
+function accountGroupDisplayLabel(group, translate) {
+  const l = group.label;
+  switch (l.kind) {
+    case "type-group":
+      return displayGroupLabel(l.id, l.stored, translate);
+    case "type":
+      return displayTypeLabel(l.type, l.stored, translate);
+    case "raw":
+      return l.text;
+    case "i18n":
+      return translate(l.key);
+  }
 }
 
 // ../../packages/core/src/id.ts
@@ -2531,6 +2638,94 @@ function mergeEnsureCategories(categories, items) {
   return { next, changed };
 }
 
+// ../../packages/core/src/defaultAccount.ts
+var ACCOUNT_INFER_HALF_LIFE_DAYS = 30;
+function candidateIds(accounts) {
+  return new Set(accounts.filter((a) => a.active && a.type !== "person").map((a) => a.id));
+}
+function weightOf(ts2, nowMs) {
+  const ms = Date.parse(ts2);
+  if (Number.isNaN(ms)) return null;
+  const ageDays = Math.max(0, (nowMs - ms) / 864e5);
+  return { w: 0.5 ** (ageDays / ACCOUNT_INFER_HALF_LIFE_DAYS), ms };
+}
+function accumulate(map, key, w, ms) {
+  const cur = map.get(key);
+  if (cur) {
+    cur.weight += w;
+    if (ms > cur.lastMs) cur.lastMs = ms;
+  } else {
+    map.set(key, { weight: w, lastMs: ms });
+  }
+}
+function pickWinner(map) {
+  let bestKey;
+  let best;
+  for (const [key, s] of map) {
+    if (best === void 0 || s.weight > best.weight || s.weight === best.weight && (s.lastMs > best.lastMs || s.lastMs === best.lastMs && key < bestKey)) {
+      bestKey = key;
+      best = s;
+    }
+  }
+  return bestKey;
+}
+function inferDefaultAccount(transactions, accounts, input) {
+  const candidates = candidateIds(accounts);
+  if (candidates.size === 0) return void 0;
+  const nowMs = Date.parse(input.now ?? nowISO());
+  const map = /* @__PURE__ */ new Map();
+  for (const tx of transactions) {
+    if (tx.type !== input.type) continue;
+    const acc = tx.account;
+    if (!acc || !candidates.has(acc)) continue;
+    const r = weightOf(tx.ts, nowMs);
+    if (!r) continue;
+    accumulate(map, acc, r.w, r.ms);
+  }
+  return pickWinner(map);
+}
+function inferDefaultCategory(transactions, categories, input) {
+  const candidates = new Set(
+    categories.filter((c) => c.active !== false && c.flow === input.type).map((c) => c.name)
+  );
+  if (candidates.size === 0) return void 0;
+  const nowMs = Date.parse(input.now ?? nowISO());
+  const score = (scoped) => {
+    const map = /* @__PURE__ */ new Map();
+    for (const tx of transactions) {
+      if (tx.type !== input.type || tx.linkId) continue;
+      if (scoped && tx.account !== input.account) continue;
+      const cat = tx.category;
+      if (!cat || !candidates.has(cat)) continue;
+      const r = weightOf(tx.ts, nowMs);
+      if (!r) continue;
+      accumulate(map, cat, r.w, r.ms);
+    }
+    return map.size > 0 ? map : null;
+  };
+  const result = (input.account ? score(true) : null) ?? score(false);
+  return result ? pickWinner(result) : void 0;
+}
+function inferTransferAccounts(transactions, accounts, now) {
+  const candidates = candidateIds(accounts);
+  if (candidates.size === 0) return {};
+  const nowMs = Date.parse(now ?? nowISO());
+  const map = /* @__PURE__ */ new Map();
+  for (const tx of transactions) {
+    if (tx.type !== "transfer") continue;
+    const from2 = tx.fromAccount;
+    const to2 = tx.toAccount;
+    if (!from2 || !to2 || !candidates.has(from2) || !candidates.has(to2)) continue;
+    const r = weightOf(tx.ts, nowMs);
+    if (!r) continue;
+    accumulate(map, `${from2} ${to2}`, r.w, r.ms);
+  }
+  const best = pickWinner(map);
+  if (!best) return {};
+  const [from, to] = best.split(" ");
+  return { fromAccount: from, toAccount: to };
+}
+
 // ../../packages/core/src/accountOps.ts
 function numOr(s) {
   const t2 = s.trim();
@@ -2545,6 +2740,7 @@ function applyAccountEdits(existing, edits, now) {
     currency: existing.currency || "CNY",
     // 币种创建后不可变更：始终保留原值，忽略 edits.currency（防御极早期缺字段数据 → CNY）
     note: edits.note.trim() || void 0,
+    tag: edits.tag?.trim() || void 0,
     updatedAt: now,
     creditLimit: edits.type === "credit" ? round2(numOr(edits.creditLimit) ?? 0) : void 0,
     billingDay: edits.type === "credit" ? numOr(edits.billingDay) : void 0,
@@ -2593,6 +2789,76 @@ function planMergeAccount(input) {
 }
 function canMergeAccount(from, to) {
   return from.currency === to.currency;
+}
+
+// ../../packages/core/src/accountTagOps.ts
+function accountTagList(categories, accounts) {
+  const rows = /* @__PURE__ */ new Map();
+  for (const c of categories) {
+    if (c.flow !== "accountTag") continue;
+    rows.set(c.name, { name: c.name, id: c.id, hidden: c.active === false, usage: 0 });
+  }
+  for (const a of accounts) {
+    const tag = a.tag?.trim();
+    if (!tag) continue;
+    const row = rows.get(tag) ?? { name: tag, hidden: false, usage: 0 };
+    row.usage++;
+    rows.set(tag, row);
+  }
+  return [...rows.values()].sort((x, y) => x.name.localeCompare(y.name, "zh"));
+}
+function accountTagSuggestions(categories, accounts) {
+  return accountTagList(categories, accounts).filter((r) => !r.hidden).map((r) => r.name);
+}
+function accountTagNameExists(categories, accounts, name) {
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  return accountTagList(categories, accounts).some((r) => r.name === trimmed);
+}
+function newAccountTagCategory(categories, accounts, name) {
+  const trimmed = name.trim();
+  if (trimmed === "") throw new AppError("err.category.nameEmpty", "\u6807\u7B7E\u540D\u4E0D\u80FD\u4E3A\u7A7A");
+  if (accountTagNameExists(categories, accounts, trimmed)) {
+    throw new AppError("err.category.nameExists", "\u8BE5\u540D\u79F0\u5DF2\u5B58\u5728\uFF0C\u5982\u9700\u5408\u5E76\u8BF7\u4F7F\u7528\u5408\u5E76\u529F\u80FD");
+  }
+  return { id: newCategoryId(), name: trimmed, flow: "accountTag" };
+}
+function retagAccounts(accounts, from, to, now) {
+  let retagged = 0;
+  const nextAccounts = accounts.map((a) => {
+    if (a.tag?.trim() !== from) return a;
+    retagged++;
+    return { ...a, tag: to || void 0, updatedAt: now };
+  });
+  return { accounts: nextAccounts, retagged };
+}
+function planRenameAccountTag(input) {
+  const { accounts, categories, from, to, now } = input;
+  const fromTrimmed = from.trim();
+  const toTrimmed = to.trim();
+  if (toTrimmed === "") throw new AppError("err.category.nameEmpty", "\u6807\u7B7E\u540D\u4E0D\u80FD\u4E3A\u7A7A");
+  if (fromTrimmed === toTrimmed) return { accounts: [...accounts], categories: [...categories], retagged: 0 };
+  const row = accountTagList(categories, accounts).find((r) => r.name === fromTrimmed);
+  if (!row) throw new AppError("err.category.notFound", "\u6807\u7B7E\u4E0D\u5B58\u5728");
+  if (accountTagNameExists(categories, accounts, toTrimmed)) {
+    throw new AppError("err.category.nameExists", "\u8BE5\u540D\u79F0\u5DF2\u5B58\u5728\uFF0C\u5982\u9700\u5408\u5E76\u8BF7\u4F7F\u7528\u5408\u5E76\u529F\u80FD");
+  }
+  const { accounts: nextAccounts, retagged } = retagAccounts(accounts, fromTrimmed, toTrimmed, now);
+  const nextCategories = row.id ? categories.map((c) => c.id === row.id ? { ...c, name: toTrimmed } : c) : [...categories];
+  return { accounts: nextAccounts, categories: nextCategories, retagged };
+}
+function planMergeAccountTag(input) {
+  const { accounts, categories, from, to, now } = input;
+  const fromTrimmed = from.trim();
+  const toTrimmed = to.trim();
+  if (fromTrimmed === toTrimmed) return { accounts: [...accounts], categories: [...categories], retagged: 0 };
+  const rows = accountTagList(categories, accounts);
+  const fromRow = rows.find((r) => r.name === fromTrimmed);
+  const toRow = rows.find((r) => r.name === toTrimmed);
+  if (!fromRow || !toRow) throw new AppError("err.category.notFound", "\u6807\u7B7E\u4E0D\u5B58\u5728");
+  const { accounts: nextAccounts, retagged } = retagAccounts(accounts, fromTrimmed, toTrimmed, now);
+  const nextCategories = fromRow.id ? categories.filter((c) => c.id !== fromRow.id) : [...categories];
+  return { accounts: nextAccounts, categories: nextCategories, retagged };
 }
 
 // ../../packages/core/src/accountTypeOps.ts
@@ -2662,6 +2928,20 @@ function moveType(s, type, dir) {
   const tmp = types[a];
   types[a] = types[b];
   types[b] = tmp;
+  return { ...s, types };
+}
+function moveTypeInList(s, type, dir) {
+  const idx = s.types.findIndex((t2) => t2.type === type);
+  if (idx < 0) return s;
+  const cfg = s.types[idx];
+  const sameCohort = (t2) => t2.active !== false === (cfg.active !== false) && isSystemAccountType(t2.type) === isSystemAccountType(cfg.type);
+  let j = idx + dir;
+  while (j >= 0 && j < s.types.length && !sameCohort(s.types[j])) j += dir;
+  if (j < 0 || j >= s.types.length) return s;
+  const types = s.types.slice();
+  const tmp = types[idx];
+  types[idx] = types[j];
+  types[j] = tmp;
   return { ...s, types };
 }
 function addType(s, input) {
@@ -2912,6 +3192,9 @@ function parseLedgerPasswordMeta(raw) {
   };
 }
 
+// src/main.ts
+var import_obsidian21 = require("obsidian");
+
 // src/i18n/zh.ts
 var zh = {
   "settings.tab.general": "\u901A\u7528",
@@ -2928,7 +3211,7 @@ var zh = {
   "nav.entry": "\u8BB0\u8D26",
   "nav.list": "\u6D41\u6C34",
   "nav.accounts": "\u8D26\u6237",
-  "nav.dashboard": "\u7EDF\u8BA1",
+  "nav.dashboard": "\u62A5\u8868",
   "nav.settings": "\u8BBE\u7F6E",
   "nav.back": "\u2039 \u8FD4\u56DE",
   "keypad.done": "\u5B8C\u6210",
@@ -3017,8 +3300,8 @@ var zh = {
   "txList.monthBalanceTitle": "{{account}} \u6708\u672B\u7D2F\u8BA1\u4F59\u989D",
   "txList.balancePrefix": "\u4F59 {{amount}}",
   "txList.flatSortHint": "\u91D1\u989D\u6392\u5E8F\u65F6\u4E0D\u6309\u6708\u5206\u7EC4",
-  "txList.expandAll": "\u5C55\u5F00\u5168\u90E8",
-  "txList.collapseAll": "\u6298\u53E0\u5168\u90E8",
+  "txList.expandAll": "\u5C55\u5F00",
+  "txList.collapseAll": "\u6298\u53E0",
   "txList.loanDir.lend": "\u501F\u51FA",
   "txList.loanDir.borrow": "\u501F\u5165",
   "txList.loanDir.collect": "\u6536\u6B3E",
@@ -3120,6 +3403,8 @@ var zh = {
   "account.field.openingBalance": "\u521D\u59CB\u4F59\u989D",
   "account.field.currency": "\u5E01\u79CD",
   "account.field.note": "\u5907\u6CE8",
+  "account.field.tag": "\u6807\u7B7E",
+  "account.tagPlaceholder": "\u53EF\u9009",
   "account.field.creditLimit": "\u4FE1\u7528\u989D\u5EA6",
   "account.field.billingDay": "\u8D26\u5355\u65E5",
   "account.field.repaymentDay": "\u8FD8\u6B3E\u65E5",
@@ -3175,6 +3460,24 @@ var zh = {
   "balance.kindLiability": "\u8D1F\u503A",
   "balance.accountOptionsHint": "\u67E5\u770B\u8D26\u6237\u9009\u9879",
   "balance.adjustHint": "\u70B9\u51FB\u8C03\u6574\u4F59\u989D",
+  "balance.searchPlaceholder": "\u641C\u7D22\u8D26\u6237\u540D\u79F0",
+  "balance.ariaClearSearch": "\u6E05\u9664\u641C\u7D22",
+  "balance.noMatch": "\u6CA1\u6709\u5339\u914D\u7684\u8D26\u6237",
+  // 展开/折叠（与流水页 txList.* 同文案、桌面 accounts.* 同语义）
+  "balance.expandAll": "\u5C55\u5F00",
+  "balance.collapseAll": "\u6298\u53E0",
+  "balance.allTypes": "\u5168\u90E8\u7C7B\u578B",
+  "balance.typeFilterLabel": "\u8D26\u6237\u7C7B\u578B",
+  "balance.typeLabel": "\u7C7B\u578B",
+  // 分组方式可见短标签（一行容纳三控件；aria 仍用 modeLabel 全称）
+  "accountGrouping.modeLabelShort": "\u5206\u7EC4",
+  // 账户分组方式（与桌面 accountGrouping.* 同名对齐；type-group 为默认）
+  "accountGrouping.modeLabel": "\u5206\u7EC4\u65B9\u5F0F",
+  "accountGrouping.mode.typeGroup": "\u6309\u7C7B\u578B\u5206\u7EC4",
+  "accountGrouping.mode.type": "\u6309\u7C7B\u578B",
+  "accountGrouping.mode.currency": "\u6309\u5E01\u79CD",
+  "accountGrouping.mode.tag": "\u6309\u6807\u7B7E",
+  "accountGrouping.untagged": "\u65E0\u6807\u7B7E",
   // KR6/task1: helpDisclosure + createLedgerForm
   "help.ariaLabel": "\u67E5\u770B\u8BF4\u660E",
   "ledger.create.title": "\u65B0\u5EFA\u8D26\u672C",
@@ -3188,7 +3491,7 @@ var zh = {
   "report.range.thisYear": "\u672C\u5E74",
   "report.range.last6y": "\u8FD16\u5E74",
   "report.range.all": "\u5168\u90E8",
-  "report.emptyNoTx": "\u6682\u65E0\u6D41\u6C34\u8BB0\u5F55\uFF0C\u65E0\u6CD5\u751F\u6210\u7EDF\u8BA1\u3002",
+  "report.emptyNoTx": "\u6682\u65E0\u6D41\u6C34\u8BB0\u5F55\uFF0C\u65E0\u6CD5\u751F\u6210\u62A5\u8868\u3002",
   "report.rangeLabel": "\u65F6\u95F4\u6BB5",
   "report.incomeCategory": "\u6536\u5165\u5206\u7C7B",
   "report.expenseCategory": "\u652F\u51FA\u5206\u7C7B",
@@ -3433,6 +3736,27 @@ var zh = {
   "settings.category.mergeErrNoTarget": "\u8BF7\u9009\u62E9\u76EE\u6807\u5206\u7C7B",
   "settings.category.mergeConfirmUsed": "\u5C06\u628A {{n}} \u6761\u5386\u53F2\u4EA4\u6613\u6539\u5199\u4E3A\u300C{{target}}\u300D\u3001\u6E90\u5206\u7C7B\u300C{{from}}\u300D\u5C06\u88AB\u5220\u9664\uFF0C\u4E0D\u53EF\u64A4\u9500\uFF08\u5DF2\u81EA\u52A8\u5907\u4EFD\uFF09",
   "settings.category.mergeConfirmEmpty": "\u5C06\u5220\u9664\u6E90\u5206\u7C7B\u300C{{from}}\u300D\uFF08\u65E0\u5386\u53F2\u4EA4\u6613\u9700\u6539\u5199\uFF09\uFF0C\u4E0D\u53EF\u64A4\u9500",
+  // 账户标签管理（「分类」tab，与桌面端 accountTags.* 同口径）
+  "settings.accountTag.title": "\u8D26\u6237\u6807\u7B7E",
+  "settings.accountTag.add": "+ \u65B0\u5EFA\u6807\u7B7E",
+  "settings.accountTag.placeholder": "\u4F8B\u5982\uFF1A\u88C5\u4FEE",
+  "settings.accountTag.hiddenNote": "\u4E0D\u51FA\u73B0\u5728\u6807\u7B7E\u5EFA\u8BAE\uFF0C\u8D26\u6237\u5F15\u7528\u4E0E\u6309\u6807\u7B7E\u5206\u7EC4\u4E0D\u53D7\u5F71\u54CD",
+  "settings.accountTag.usage": "{{n}} \u4E2A\u8D26\u6237",
+  "settings.accountTag.addedNotice": "\u5DF2\u6DFB\u52A0\u6807\u7B7E\u300C{{name}}\u300D",
+  "settings.accountTag.renamedNotice": "\u5DF2\u6539\u540D\uFF0C\u66F4\u65B0 {{n}} \u4E2A\u8D26\u6237",
+  "settings.accountTag.mergedNotice": "\u5DF2\u5408\u5E76\uFF0C\u6539\u5F52 {{n}} \u4E2A\u8D26\u6237",
+  "settings.accountTag.renameTitle": "\u91CD\u547D\u540D\u6807\u7B7E",
+  "settings.accountTag.mergeTitle": "\u5408\u5E76\u6807\u7B7E",
+  "settings.accountTag.mergeIntro": "\u5C06\u300C{{name}}\u300D\u7684\u5168\u90E8\u8D26\u6237\u6539\u5F52\u76EE\u6807\u6807\u7B7E\uFF0C\u539F\u6807\u7B7E\u5C06\u88AB\u5220\u9664\uFF08\u4E0D\u53EF\u64A4\u9500\uFF09",
+  "settings.accountTag.mergeErrNoTarget": "\u8BF7\u9009\u62E9\u76EE\u6807\u6807\u7B7E",
+  "settings.accountTag.mergeConfirmUsed": "\u5C06\u628A {{n}} \u4E2A\u8D26\u6237\u4ECE\u300C{{from}}\u300D\u6539\u5F52\u300C{{target}}\u300D\u3001\u6807\u7B7E\u300C{{from}}\u300D\u5C06\u88AB\u5220\u9664\uFF0C\u4E0D\u53EF\u64A4\u9500",
+  "settings.accountTag.mergeConfirmEmpty": "\u5C06\u5220\u9664\u6807\u7B7E\u300C{{from}}\u300D\uFF08\u65E0\u8D26\u6237\u4F7F\u7528\uFF09\uFF0C\u4E0D\u53EF\u64A4\u9500",
+  "settings.accountTag.mergeAria": "\u5408\u5E76\u5230\u5176\u4ED6\u6807\u7B7E",
+  "settings.accountTag.mergeNoTargets": "\u6CA1\u6709\u5176\u4ED6\u6807\u7B7E\u53EF\u5408\u5E76",
+  "settings.accountTag.deleteAria": "\u5220\u9664\u6807\u7B7E",
+  "settings.accountTag.purgeAria": "\u5F7B\u5E95\u5220\u9664\u6807\u7B7E",
+  "settings.accountTag.deleteConfirmUsed": "\u6807\u7B7E\u300C{{name}}\u300D\u88AB {{n}} \u4E2A\u8D26\u6237\u4F7F\u7528\uFF0C\u5C06\u9690\u85CF\uFF08\u8D26\u6237\u4E0E\u5206\u7EC4\u4E0D\u53D8\uFF0C\u4EC5\u4E0D\u518D\u51FA\u73B0\u5728\u5EFA\u8BAE\u4E2D\uFF09\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F",
+  "settings.accountTag.purgeConfirm": "\u5F7B\u5E95\u5220\u9664\u6807\u7B7E\u300C{{name}}\u300D\uFF1F\u672A\u88AB\u4EFB\u4F55\u8D26\u6237\u4F7F\u7528\u3002",
   // KR7/task4: settings — 账户类型管理（卡片/分组/停用区/footer + RegroupTypeModal）
   "settings.accountType.title": "\u8D26\u6237\u7C7B\u578B\u5206\u7EC4",
   "settings.accountType.resetBtn": "\u6062\u590D\u9ED8\u8BA4",
@@ -3598,9 +3922,9 @@ var en = {
   "common.confirm": "Confirm",
   "common.cancel": "Cancel",
   "nav.entry": "Entry",
-  "nav.list": "Transactions",
+  "nav.list": "Historys",
   "nav.accounts": "Accounts",
-  "nav.dashboard": "Stats",
+  "nav.dashboard": "Reports",
   "nav.settings": "Settings",
   "nav.back": "\u2039 Back",
   "keypad.done": "Done",
@@ -3622,10 +3946,10 @@ var en = {
   "entry.field.amount": "Amount",
   "entry.field.account": "Account",
   "entry.field.category": "Category",
-  "entry.field.fromAccount": "From account",
-  "entry.field.toAccount": "To account",
+  "entry.field.fromAccount": "From",
+  "entry.field.toAccount": "To",
   "entry.field.direction": "Direction",
-  "entry.field.selfAccount": "My account",
+  "entry.field.selfAccount": "Mine",
   "entry.field.note": "Note",
   "txDetail.title": "Transaction details",
   "txDetail.type": "Type",
@@ -3633,7 +3957,7 @@ var en = {
   "txDetail.converted": "In {{base}}",
   "txDetail.toAmount": "Received",
   "txDetail.impliedRate": "Implied rate",
-  "txDetail.counterparty": "Counterparty",
+  "txDetail.counterparty": "Party",
   "txDetail.balanceSuffix": " (balance {{balance}})",
   "txDetail.settlementEditBlock": "Collect/repay (settlement) transactions can only be edited on desktop; not yet supported on mobile.",
   "txDetail.settlementCopyBlock": "Collect/repay (settlement) transactions can only be duplicated on desktop; not yet supported on mobile.",
@@ -3689,8 +4013,8 @@ var en = {
   "txList.monthBalanceTitle": "{{account}} month-end balance",
   "txList.balancePrefix": "Bal {{amount}}",
   "txList.flatSortHint": "Not grouped by month when sorted by amount",
-  "txList.expandAll": "Expand all",
-  "txList.collapseAll": "Collapse all",
+  "txList.expandAll": "Expand",
+  "txList.collapseAll": "Collapse",
   "txList.loanDir.lend": "Lend",
   "txList.loanDir.borrow": "Borrow",
   "txList.loanDir.collect": "Collect",
@@ -3730,7 +4054,7 @@ var en = {
   "entry.weekday.fri": "Fri",
   "entry.weekday.sat": "Sat",
   "entry.add": "Add",
-  "entry.newPerson": "New counterparty",
+  "entry.newPerson": "New party",
   "entry.personNamePlaceholder": "Name",
   "entry.notePlaceholder": "Optional \u2014 paste SMS/text to auto-extract amount",
   "entry.receivable": "receivable",
@@ -3792,6 +4116,8 @@ var en = {
   "account.field.openingBalance": "Opening balance",
   "account.field.currency": "Currency",
   "account.field.note": "Note",
+  "account.field.tag": "Tag",
+  "account.tagPlaceholder": "optional",
   "account.field.creditLimit": "Credit limit",
   "account.field.billingDay": "Billing day",
   "account.field.repaymentDay": "Repayment day",
@@ -3847,6 +4173,24 @@ var en = {
   "balance.kindLiability": "Liabilities",
   "balance.accountOptionsHint": "View account options",
   "balance.adjustHint": "Tap to adjust balance",
+  "balance.searchPlaceholder": "Search account name",
+  "balance.ariaClearSearch": "Clear search",
+  "balance.noMatch": "No matching accounts",
+  // Expand/collapse all (same wording as txList.*, same semantics as desktop accounts.*)
+  "balance.expandAll": "Expand",
+  "balance.collapseAll": "Collapse",
+  "balance.allTypes": "All types",
+  "balance.typeFilterLabel": "Account type",
+  "balance.typeLabel": "Type",
+  // Short visible label for grouping (aria keeps the full modeLabel)
+  "accountGrouping.modeLabelShort": "Group",
+  // Account grouping modes (key names mirror desktop accountGrouping.*; type-group is the default)
+  "accountGrouping.modeLabel": "Group by",
+  "accountGrouping.mode.typeGroup": "Type group",
+  "accountGrouping.mode.type": "Type",
+  "accountGrouping.mode.currency": "Currency",
+  "accountGrouping.mode.tag": "Tag",
+  "accountGrouping.untagged": "Untagged",
   // KR6/task1: helpDisclosure + createLedgerForm
   "help.ariaLabel": "View explanation",
   "ledger.create.title": "New ledger",
@@ -4105,6 +4449,27 @@ var en = {
   "settings.category.mergeErrNoTarget": "Please select a target category",
   "settings.category.mergeConfirmUsed": 'Rewrite {{n}} historical txn(s) to "{{target}}"; source category "{{from}}" will be deleted. Irreversible (auto-backed up).',
   "settings.category.mergeConfirmEmpty": 'Delete source category "{{from}}" (no historical transactions to rewrite). Irreversible.',
+  // Account tag management ("Categories" tab, aligned with desktop accountTags.*)
+  "settings.accountTag.title": "Account tags",
+  "settings.accountTag.add": "+ New tag",
+  "settings.accountTag.placeholder": "e.g. Renovation",
+  "settings.accountTag.hiddenNote": "Not suggested for tagging; account references and tag grouping are unaffected",
+  "settings.accountTag.usage": "{{n}} accounts",
+  "settings.accountTag.addedNotice": 'Added tag "{{name}}"',
+  "settings.accountTag.renamedNotice": "Renamed, updated {{n}} accounts",
+  "settings.accountTag.mergedNotice": "Merged, moved {{n}} accounts",
+  "settings.accountTag.renameTitle": "Rename tag",
+  "settings.accountTag.mergeTitle": "Merge tag",
+  "settings.accountTag.mergeIntro": 'Move all accounts tagged "{{name}}" to the target tag; the source tag will be deleted (irreversible)',
+  "settings.accountTag.mergeErrNoTarget": "Please select a target tag",
+  "settings.accountTag.mergeConfirmUsed": 'Move {{n}} account(s) from "{{from}}" to "{{target}}"; tag "{{from}}" will be deleted. Irreversible.',
+  "settings.accountTag.mergeConfirmEmpty": 'Delete tag "{{from}}" (not used by any account). Irreversible.',
+  "settings.accountTag.mergeAria": "Merge into another tag",
+  "settings.accountTag.mergeNoTargets": "No other tags to merge into",
+  "settings.accountTag.deleteAria": "Delete tag",
+  "settings.accountTag.purgeAria": "Permanently delete tag",
+  "settings.accountTag.deleteConfirmUsed": 'Tag "{{name}}" is used by {{n}} account(s). Hide it? (accounts and grouping unchanged; it just stops appearing in suggestions)',
+  "settings.accountTag.purgeConfirm": 'Permanently delete tag "{{name}}"? It is not used by any account.',
   // KR7/task4: settings — account-type management (card/group/disabled-area/footer + RegroupTypeModal)
   "settings.accountType.title": "Account type groups",
   "settings.accountType.resetBtn": "Reset to default",
@@ -4339,6 +4704,72 @@ function settlementLabels() {
     fee: t("settle.cat.fee"),
     writeoffNotePrefix: t("settle.writeoffNotePrefix")
   };
+}
+
+// src/accountGrouping.ts
+var byName = (a, b) => a.name.localeCompare(b.name, "zh");
+var currentMode = DEFAULT_ACCOUNT_GROUPING_MODE;
+var persistMode = null;
+function resolveAccountGroupingMode(raw) {
+  return isAccountGroupingMode(raw) ? raw : DEFAULT_ACCOUNT_GROUPING_MODE;
+}
+function initAccountGroupingMode(mode, persist) {
+  currentMode = mode;
+  persistMode = persist;
+}
+function accountGroupingMode() {
+  return currentMode;
+}
+async function setAccountGroupingMode(mode) {
+  currentMode = mode;
+  await persistMode?.(mode);
+}
+function displayTypeLabel2(type, storedLabel) {
+  return displayTypeLabel(type, storedLabel, (key) => t(key));
+}
+function displayGroupLabel2(id, storedLabel) {
+  return displayGroupLabel(id, storedLabel, (key) => t(key));
+}
+function displayAccountGroupLabel(group) {
+  return accountGroupDisplayLabel(group, (key) => t(key));
+}
+function groupAccountsOf(mode, accounts, settings, baseCurrency) {
+  return groupAccounts(mode, accounts, { settings, baseCurrency });
+}
+function renderTagChips(host, accounts, target, max = 8, extraTags) {
+  const tags = [.../* @__PURE__ */ new Set([
+    ...extraTags ?? [],
+    ...accounts.map((a) => a.tag).filter((x) => !!x)
+  ])].sort((x, y) => x.localeCompare(y, "zh"));
+  if (tags.length === 0) return null;
+  const chips = host.createDiv({ cls: "accounting-tag-chips" });
+  for (const tag of tags.slice(0, max)) {
+    const btn = chips.createEl("button", { type: "button", text: tag, cls: "accounting-tag-chip" });
+    btn.onclick = () => {
+      target.value = tag;
+    };
+  }
+  return chips;
+}
+function fillAccountOptions(sel, accounts, value, includeHidden, settings, typeFilter) {
+  const typeToGroup = new Map(settings.types.map((at) => [at.type, at.groupId]));
+  const pool = accounts.filter((a) => typeFilter ? a.type === typeFilter : true);
+  const active = pool.filter((a) => a.active).sort(byName);
+  const hidden = includeHidden ? pool.filter((a) => !a.active).sort(byName) : [];
+  const selectedAcc = value ? pool.find((a) => a.id === value) : void 0;
+  if (selectedAcc && !selectedAcc.active && !includeHidden) {
+    hidden.push(selectedAcc);
+  }
+  const groups = resolveTypeGroups(settings).map((g) => ({ label: displayGroupLabel2(g.id, g.label), items: active.filter((a) => typeToGroup.get(a.type) === g.id) })).filter((g) => g.items.length > 0);
+  if (hidden.length > 0) groups.push({ label: t("account.hiddenGroup"), items: hidden });
+  for (const g of groups) {
+    const og = sel.createEl("optgroup", { attr: { label: g.label } });
+    for (const a of g.items) {
+      const o = og.createEl("option", { text: a.name });
+      o.value = a.id;
+      if (a.id === value) o.selected = true;
+    }
+  }
 }
 
 // src/logger.ts
@@ -4938,330 +5369,311 @@ var ObsidianDataAdapter = class _ObsidianDataAdapter {
   }
 };
 
-// src/accountGrouping.ts
-var byName = (a, b) => a.name.localeCompare(b.name, "zh");
-function displayTypeLabel2(type, storedLabel) {
-  return displayTypeLabel(type, storedLabel, (key) => t(key));
+// src/diagLogModal.ts
+var import_obsidian = require("obsidian");
+var LEVELS = ["ALL", "ERROR", "WARN", "INFO", "DEBUG"];
+var TONE = {
+  ERROR: "var(--color-red)",
+  WARN: "var(--color-orange)",
+  INFO: "var(--color-blue)",
+  DEBUG: "var(--text-faint)"
+};
+function lineLevel(line) {
+  return line.split(/\s+/)[1] ?? null;
 }
-function displayGroupLabel2(id, storedLabel) {
-  return displayGroupLabel(id, storedLabel, (key) => t(key));
-}
-function fillAccountOptions(sel, accounts, value, includeHidden, settings, typeFilter) {
-  const typeToGroup = new Map(settings.types.map((at) => [at.type, at.groupId]));
-  const pool = accounts.filter((a) => typeFilter ? a.type === typeFilter : true);
-  const active = pool.filter((a) => a.active).sort(byName);
-  const hidden = includeHidden ? pool.filter((a) => !a.active).sort(byName) : [];
-  const selectedAcc = value ? pool.find((a) => a.id === value) : void 0;
-  if (selectedAcc && !selectedAcc.active && !includeHidden) {
-    hidden.push(selectedAcc);
+var DiagLogModal = class extends import_obsidian.Modal {
+  level = "ALL";
+  keyword = "";
+  listEl;
+  constructor(app) {
+    super(app);
   }
-  const groups = resolveTypeGroups(settings).map((g) => ({ label: displayGroupLabel2(g.id, g.label), items: active.filter((a) => typeToGroup.get(a.type) === g.id) })).filter((g) => g.items.length > 0);
-  if (hidden.length > 0) groups.push({ label: t("account.hiddenGroup"), items: hidden });
-  for (const g of groups) {
-    const og = sel.createEl("optgroup", { attr: { label: g.label } });
-    for (const a of g.items) {
-      const o = og.createEl("option", { text: a.name });
-      o.value = a.id;
-      if (a.id === value) o.selected = true;
+  async onOpen() {
+    this.modalEl.addClass("accounting-sub-modal");
+    if (!import_obsidian.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h2", { text: t("diaglog.title") }).addClass("accounting-modal-title");
+    const toolbar = contentEl.createDiv({ cls: "accounting-diaglog-toolbar" });
+    const seg = toolbar.createDiv({ cls: "accounting-diaglog-seg" });
+    for (const l of LEVELS) {
+      const b = seg.createEl("button", { text: l === "ALL" ? t("diaglog.all") : l, cls: "accounting-diaglog-seg-btn" });
+      b.onclick = () => {
+        this.level = l;
+        this.updateSegActive(seg);
+        void this.render();
+      };
     }
+    this.updateSegActive(seg);
+    const search = toolbar.createEl("input", { cls: "accounting-search-input accounting-diaglog-search" });
+    search.placeholder = t("diaglog.search");
+    search.oninput = () => {
+      this.keyword = search.value;
+      void this.render();
+    };
+    const refresh = toolbar.createEl("button", { text: t("diaglog.refresh"), cls: "accounting-btn accounting-btn-secondary" });
+    refresh.onclick = () => void this.render();
+    const exportBtn = toolbar.createEl("button", { text: t("diaglog.export"), cls: "accounting-btn accounting-btn-secondary" });
+    exportBtn.onclick = async () => {
+      try {
+        const path = await exportPluginLog();
+        new import_obsidian.Notice(`${t("diaglog.exportDone")}: ${path}`);
+      } catch {
+        new import_obsidian.Notice(t("diaglog.exportFail"));
+      }
+    };
+    this.listEl = contentEl.createDiv({ cls: "accounting-diaglog-list" });
+    await this.render();
+    const closeWrap = contentEl.createDiv({ cls: "accounting-modal-close" });
+    const closeBtn = closeWrap.createEl("button", { text: t("common.close"), cls: "accounting-btn-secondary" });
+    closeBtn.onclick = () => this.close();
   }
-}
-
-// src/currencyPicker.ts
-function createCurrencyPicker(parent, opts) {
-  const wrap = parent.createDiv({ cls: "accounting-currency-picker" });
-  const input = wrap.createEl("input", { cls: "accounting-ledger-input accounting-currency-picker-input" });
-  input.type = "text";
-  input.placeholder = opts.placeholder ?? t("settings.currency.searchPlaceholder");
-  input.value = opts.value ? `${currencyDisplayName(opts.value, getLocale())} ${opts.value}` : "";
-  input.setAttribute("autocomplete", "off");
-  const dropdown = createDiv({ cls: "accounting-currency-picker-dropdown" });
-  document.body.appendChild(dropdown);
-  dropdown.style.display = "none";
-  const excludeSet = new Set((opts.exclude ?? []).map((c) => c.toUpperCase()));
-  const currentUpper = (opts.value ?? "").toUpperCase();
-  let open = false;
-  let flat = [];
-  let hi = 0;
-  function sections(text) {
-    const term = text.trim();
-    if (term) {
-      const items = filterCurrencies(term, getLocale()).filter((c) => !excludeSet.has(c.code));
-      return [{ label: t("settings.currency.searchResults", { n: items.length }), items }];
-    }
-    return orderedCurrencyCatalog(getLocale()).map((g) => ({ label: t(g.labelKey, { count: g.count }), items: g.items.filter((c) => !excludeSet.has(c.code)) })).filter((g) => g.items.length > 0);
+  onClose() {
+    this.contentEl.empty();
   }
-  function paint() {
-    dropdown.querySelectorAll("[data-idx]").forEach((el) => {
-      const he = el;
-      he.classList.toggle("is-active", Number(he.dataset.idx) === hi);
+  updateSegActive(seg) {
+    seg.querySelectorAll("button").forEach((b, i) => {
+      b.classList.toggle("is-active", LEVELS[i] === this.level);
     });
-    const active = dropdown.querySelector(`[data-idx="${hi}"]`);
-    active?.scrollIntoView({ block: "nearest" });
   }
-  function render() {
-    dropdown.empty();
-    const gs = sections(input.value);
-    flat = gs.flatMap((g) => g.items);
-    if (flat.length === 0) {
-      dropdown.createEl("div", { text: t("settings.currency.noMatch"), cls: "accounting-currency-picker-empty" });
+  async render() {
+    const text = await readPluginLogText();
+    const kw = this.keyword.trim().toLowerCase();
+    const lines = text.split("\n").filter((l) => {
+      if (!l.trim()) return false;
+      if (this.level !== "ALL" && lineLevel(l) !== this.level) return false;
+      if (kw && !l.toLowerCase().includes(kw)) return false;
+      return true;
+    });
+    this.listEl.empty();
+    if (lines.length === 0) {
+      this.listEl.createEl("div", { text: t("diaglog.empty"), cls: "accounting-diaglog-empty" });
       return;
     }
-    for (const g of gs) {
-      dropdown.createEl("div", { text: g.label, cls: "accounting-currency-picker-group" });
-      for (const c of g.items) {
-        const idx = flat.indexOf(c);
-        const item = dropdown.createDiv({ cls: "accounting-currency-picker-item" });
-        item.dataset.idx = String(idx);
-        item.createEl("span", { text: c.name, cls: "accounting-currency-picker-cn" });
-        item.createEl("span", { text: c.code, cls: "accounting-currency-picker-code" });
-        if (c.code === currentUpper) item.createEl("span", { text: "\u2713", cls: "accounting-currency-picker-check" });
-        item.addEventListener("mousedown", (e) => {
-          e.preventDefault();
-          pick(c.code);
-        });
-        item.addEventListener("mouseenter", () => {
-          hi = idx;
-          paint();
-        });
-      }
+    for (const ln of lines) {
+      const lv = lineLevel(ln);
+      const color = lv && TONE[lv] || "inherit";
+      const div = this.listEl.createDiv({ text: ln, cls: "accounting-diaglog-line" });
+      div.style.color = color;
     }
-    paint();
   }
-  function position() {
-    const r = input.getBoundingClientRect();
-    dropdown.style.left = `${r.left}px`;
-    dropdown.style.top = `${r.bottom + 4}px`;
-    dropdown.style.width = `${r.width}px`;
-  }
-  const displayValue = () => opts.value ? `${currencyDisplayName(opts.value, getLocale())} ${opts.value}` : "";
-  function openPanel() {
-    if (open) return;
-    open = true;
-    hi = 0;
-    input.value = "";
-    render();
-    position();
-    dropdown.style.display = "block";
-  }
-  function close() {
-    if (!open) return;
-    open = false;
-    dropdown.style.display = "none";
-    input.value = displayValue();
-  }
-  function pick(code) {
-    input.value = `${currencyDisplayName(code, getLocale())} ${code}`;
-    close();
-    opts.onPick(code);
-  }
-  input.addEventListener("focus", openPanel);
-  input.addEventListener("input", () => {
-    if (!open) openPanel();
-    else {
-      render();
-      position();
-    }
-    hi = 0;
-    paint();
-  });
-  input.addEventListener("keydown", (e) => {
-    if (!open) {
-      if (e.key === "ArrowDown" || e.key === "Enter") {
-        e.preventDefault();
-        openPanel();
-      }
-      return;
-    }
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      hi = Math.min(hi + 1, flat.length - 1);
-      paint();
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      hi = Math.max(hi - 1, 0);
-      paint();
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      const c = flat[hi];
-      if (c) pick(c.code);
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      close();
-      opts.onDismiss?.();
-    }
-  });
-  const onFollow = () => {
-    if (!input.isConnected) {
-      destroy();
-      return;
-    }
-    if (open) position();
-  };
-  const onDoc = (e) => {
-    if (!input.isConnected) {
-      destroy();
-      return;
-    }
-    const node = e.target;
-    if (!wrap.contains(node) && !dropdown.contains(node)) {
-      close();
-      opts.onDismiss?.();
-    }
-  };
-  document.addEventListener("mousedown", onDoc);
-  window.addEventListener("scroll", onFollow, true);
-  window.addEventListener("resize", onFollow);
-  function destroy() {
-    document.removeEventListener("mousedown", onDoc);
-    window.removeEventListener("scroll", onFollow, true);
-    window.removeEventListener("resize", onFollow);
-    dropdown.remove();
-    wrap.remove();
-  }
-  return { input, destroy };
-}
+};
 
-// src/helpDisclosure.ts
-var activeHeaderHelp = null;
-var headerHelpIdSeq = 0;
-function closeHeaderHelp() {
-  if (!activeHeaderHelp) return;
-  activeHeaderHelp.detail.hidden = true;
-  activeHeaderHelp.btn.classList.remove("is-open");
-  activeHeaderHelp.btn.setAttribute("aria-expanded", "false");
-  activeHeaderHelp = null;
-  document.removeEventListener("click", closeHeaderHelp);
-}
-function appendHeaderHelp(parent, opts) {
-  const wrap = parent.createDiv({ cls: `accounting-header-help${opts.cls ? " " + opts.cls : ""}` });
-  const btn = wrap.createEl("button", { text: "?", cls: "accounting-help-tip-btn accounting-header-help-btn" });
-  btn.type = "button";
-  btn.setAttribute("aria-label", opts.ariaLabel ?? t("help.ariaLabel"));
-  btn.setAttribute("aria-expanded", "false");
-  const detailId = `accounting-header-help-${++headerHelpIdSeq}`;
-  const detail = wrap.createEl("div", { text: opts.detail, cls: "accounting-header-help-detail" });
-  detail.id = detailId;
-  detail.hidden = true;
-  btn.setAttribute("aria-controls", detailId);
-  wrap.addEventListener("click", (event) => {
-    event.stopPropagation();
-  });
-  btn.onclick = (event) => {
-    event.stopPropagation();
-    if (activeHeaderHelp?.wrap === wrap) {
-      closeHeaderHelp();
-      return;
-    }
-    closeHeaderHelp();
-    detail.hidden = false;
-    btn.classList.add("is-open");
-    btn.setAttribute("aria-expanded", "true");
-    activeHeaderHelp = { wrap, btn, detail };
-    document.addEventListener("click", closeHeaderHelp);
-  };
-  return wrap;
-}
-
-// src/createLedgerForm.ts
-function renderCreateLedgerForm(container, existing, handlers, opts = {}) {
-  container.empty();
-  container.createEl("h2", { text: opts.title ?? t("ledger.create.title") });
-  const nameInput = container.createEl("input", { type: "text", cls: "accounting-ledger-input" });
-  nameInput.placeholder = t("ledger.create.namePlaceholder");
-  nameInput.autofocus = true;
-  const aliasInput = container.createEl("input", { type: "text", cls: "accounting-ledger-input" });
-  aliasInput.placeholder = t("ledger.create.aliasPlaceholder");
-  container.createEl("div", { text: t("settings.currency.baseLabel"), cls: "accounting-ledger-card-title" });
-  const baseHolder = container.createDiv();
-  const defaultBase = getLocale().toLowerCase().startsWith("zh") ? "CNY" : "USD";
-  let baseCurrency = defaultBase;
-  const basePicker = createCurrencyPicker(baseHolder, {
-    value: defaultBase,
-    onPick: (code) => {
-      baseCurrency = code;
-    }
-  });
-  const errorEl = container.createEl("div", { cls: "accounting-ledger-error" });
-  const actions = container.createDiv("accounting-modal-actions");
-  const cancelBtn = actions.createEl("button", { text: opts.cancelText ?? t("common.cancel"), cls: "accounting-btn-secondary" });
-  cancelBtn.onclick = () => {
-    basePicker.destroy();
-    handlers.onCancel();
-  };
-  const submitBtn = actions.createEl("button", { text: opts.submitText ?? t("ledger.create.submitBtn"), cls: "accounting-btn-primary" });
-  submitBtn.disabled = true;
-  const update = () => {
-    const err = validateLedgerName(nameInput.value, existing);
-    errorEl.setText(err ? t(err) : "");
-    submitBtn.disabled = err !== null || !nameInput.value.trim();
-  };
-  nameInput.oninput = update;
-  submitBtn.onclick = async () => {
-    const name = nameInput.value.trim();
-    const alias = aliasInput.value.trim();
-    const ok2 = await handlers.onSubmit(name, alias, baseCurrency);
-    if (ok2) {
-      basePicker.destroy();
-    } else {
-      update();
-    }
-  };
-  update();
-  setTimeout(() => nameInput.focus(), 0);
-}
-
-// src/settings.ts
-var import_obsidian19 = require("obsidian");
-
-// src/transactionListModal.ts
-var import_obsidian8 = require("obsidian");
-
-// src/batchModifyModal.ts
+// src/ledgerHeader.ts
 var import_obsidian2 = require("obsidian");
-
-// src/dateField.ts
-function formatDateFieldLabel(value, kind, placeholder) {
-  if (!value) return placeholder ?? "";
-  const locale = getLocale();
-  if (kind === "date") return formatDateDisplay(value, locale);
-  const date = value.slice(0, 10);
-  const time = value.slice(11, 16);
-  return time ? `${formatDateDisplay(date, locale)} ${time}` : formatDateDisplay(date, locale);
-}
-function createDateField(opts) {
-  const wrap = document.createElement("div");
-  wrap.addClass("accounting-datefield");
-  if (opts.cls) {
-    for (const c of opts.cls.split(/\s+/).filter(Boolean)) wrap.addClass(c);
+var LedgerSwitchModal = class extends import_obsidian2.Modal {
+  constructor(app, current, ledgers, onPick) {
+    super(app);
+    this.current = current;
+    this.ledgers = ledgers;
+    this.onPick = onPick;
   }
-  const input = document.createElement("input");
-  input.addClass("accounting-datefield-native");
-  input.type = opts.kind;
-  input.value = opts.value;
-  wrap.appendChild(input);
-  const label = wrap.createSpan({ cls: "accounting-datefield-label" });
-  const render = () => {
-    label.textContent = formatDateFieldLabel(input.value, opts.kind, opts.placeholder);
-  };
-  render();
-  input.addEventListener("change", () => {
-    render();
-    opts.onChange(input.value);
-  });
-  input.addEventListener("input", render);
-  input.addEventListener("click", () => {
-    const el = input;
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.modalEl.addClass("accounting-ledger-switch-modal");
+    this.modalEl.addClass("accounting-sub-modal");
+    contentEl.createEl("h2", { text: t("entry.switchLedger") });
+    if (this.ledgers.length === 0) {
+      contentEl.createEl("p", { text: t("entry.switchLedgerEmpty"), cls: "accounting-ledger-empty" });
+      const emptyCloseWrap = contentEl.createDiv({ cls: "accounting-modal-close" });
+      const emptyClose = emptyCloseWrap.createEl("button", { text: t("common.close"), cls: "accounting-btn-secondary" });
+      emptyClose.onclick = () => this.close();
+      return;
+    }
+    const card = contentEl.createDiv({ cls: "accounting-ledger-card" });
+    if (!this.ledgers.some((l) => l.name === this.current)) {
+      card.createEl("p", { text: t("entry.switchLedgerNoneCurrent"), cls: "accounting-ledger-empty" });
+    }
+    const list = card.createDiv({ cls: "accounting-ledger-list" });
+    for (const { name, alias } of this.ledgers) {
+      const isCurrent = name === this.current;
+      const item = list.createDiv({ cls: "accounting-ledger-item" });
+      if (isCurrent) {
+        item.classList.add("accounting-ledger-current");
+      } else {
+        item.classList.add("accounting-ledger-pickable");
+      }
+      const info = item.createDiv({ cls: "accounting-ledger-info" });
+      info.createEl("div", { text: alias, cls: "accounting-ledger-name" });
+      info.createEl("div", { text: ObsidianDataAdapter.formatLedgerName(name), cls: "accounting-ledger-folder" });
+      if (isCurrent) {
+        item.createEl("span", { text: t("entry.switchLedgerCurrent"), cls: "accounting-ledger-badge" });
+      } else {
+        item.createEl("span", { text: "\u203A", cls: "accounting-ledger-chevron" });
+        item.onclick = () => {
+          this.close();
+          this.onPick(name);
+        };
+      }
+    }
+    const closeWrap = contentEl.createDiv({ cls: "accounting-modal-close" });
+    const closeBtn = closeWrap.createEl("button", { text: t("common.close"), cls: "accounting-btn-secondary" });
+    closeBtn.onclick = () => this.close();
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+function mountLedgerPill(modalEl, app, adapter, alias, onPick) {
+  const pill = modalEl.createDiv({ cls: "accounting-entry-ledger accounting-entry-ledger-clickable" });
+  pill.createEl("span", { cls: "accounting-entry-ledger-name", text: alias });
+  pill.createEl("span", { cls: "accounting-entry-ledger-caret", text: "\u25BE" });
+  pill.onclick = async () => {
     try {
-      el.showPicker?.();
+      const names = await adapter.listLedgers();
+      const ledgers = await Promise.all(
+        names.map(async (name) => ({ name, alias: await adapter.readLedgerAlias(name) }))
+      );
+      new LedgerSwitchModal(app, adapter.activeLedger, ledgers, onPick).open();
     } catch {
     }
-  });
-  return wrap;
+  };
+  return pill;
 }
 
+// src/ledgerPasswordModal.ts
+var import_obsidian3 = require("obsidian");
+var LedgerPasswordModal = class extends import_obsidian3.Modal {
+  constructor(app, props, onSubmit, onCancel) {
+    super(app);
+    this.props = props;
+    this.onSubmit = onSubmit;
+    this.onCancel = onCancel;
+  }
+  errorEl;
+  bodyEl;
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.modalEl.addClass("accounting-sub-modal");
+    if (!import_obsidian3.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    const title = this.props.mode === "unlock" ? t("settings.password.unlockTitle", { name: this.props.alias }) : this.props.mode === "set" ? t("settings.password.setTitle") : this.props.mode === "change" ? t("settings.password.changeTitle") : t("settings.password.removeTitle");
+    contentEl.createEl("h2", { text: title });
+    if (this.props.mode === "unlock") {
+      contentEl.createEl("p", { text: t("settings.password.unlockHint"), cls: "accounting-ledger-empty" });
+    } else if (this.props.mode === "set") {
+      contentEl.createEl("p", { text: t("settings.password.setHint"), cls: "accounting-ledger-empty" });
+    } else if (this.props.mode === "change") {
+      contentEl.createEl("p", { text: t("settings.password.changeHint", { name: this.props.alias }), cls: "accounting-ledger-empty" });
+    } else {
+      contentEl.createEl("p", { text: t("settings.password.removeHint", { name: this.props.alias }), cls: "accounting-ledger-empty" });
+    }
+    this.bodyEl = contentEl.createDiv();
+    this.renderBody();
+    this.errorEl = contentEl.createDiv({ cls: "accounting-ledger-empty" });
+    this.errorEl.style.color = "var(--text-error)";
+    this.errorEl.style.display = "none";
+    const actions = contentEl.createDiv("accounting-modal-actions");
+    const cancelBtn = actions.createEl("button", { text: t("common.cancel"), cls: "accounting-btn-secondary" });
+    cancelBtn.onclick = () => {
+      this.onCancel();
+      this.close();
+    };
+    const isRemove = this.props.mode === "remove";
+    const submitText = this.props.mode === "unlock" ? t("settings.password.unlock") : isRemove ? t("settings.password.removeBtn") : t("common.confirm");
+    const submitBtn = actions.createEl("button", {
+      text: submitText,
+      cls: isRemove ? "accounting-btn-danger" : "accounting-btn-primary"
+    });
+    submitBtn.onclick = async () => {
+      await this.handleSubmit(submitBtn);
+    };
+    setTimeout(() => this.firstInput()?.focus(), 0);
+  }
+  firstInput() {
+    return this.bodyEl.querySelector("input");
+  }
+  renderBody() {
+    this.bodyEl.empty();
+    if (this.props.mode === "change" || this.props.mode === "remove") {
+      this.makeInput("old", t("settings.password.oldPlaceholder"), "password");
+    }
+    if (this.props.mode !== "remove") {
+      this.makeInput("new", t("settings.password.newPlaceholder"), "password");
+    }
+    if (this.props.mode === "set" || this.props.mode === "change") {
+      this.makeInput("confirm", t("settings.password.confirmPlaceholder"), "password");
+    }
+  }
+  makeInput(key, placeholder, type) {
+    const input = this.bodyEl.createEl("input", { type, cls: "accounting-ledger-input" });
+    input.placeholder = placeholder;
+    input.dataset["field"] = key;
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        const submit = this.contentEl.querySelector(".accounting-btn-primary, .accounting-btn-danger");
+        submit?.click();
+      }
+    });
+    return input;
+  }
+  readField(key) {
+    const el = this.bodyEl.querySelector(`input[data-field="${key}"]`);
+    return el ? el.value : "";
+  }
+  showError(msg) {
+    this.errorEl.textContent = msg;
+    this.errorEl.style.display = "block";
+  }
+  async handleSubmit(submitBtn) {
+    const mode = this.props.mode;
+    const newPwd = this.readField("new");
+    if (mode === "set") {
+      if (newPwd.trim().length === 0) {
+        this.showError(t("settings.password.empty"));
+        return;
+      }
+      const confirm2 = this.readField("confirm");
+      if (newPwd !== confirm2) {
+        this.showError(t("settings.password.mismatch"));
+        return;
+      }
+    } else if (mode === "change") {
+      const confirm2 = this.readField("confirm");
+      if (newPwd !== confirm2) {
+        this.showError(t("settings.password.mismatch"));
+        return;
+      }
+    } else if (mode === "unlock" && newPwd.length === 0) {
+      this.showError(t("settings.password.empty"));
+      return;
+    } else if (mode === "remove" && this.readField("old").length === 0) {
+      this.showError(t("settings.password.empty"));
+      return;
+    }
+    const old = this.readField("old");
+    submitBtn.disabled = true;
+    const prevText = submitBtn.textContent;
+    submitBtn.textContent = t("settings.password.verifying");
+    try {
+      const err = await this.onSubmit({ old: old || void 0, new: newPwd });
+      if (err) {
+        this.showError(err);
+      } else {
+        this.close();
+      }
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = prevText;
+    }
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+
+// src/balanceModal.ts
+var import_obsidian11 = require("obsidian");
+
+// src/accountActionModal.ts
+var import_obsidian7 = require("obsidian");
+
+// src/accountPropertiesModal.ts
+var import_obsidian5 = require("obsidian");
+
 // src/keyboardAvoidance.ts
-var import_obsidian = require("obsidian");
+var import_obsidian4 = require("obsidian");
 function bindKeyboardAvoidance(options) {
   const { rootEl, modalEl, mode } = options;
   const targetBottomRatio = options.targetBottomRatio ?? 0.45;
@@ -5276,7 +5688,7 @@ function bindKeyboardAvoidance(options) {
       modalEl.style.position = "";
     }
   };
-  const isSmallScreen = () => import_obsidian.Platform.isMobile || window.innerWidth < 768;
+  const isSmallScreen = () => import_obsidian4.Platform.isMobile || window.innerWidth < 768;
   const isSoftKeyboardTarget = (el) => {
     if (el.tagName === "TEXTAREA") return true;
     return el.tagName === "INPUT" && el.type === "text";
@@ -5332,327 +5744,215 @@ function bindKeyboardAvoidance(options) {
   };
 }
 
-// src/batchModifyModal.ts
-var TYPES = [
-  { key: "expense", i18nKey: "tx.type.expense" },
-  { key: "income", i18nKey: "tx.type.income" },
-  { key: "transfer", i18nKey: "tx.type.transfer" },
-  { key: "loan", i18nKey: "tx.type.loan" }
-];
-var BatchModifyModal = class extends import_obsidian2.Modal {
-  constructor(app, adapter, transactions, baseUpdatedAtById, accounts, categories, accountTypeSettings, onDone) {
+// src/accountPropertiesModal.ts
+var AccountPropertiesModal = class extends import_obsidian5.Modal {
+  constructor(app, adapter, account, accounts, categories, accountTypeSettings, onSaved) {
     super(app);
     this.adapter = adapter;
-    this.transactions = transactions;
-    this.baseUpdatedAtById = baseUpdatedAtById;
+    this.account = account;
     this.accounts = accounts;
     this.categories = categories;
     this.accountTypeSettings = accountTypeSettings;
-    this.onDone = onDone;
-    this.originalType = this.transactions[0]?.type ?? "expense";
-    this.state = {
-      type: this.originalType,
-      amount: "",
-      account: "",
-      category: "",
-      fromAccount: "",
-      toAccount: "",
-      person: "",
-      direction: "",
-      ts: "",
-      note: ""
-    };
+    this.onSaved = onSaved;
   }
-  state;
-  errorEl = null;
-  fieldContainer = null;
-  originalType;
-  submitting = false;
+  nameEl;
+  typeEl;
+  openingEl;
+  currencyEl;
+  noteEl;
+  tagEl;
+  tagChipsEl;
+  creditLimitEl;
+  billingDayEl;
+  repaymentEl;
+  creditBlockEl;
+  footerEl;
+  editing = false;
+  rates = {};
+  baseCurrency = "CNY";
   keyboardAvoidance;
-  keyboardBound = false;
-  onOpen() {
+  async onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    try {
+      this.rates = await this.adapter.readRates();
+      this.baseCurrency = await this.adapter.readBaseCurrency();
+    } catch {
+    }
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian2.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
-    const { contentEl } = this;
-    contentEl.empty();
-    contentEl.addClass("accounting-modal");
-    this.renderView();
-  }
-  renderView() {
-    const { contentEl } = this;
-    contentEl.empty();
-    contentEl.createEl("h2", { text: t("batch.title", { n: this.transactions.length }) });
-    const hint = contentEl.createDiv({ cls: "accounting-batch-hint" });
-    hint.createEl("div", { text: t("batch.hint") });
-    const typeChanged = this.state.type !== this.originalType;
-    if (typeChanged) {
-      hint.createEl("div", {
-        text: t("batch.typeChangedWarn"),
-        cls: "accounting-batch-warn"
-      });
-    }
-    this.renderTypePills(contentEl);
-    this.fieldContainer = contentEl.createDiv({ cls: "accounting-batch-fields" });
-    this.renderFields();
-    this.errorEl = contentEl.createDiv({ cls: "accounting-error" });
-    this.errorEl.style.display = "none";
-    this.bindKeyboardAvoidance();
-    const footer = contentEl.createDiv({ cls: "accounting-batch-footer" });
-    const submitBtn = footer.createEl("button", {
-      text: t("batch.submitBtn", { n: this.transactions.length }),
-      cls: "accounting-btn-primary"
+    if (!import_obsidian5.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    contentEl.addClass("accounting-adjust-modal");
+    contentEl.createEl("div", { text: t("account.properties.title", { name: this.account.name }), cls: "accounting-adjust-title" });
+    const nameRow = this.row(t("account.field.name"));
+    this.nameEl = this.input(nameRow, "text");
+    const typeRow = this.row(t("account.field.type"));
+    this.typeEl = this.select(typeRow);
+    this.typeEl.onchange = () => this.toggleCredit();
+    const openRow = this.row(t("account.field.openingBalance"));
+    this.openingEl = this.input(openRow, "number", "0.01");
+    const curRow = this.row(t("account.field.currencyLocked"));
+    this.currencyEl = this.currencySelect(curRow);
+    this.currencyEl.title = t("account.field.currencyLockedHint");
+    const noteRow = this.row(t("account.field.note"));
+    this.noteEl = this.input(noteRow, "text");
+    const tagRow = this.row(t("account.field.tag"));
+    this.tagEl = this.input(tagRow, "text");
+    this.tagEl.placeholder = t("account.tagPlaceholder");
+    this.tagChipsEl = renderTagChips(tagRow, this.accounts, this.tagEl, 8, accountTagSuggestions(this.categories, this.accounts)) ?? tagRow.createDiv();
+    this.tagChipsEl.style.display = "none";
+    this.creditBlockEl = contentEl.createDiv({ cls: "accounting-credit-block" });
+    const clRow = this.row(t("account.field.creditLimit"), this.creditBlockEl);
+    this.creditLimitEl = this.input(clRow, "number", "0.01");
+    const bdRow = this.row(t("account.field.billingDay"), this.creditBlockEl);
+    this.billingDayEl = this.input(bdRow, "number");
+    this.billingDayEl.min = "1";
+    this.billingDayEl.max = "31";
+    this.billingDayEl.placeholder = "1-31";
+    const rdRow = this.row(t("account.field.repaymentDay"), this.creditBlockEl);
+    this.repaymentEl = this.input(rdRow, "number");
+    this.repaymentEl.min = "1";
+    this.repaymentEl.max = "31";
+    this.repaymentEl.placeholder = "1-31";
+    contentEl.createEl("div", {
+      text: t("account.properties.timestamps", { created: fmtTime(this.account.createdAt), modified: fmtTime(this.account.updatedAt) }),
+      cls: "accounting-adjust-current"
     });
-    submitBtn.onclick = () => this.submit();
-    const cancelBtn = footer.createEl("button", { text: t("common.cancel"), cls: "accounting-btn-secondary" });
-    cancelBtn.onclick = () => this.close();
-  }
-  renderTypePills(container) {
-    const row = container.createDiv({ cls: "accounting-type-pills" });
-    for (const tp of TYPES) {
-      const active = this.state.type === tp.key;
-      const pill = row.createEl("button", {
-        text: t(tp.i18nKey),
-        cls: `accounting-type-pill${active ? " accounting-type-pill-active" : ""}`
-      });
-      pill.onclick = () => {
-        this.state.type = tp.key;
-        this.renderView();
-      };
-    }
-  }
-  renderFields() {
-    const fc = this.fieldContainer;
-    if (!fc) return;
-    fc.empty();
-    const s = this.state;
-    const typeChanged = s.type !== this.originalType;
-    const keepHint = typeChanged ? t("account.selectPlaceholder") : t("batch.keepHint");
-    this.addField(fc, t("entry.amount"), (wrap) => {
-      const input = wrap.createEl("input", {
-        type: "text",
-        value: s.amount,
-        cls: "accounting-input",
-        attr: { placeholder: t("batch.keepHint"), inputmode: "decimal" }
-      });
-      input.oninput = () => {
-        s.amount = input.value;
-      };
-    });
-    if (s.type === "expense" || s.type === "income") {
-      const cats = this.categories.filter((c) => c.flow === (s.type === "expense" ? "expense" : "income")).slice().sort((a, b) => a.name.localeCompare(b.name, "zh"));
-      this.addField(fc, t("entry.field.account"), (wrap) => {
-        const sel = wrap.createEl("select", { cls: "accounting-input" });
-        sel.createEl("option", { text: keepHint }).value = "";
-        fillAccountOptions(sel, this.accounts, s.account, false, this.accountTypeSettings);
-        sel.onchange = () => {
-          s.account = sel.value;
-        };
-      });
-      this.addField(fc, t("entry.field.category"), (wrap) => {
-        const sel = wrap.createEl("select", { cls: "accounting-input" });
-        sel.createEl("option", { text: keepHint }).value = "";
-        for (const c of cats) {
-          const o = sel.createEl("option", { text: c.name });
-          o.value = c.name;
-          if (c.name === s.category) o.selected = true;
-        }
-        sel.onchange = () => {
-          s.category = sel.value;
-        };
-      });
-    } else if (s.type === "transfer") {
-      this.addField(fc, t("entry.field.fromAccount"), (wrap) => {
-        const sel = wrap.createEl("select", { cls: "accounting-input" });
-        sel.createEl("option", { text: keepHint }).value = "";
-        fillAccountOptions(sel, this.accounts, s.fromAccount, false, this.accountTypeSettings);
-        sel.onchange = () => {
-          s.fromAccount = sel.value;
-        };
-      });
-      this.addField(fc, t("entry.field.toAccount"), (wrap) => {
-        const sel = wrap.createEl("select", { cls: "accounting-input" });
-        sel.createEl("option", { text: keepHint }).value = "";
-        fillAccountOptions(sel, this.accounts, s.toAccount, false, this.accountTypeSettings);
-        sel.onchange = () => {
-          s.toAccount = sel.value;
-        };
-      });
-    } else if (s.type === "loan") {
-      this.addField(fc, t("entry.field.direction"), (wrap) => {
-        const sel = wrap.createEl("select", { cls: "accounting-input" });
-        sel.createEl("option", { text: keepHint }).value = "";
-        const lend = sel.createEl("option", { text: t("entry.direction.lend") });
-        lend.value = "lend";
-        const borrow = sel.createEl("option", { text: t("entry.direction.borrow") });
-        borrow.value = "borrow";
-        if (s.direction === "lend") lend.selected = true;
-        if (s.direction === "borrow") borrow.selected = true;
-        sel.onchange = () => {
-          s.direction = sel.value;
-        };
-      });
-      this.addField(fc, t("entry.field.selfAccount"), (wrap) => {
-        const sel = wrap.createEl("select", { cls: "accounting-input" });
-        sel.createEl("option", { text: keepHint }).value = "";
-        fillAccountOptions(sel, this.accounts, s.account, false, this.accountTypeSettings);
-        sel.onchange = () => {
-          s.account = sel.value;
-        };
-      });
-      this.addField(fc, t("batch.field.personAccount"), (wrap) => {
-        const sel = wrap.createEl("select", { cls: "accounting-input" });
-        sel.createEl("option", { text: keepHint }).value = "";
-        for (const a of this.accounts.filter((a2) => a2.type === "person" && a2.active).slice().sort((a2, b) => a2.name.localeCompare(b.name, "zh"))) {
-          const o = sel.createEl("option", { text: a.name });
-          o.value = a.id;
-          if (a.id === s.person) o.selected = true;
-        }
-        sel.onchange = () => {
-          s.person = sel.value;
-        };
-      });
-    }
-    this.addField(fc, t("entry.field.ts"), (wrap) => {
-      wrap.appendChild(createDateField({
-        kind: "datetime-local",
-        value: s.ts,
-        cls: "accounting-input",
-        onChange: (iso) => {
-          s.ts = iso;
-        }
-      }));
-    });
-    this.addField(fc, t("entry.field.note"), (wrap) => {
-      const ta = wrap.createEl("textarea", { cls: "accounting-input" });
-      ta.value = s.note;
-      ta.setAttr("rows", "2");
-      ta.oninput = () => {
-        s.note = ta.value;
-      };
-    });
-  }
-  addField(container, label, renderControl) {
-    const wrap = container.createDiv({ cls: "accounting-batch-field" });
-    wrap.createEl("div", { text: label, cls: "accounting-batch-field-label" });
-    renderControl(wrap);
-  }
-  showError(msg) {
-    if (!this.errorEl) return;
-    this.errorEl.setText(msg);
-    this.errorEl.style.display = "";
-  }
-  buildPatch() {
-    const s = this.state;
-    const patch = {};
-    const typeChanged = s.type !== this.originalType;
-    if (typeChanged) patch.type = s.type;
-    if (s.amount.trim() !== "") {
-      const amt = evaluateAmount(s.amount);
-      if (!amt.ok || amt.value <= 0) {
-        this.showError(t("batch.err.amount"));
-        return null;
+    this.footerEl = contentEl.createDiv({ cls: "accounting-adjust-footer" });
+    this.refillFrom(this.account);
+    this.setEditable(false);
+    this.renderFooter();
+    contentEl.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        if (this.editing) this.cancelEdit();
+        else this.close();
       }
-      patch.amount = round2(amt.value);
+    });
+    this.keyboardAvoidance = bindKeyboardAvoidance({
+      rootEl: contentEl,
+      modalEl: this.modalEl,
+      mode: "top"
+    });
+  }
+  row(label, parent) {
+    const host = parent ?? this.contentEl;
+    const r = host.createDiv({ cls: "accounting-adjust-row" });
+    r.createEl("label", { text: label, cls: "accounting-adjust-label" });
+    return r;
+  }
+  input(parent, type, step) {
+    const el = parent.createEl("input", { cls: "accounting-adjust-input" });
+    el.type = type;
+    if (step) el.step = step;
+    if (type === "number") el.inputMode = "decimal";
+    return el;
+  }
+  select(parent) {
+    const el = parent.createEl("select", { cls: "accounting-adjust-input" });
+    for (const at of this.accountTypeSettings.types) {
+      el.createEl("option", { text: displayTypeLabel2(at.type, at.label), value: at.type });
     }
-    if (s.account) patch.account = s.account;
-    if (s.category) patch.category = s.category;
-    if (s.fromAccount) patch.fromAccount = s.fromAccount;
-    if (s.toAccount) patch.toAccount = s.toAccount;
-    if (s.person) patch.person = s.person;
-    if (s.direction) patch.direction = s.direction;
-    if (s.ts) {
-      const iso = datetimeLocalToISOStrict(s.ts);
-      if (!iso) {
-        this.showError(t("batch.err.tsFormat"));
-        return null;
-      }
-      patch.ts = iso;
+    return el;
+  }
+  currencySelect(parent) {
+    const el = parent.createEl("select", { cls: "accounting-adjust-input" });
+    const currencies = currencyOptions(this.rates, this.accounts, this.baseCurrency);
+    for (const c of currencies) {
+      el.createEl("option", { text: c, value: c });
     }
-    if (s.note.trim() !== "") patch.note = s.note.trim();
-    if (Object.keys(patch).length === 0) {
-      this.showError(t("batch.err.empty"));
-      return null;
+    return el;
+  }
+  toggleCredit() {
+    this.creditBlockEl.style.display = this.typeEl.value === "credit" ? "" : "none";
+  }
+  /** 用指定账户的值重填所有字段（初始填充 / 取消恢复 / 保存后刷新查看态） */
+  refillFrom(a) {
+    this.nameEl.value = a.name;
+    for (const opt of Array.from(this.typeEl.options)) {
+      opt.selected = opt.value === a.type;
     }
-    if (typeChanged) {
-      if (s.type === "expense" || s.type === "income") {
-        if (!s.account) {
-          this.showError(t("batch.err.tcAccount"));
-          return null;
-        }
-        if (!s.category) {
-          this.showError(t("batch.err.tcCategory"));
-          return null;
-        }
-      } else if (s.type === "transfer") {
-        if (!s.fromAccount) {
-          this.showError(t("batch.err.tcFromAccount"));
-          return null;
-        }
-        if (!s.toAccount) {
-          this.showError(t("batch.err.tcToAccount"));
-          return null;
-        }
-        if (s.fromAccount === s.toAccount) {
-          this.showError(t("entry.err.sameAccount"));
-          return null;
-        }
-      } else if (s.type === "loan") {
-        if (!s.account) {
-          this.showError(t("batch.err.tcSelfAccount"));
-          return null;
-        }
-        if (!s.person) {
-          this.showError(t("batch.err.tcPerson"));
-          return null;
-        }
-        if (!s.direction) {
-          this.showError(t("batch.err.tcDirection"));
-          return null;
-        }
-      }
+    this.openingEl.value = String(a.openingBalance);
+    for (const opt of Array.from(this.currencyEl.options)) {
+      opt.selected = opt.value === (a.currency || "CNY");
     }
-    return patch;
+    this.noteEl.value = a.note ?? "";
+    this.tagEl.value = a.tag ?? "";
+    this.creditLimitEl.value = a.creditLimit != null ? String(a.creditLimit) : "";
+    this.billingDayEl.value = a.billingDay != null ? String(a.billingDay) : "";
+    this.repaymentEl.value = a.repaymentDay != null ? String(a.repaymentDay) : "";
+    this.toggleCredit();
+  }
+  /** 切换查看/编辑态：禁用或启用所有字段（币种除外——创建后不可变更，始终只读）；标签 chips 仅编辑态显示 */
+  setEditable(editable) {
+    this.editing = editable;
+    const els = [
+      this.nameEl,
+      this.typeEl,
+      this.openingEl,
+      this.noteEl,
+      this.tagEl,
+      this.creditLimitEl,
+      this.billingDayEl,
+      this.repaymentEl
+    ];
+    for (const el of els) el.disabled = !editable;
+    this.currencyEl.disabled = true;
+    this.tagChipsEl.style.display = editable ? "" : "none";
+  }
+  /** 按当前态重渲染底部按钮：查看态=「关闭 / 编辑」，编辑态=「取消 / 保存」 */
+  renderFooter() {
+    this.footerEl.empty();
+    if (this.editing) {
+      const cancel = this.footerEl.createEl("button", { text: t("common.cancel"), cls: "accounting-btn-secondary" });
+      cancel.onclick = () => this.cancelEdit();
+      const save = this.footerEl.createEl("button", { text: t("common.save"), cls: "accounting-btn-primary" });
+      save.onclick = () => void this.submit();
+    } else {
+      const close = this.footerEl.createEl("button", { text: t("common.close"), cls: "accounting-btn-secondary" });
+      close.onclick = () => this.close();
+      const edit = this.footerEl.createEl("button", { text: t("common.edit"), cls: "accounting-btn-primary" });
+      edit.onclick = () => this.enterEdit();
+    }
+  }
+  enterEdit() {
+    this.setEditable(true);
+    this.renderFooter();
+    this.nameEl.focus();
+    this.nameEl.select();
+  }
+  /** 取消编辑：恢复字段为账户当前值，回查看态 */
+  cancelEdit() {
+    this.refillFrom(this.account);
+    this.setEditable(false);
+    this.renderFooter();
+    this.keyboardAvoidance?.reset();
   }
   async submit() {
-    if (this.submitting) return;
-    const patch = this.buildPatch();
-    if (!patch) return;
-    this.submitting = true;
+    const edits = {
+      name: this.nameEl.value,
+      type: this.typeEl.value,
+      openingBalance: this.openingEl.value,
+      currency: this.currencyEl.value || "CNY",
+      note: this.noteEl.value,
+      tag: this.tagEl.value,
+      creditLimit: this.creditLimitEl.value,
+      billingDay: this.billingDayEl.value,
+      repaymentDay: this.repaymentEl.value
+    };
+    const updated = applyAccountEdits(this.account, edits, nowISO());
     try {
-      await this.adapter.backup("pre-batch-modify");
-      const fresh = await this.adapter.loadLog();
-      const latestUpdatedAt = latestUpdatedAtById(fresh);
-      for (const tx of this.transactions) {
-        const current = latestUpdatedAt.get(tx.id);
-        const base = this.baseUpdatedAtById.get(tx.id) ?? "";
-        if (hasUpdatedSince(current, base)) {
-          new import_obsidian2.Notice(t("txList.concurrencyConflict"));
-          this.onDone();
-          this.close();
-          return;
-        }
-      }
-      const folded = foldEvents(fresh);
-      const ids = this.transactions.map((tx) => tx.id);
-      const { events } = buildBatchUpsertEvents({
-        folded,
-        ids,
-        patch,
-        latestUpdatedAtById: latestUpdatedAt,
-        now: nowISO()
+      await this.adapter.writeMeta({
+        accounts: this.accounts.map((a) => a.id === this.account.id ? updated : a),
+        categories: this.categories
       });
-      if (events.length > 0) {
-        await this.adapter.appendEvents(events);
-      }
-      new import_obsidian2.Notice(t("batch.updatedN", { n: events.length }));
-      this.onDone();
-      this.close();
-    } catch (e) {
-      const msg = t("batch.failed", { msg: formatError(e) });
-      this.showError(msg);
-      new import_obsidian2.Notice(msg);
-    } finally {
-      this.submitting = false;
+      new import_obsidian5.Notice(t("account.properties.savedNotif"));
+      this.account = updated;
+      this.onSaved();
+      this.refillFrom(this.account);
+      this.setEditable(false);
+      this.renderFooter();
+      this.keyboardAvoidance?.reset();
+    } catch (err) {
+      new import_obsidian5.Notice(t("entry.saveFailed", { msg: formatError(err) }));
     }
   }
   onClose() {
@@ -5660,19 +5960,676 @@ var BatchModifyModal = class extends import_obsidian2.Modal {
     this.keyboardAvoidance = void 0;
     this.contentEl.empty();
   }
-  bindKeyboardAvoidance() {
-    if (this.keyboardBound) return;
-    this.keyboardBound = true;
+};
+function fmtTime(iso) {
+  if (!iso) return "\u2014";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (x) => String(x).padStart(2, "0");
+  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// src/accountMergeModal.ts
+var import_obsidian6 = require("obsidian");
+var AccountMergeModal = class extends import_obsidian6.Modal {
+  constructor(app, adapter, source, allAccounts, onDone) {
+    super(app);
+    this.adapter = adapter;
+    this.source = source;
+    this.allAccounts = allAccounts;
+    this.onDone = onDone;
+  }
+  targetSelect;
+  errorEl;
+  submitting = false;
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.modalEl.addClass("accounting-sub-modal");
+    if (!import_obsidian6.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    contentEl.createEl("h2", { text: t("account.merge.title") });
+    contentEl.createEl("div", {
+      text: t("account.merge.intro", { name: this.source.name }),
+      cls: "accounting-ledger-folder"
+    });
+    contentEl.createEl("div", {
+      text: t("account.merge.currencyHint", { cur: this.source.currency }),
+      cls: "accounting-ledger-folder"
+    });
+    const targets = this.allAccounts.filter((a) => a.id !== this.source.id && canMergeAccount(this.source, a));
+    this.targetSelect = contentEl.createEl("select", { cls: "accounting-ledger-input" });
+    this.targetSelect.createEl("option", { value: "", text: t("account.merge.targetPlaceholder") });
+    for (const tgt of targets) {
+      this.targetSelect.createEl("option", {
+        value: tgt.id,
+        text: tgt.active === false ? t("account.merge.targetHidden", { name: tgt.name }) : tgt.name
+      });
+    }
+    this.errorEl = contentEl.createEl("div", { cls: "accounting-ledger-error" });
+    const actions = contentEl.createDiv("accounting-modal-actions");
+    const cancelBtn = actions.createEl("button", { text: t("common.cancel"), cls: "accounting-btn-secondary" });
+    cancelBtn.onclick = () => this.close();
+    const submitBtn = actions.createEl("button", { text: t("account.merge.confirmBtn"), cls: "accounting-btn-primary" });
+    submitBtn.onclick = () => void this.submit();
+    setTimeout(() => this.targetSelect.focus(), 0);
+  }
+  async submit() {
+    if (this.submitting) return;
+    const toId = this.targetSelect.value;
+    if (!toId) {
+      this.errorEl.setText(t("account.merge.errNoTarget"));
+      return;
+    }
+    const target = this.allAccounts.find((a) => a.id === toId);
+    const targetName = target?.name ?? toId;
+    if (!confirm(
+      t("account.merge.confirmMsg", { source: this.source.name, target: targetName })
+    )) {
+      return;
+    }
+    this.submitting = true;
+    try {
+      const events = await this.adapter.loadLog();
+      const meta = await this.adapter.readMeta();
+      const plan = planMergeAccount({
+        events,
+        accounts: meta.accounts,
+        fromId: this.source.id,
+        toId,
+        now: nowISO()
+      });
+      if (plan.events.length > 0) {
+        await this.adapter.backup("pre-merge");
+        await this.adapter.appendEvents(plan.events);
+      }
+      await this.adapter.writeMeta({ accounts: plan.accounts, categories: meta.categories });
+      const parts = [t("account.merge.resultRewritten", { n: plan.rewritten })];
+      if (plan.deleted > 0) parts.push(t("account.merge.resultDeleted", { n: plan.deleted }));
+      parts.push(t("account.merge.resultMerged", { source: this.source.name, target: targetName }));
+      new import_obsidian6.Notice(parts.join(t("account.merge.resultSep")));
+      this.close();
+      this.onDone();
+    } catch (err) {
+      this.submitting = false;
+      console.error("\u5408\u5E76\u8D26\u6237\u5931\u8D25:", err);
+      this.errorEl.setText(t("account.merge.failed", { msg: formatError(err) }));
+    }
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+
+// src/accountActionModal.ts
+var AccountActionModal = class extends import_obsidian7.Modal {
+  constructor(app, adapter, account, accounts, categories, accountTypeSettings, navCtx, onSaved) {
+    super(app);
+    this.adapter = adapter;
+    this.account = account;
+    this.accounts = accounts;
+    this.categories = categories;
+    this.accountTypeSettings = accountTypeSettings;
+    this.navCtx = navCtx;
+    this.onSaved = onSaved;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.modalEl.addClass("accounting-sub-modal");
+    if (!import_obsidian7.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    contentEl.createEl("div", { text: this.account.name, cls: "accounting-action-title" });
+    const list = contentEl.createDiv({ cls: "accounting-action-list" });
+    const txItem = list.createEl("button", { cls: "accounting-action-item" });
+    txItem.createEl("span", { text: t("account.action.viewTx"), cls: "accounting-action-item-text" });
+    txItem.title = t("account.action.viewTxHint");
+    txItem.onclick = () => {
+      this.close();
+      this.navCtx.openList(this.account.id, void 0, true, void 0, this.onSaved);
+    };
+    const propItem = list.createEl("button", { cls: "accounting-action-item" });
+    propItem.createEl("span", { text: t("account.action.viewProps"), cls: "accounting-action-item-text" });
+    propItem.title = t("account.action.viewPropsHint");
+    propItem.onclick = () => {
+      this.close();
+      new AccountPropertiesModal(
+        this.app,
+        this.adapter,
+        this.account,
+        this.accounts,
+        this.categories,
+        this.accountTypeSettings,
+        this.onSaved
+      ).open();
+    };
+    const toggleActiveItem = list.createEl("button", { cls: "accounting-action-item" });
+    const nextActive = !this.account.active;
+    toggleActiveItem.createEl("span", { text: nextActive ? t("account.action.enable") : t("account.action.hide"), cls: "accounting-action-item-text" });
+    toggleActiveItem.title = nextActive ? t("account.action.enableHint") : t("account.action.hideHint");
+    toggleActiveItem.onclick = () => {
+      void this.toggleAccountActive(nextActive);
+    };
+    if (this.accounts.filter((a) => a.id !== this.account.id).length > 0) {
+      const mergeItem = list.createEl("button", { cls: "accounting-action-item" });
+      mergeItem.createEl("span", { text: t("account.action.merge"), cls: "accounting-action-item-text" });
+      mergeItem.title = t("account.action.mergeHint");
+      mergeItem.onclick = () => {
+        this.close();
+        new AccountMergeModal(this.app, this.adapter, this.account, this.accounts, this.onSaved).open();
+      };
+    }
+    const closeWrap = contentEl.createDiv({ cls: "accounting-modal-close" });
+    const closeBtn = closeWrap.createEl("button", { text: t("common.close"), cls: "accounting-btn-secondary" });
+    closeBtn.onclick = () => this.close();
+  }
+  async toggleAccountActive(active) {
+    try {
+      const meta = await this.adapter.readMeta();
+      const target = meta.accounts.find((a) => a.id === this.account.id);
+      if (!target) {
+        new import_obsidian7.Notice(t("account.action.notFound"));
+        this.close();
+        this.onSaved();
+        return;
+      }
+      await this.adapter.writeMeta({
+        accounts: meta.accounts.map((a) => a.id === this.account.id ? { ...a, active } : a),
+        categories: meta.categories
+      });
+      new import_obsidian7.Notice(active ? t("account.action.enabledNotif", { name: target.name }) : t("account.action.hiddenNotif", { name: target.name }));
+      this.close();
+      this.onSaved();
+    } catch (err) {
+      new import_obsidian7.Notice(t("account.action.updateFailed", { msg: formatError(err) }));
+    }
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+
+// src/accountCreateModal.ts
+var import_obsidian8 = require("obsidian");
+var AccountCreateModal = class extends import_obsidian8.Modal {
+  constructor(app, adapter, accounts, categories, accountTypeSettings, onSaved) {
+    super(app);
+    this.adapter = adapter;
+    this.accounts = accounts;
+    this.categories = categories;
+    this.accountTypeSettings = accountTypeSettings;
+    this.onSaved = onSaved;
+  }
+  nameEl;
+  typeEl;
+  openingEl;
+  currencyEl;
+  noteEl;
+  tagEl;
+  creditLimitEl;
+  billingDayEl;
+  repaymentEl;
+  creditBlockEl;
+  footerEl;
+  rates = {};
+  baseCurrency = "CNY";
+  keyboardAvoidance;
+  async onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    try {
+      this.rates = await this.adapter.readRates();
+      this.baseCurrency = await this.adapter.readBaseCurrency();
+    } catch {
+    }
+    this.modalEl.addClass("accounting-sub-modal");
+    if (!import_obsidian8.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    contentEl.addClass("accounting-adjust-modal");
+    contentEl.createEl("div", { text: t("account.create.title"), cls: "accounting-adjust-title" });
+    const nameRow = this.row(t("account.field.name"));
+    this.nameEl = this.input(nameRow, "text");
+    const typeRow = this.row(t("account.field.type"));
+    this.typeEl = this.select(typeRow);
+    this.typeEl.onchange = () => this.toggleCredit();
+    const openRow = this.row(t("account.field.openingBalance"));
+    this.openingEl = this.input(openRow, "number", "0.01");
+    const curRow = this.row(t("account.field.currency"));
+    this.currencyEl = this.currencySelect(curRow);
+    const noteRow = this.row(t("account.field.note"));
+    this.noteEl = this.input(noteRow, "text");
+    const tagRow = this.row(t("account.field.tag"));
+    this.tagEl = this.input(tagRow, "text");
+    this.tagEl.placeholder = t("account.tagPlaceholder");
+    renderTagChips(tagRow, this.accounts, this.tagEl, 8, accountTagSuggestions(this.categories, this.accounts));
+    this.creditBlockEl = contentEl.createDiv({ cls: "accounting-credit-block" });
+    const clRow = this.row(t("account.field.creditLimit"), this.creditBlockEl);
+    this.creditLimitEl = this.input(clRow, "number", "0.01");
+    const bdRow = this.row(t("account.field.billingDay"), this.creditBlockEl);
+    this.billingDayEl = this.input(bdRow, "number");
+    this.billingDayEl.min = "1";
+    this.billingDayEl.max = "31";
+    this.billingDayEl.placeholder = "1-31";
+    const rdRow = this.row(t("account.field.repaymentDay"), this.creditBlockEl);
+    this.repaymentEl = this.input(rdRow, "number");
+    this.repaymentEl.min = "1";
+    this.repaymentEl.max = "31";
+    this.repaymentEl.placeholder = "1-31";
+    this.footerEl = contentEl.createDiv({ cls: "accounting-adjust-footer" });
+    this.initializeDefaults();
+    this.renderFooter();
+    contentEl.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        this.close();
+      }
+    });
     this.keyboardAvoidance = bindKeyboardAvoidance({
-      rootEl: this.contentEl,
+      rootEl: contentEl,
       modalEl: this.modalEl,
       mode: "top"
     });
   }
+  row(label, parent) {
+    const host = parent ?? this.contentEl;
+    const r = host.createDiv({ cls: "accounting-adjust-row" });
+    r.createEl("label", { text: label, cls: "accounting-adjust-label" });
+    return r;
+  }
+  input(parent, type, step) {
+    const el = parent.createEl("input", { cls: "accounting-adjust-input" });
+    el.type = type;
+    if (step) el.step = step;
+    if (type === "number") el.inputMode = "decimal";
+    return el;
+  }
+  select(parent) {
+    const el = parent.createEl("select", { cls: "accounting-adjust-input" });
+    for (const at of this.accountTypeSettings.types) {
+      el.createEl("option", { text: displayTypeLabel2(at.type, at.label), value: at.type });
+    }
+    return el;
+  }
+  currencySelect(parent) {
+    const el = parent.createEl("select", { cls: "accounting-adjust-input" });
+    const currencies = currencyOptions(this.rates, this.accounts, this.baseCurrency);
+    for (const c of currencies) {
+      el.createEl("option", { text: c, value: c });
+    }
+    return el;
+  }
+  toggleCredit() {
+    this.creditBlockEl.style.display = this.typeEl.value === "credit" ? "" : "none";
+  }
+  /** 初始化默认值：币种按界面语言（中文→CNY，其他→USD，偏好不在可选集时回落本位币），类型=第一个启用类型，其他为空 */
+  initializeDefaults() {
+    const pref = getLocale().toLowerCase().startsWith("zh") ? "CNY" : "USD";
+    const opts = Array.from(this.currencyEl.options).map((o) => o.value);
+    const defaultCur = opts.includes(pref) ? pref : this.baseCurrency;
+    for (const opt of Array.from(this.currencyEl.options)) {
+      opt.selected = opt.value === defaultCur;
+    }
+    const firstEnabled = this.accountTypeSettings.types.find((at) => at.active !== false);
+    if (firstEnabled) {
+      for (const opt of Array.from(this.typeEl.options)) {
+        opt.selected = opt.value === firstEnabled.type;
+      }
+    }
+    this.openingEl.value = "0";
+    this.toggleCredit();
+    this.nameEl.addEventListener("input", () => this.updateSaveButton());
+    this.updateSaveButton();
+  }
+  /** 更新保存按钮状态（名称为空时禁用） */
+  updateSaveButton() {
+    const saveBtn = this.footerEl?.querySelector(".accounting-btn-primary");
+    if (saveBtn) {
+      saveBtn.disabled = !this.nameEl.value.trim();
+    }
+  }
+  /** 渲染底部按钮：取消 / 保存 */
+  renderFooter() {
+    this.footerEl.empty();
+    const cancel = this.footerEl.createEl("button", { text: t("common.cancel"), cls: "accounting-btn-secondary" });
+    cancel.onclick = () => this.close();
+    const save = this.footerEl.createEl("button", { text: t("common.save"), cls: "accounting-btn-primary" });
+    save.disabled = true;
+    save.onclick = () => void this.submit();
+  }
+  async submit() {
+    const name = this.nameEl.value.trim();
+    const type = this.typeEl.value;
+    const openingBalance = this.openingEl.value;
+    const currency = this.currencyEl.value || "CNY";
+    const note = this.noteEl.value;
+    const tag = this.tagEl.value.trim() || void 0;
+    const creditLimit = this.creditLimitEl.value;
+    const billingDay = this.billingDayEl.value;
+    const repaymentDay = this.repaymentEl.value;
+    if (billingDay && (parseInt(billingDay) < 1 || parseInt(billingDay) > 31)) {
+      new import_obsidian8.Notice(t("account.err.billingDayRange"));
+      return;
+    }
+    if (repaymentDay && (parseInt(repaymentDay) < 1 || parseInt(repaymentDay) > 31)) {
+      new import_obsidian8.Notice(t("account.err.repaymentDayRange"));
+      return;
+    }
+    const id = crypto.randomUUID();
+    const now = nowISO();
+    const newAccount = {
+      id,
+      name,
+      type,
+      openingBalance: parseFloat(openingBalance) || 0,
+      currency,
+      note: note || void 0,
+      tag,
+      creditLimit: type === "credit" ? parseFloat(creditLimit) || void 0 : void 0,
+      billingDay: type === "credit" ? parseInt(billingDay) || void 0 : void 0,
+      repaymentDay: type === "credit" ? parseInt(repaymentDay) || void 0 : void 0,
+      active: true,
+      createdAt: now,
+      updatedAt: now
+    };
+    try {
+      await this.adapter.writeMeta({
+        accounts: [...this.accounts, newAccount],
+        categories: this.categories
+      });
+      new import_obsidian8.Notice(t("account.createdNotif", { name }));
+      this.onSaved();
+      this.close();
+    } catch (err) {
+      new import_obsidian8.Notice(t("account.createFailed", { msg: formatError(err) }));
+    }
+  }
+  onClose() {
+    this.keyboardAvoidance?.dispose();
+    this.keyboardAvoidance = void 0;
+    this.contentEl.empty();
+  }
+};
+
+// src/adjustBalanceModal.ts
+var import_obsidian9 = require("obsidian");
+
+// src/helpDisclosure.ts
+var activeHeaderHelp = null;
+var headerHelpIdSeq = 0;
+function closeHeaderHelp() {
+  if (!activeHeaderHelp) return;
+  activeHeaderHelp.detail.hidden = true;
+  activeHeaderHelp.btn.classList.remove("is-open");
+  activeHeaderHelp.btn.setAttribute("aria-expanded", "false");
+  activeHeaderHelp = null;
+  document.removeEventListener("click", closeHeaderHelp);
+}
+function appendHeaderHelp(parent, opts) {
+  const wrap = parent.createDiv({ cls: `accounting-header-help${opts.cls ? " " + opts.cls : ""}` });
+  const btn = wrap.createEl("button", { text: "?", cls: "accounting-help-tip-btn accounting-header-help-btn" });
+  btn.type = "button";
+  btn.setAttribute("aria-label", opts.ariaLabel ?? t("help.ariaLabel"));
+  btn.setAttribute("aria-expanded", "false");
+  const detailId = `accounting-header-help-${++headerHelpIdSeq}`;
+  const detail = wrap.createEl("div", { text: opts.detail, cls: "accounting-header-help-detail" });
+  detail.id = detailId;
+  detail.hidden = true;
+  btn.setAttribute("aria-controls", detailId);
+  wrap.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+  btn.onclick = (event) => {
+    event.stopPropagation();
+    if (activeHeaderHelp?.wrap === wrap) {
+      closeHeaderHelp();
+      return;
+    }
+    closeHeaderHelp();
+    detail.hidden = false;
+    btn.classList.add("is-open");
+    btn.setAttribute("aria-expanded", "true");
+    activeHeaderHelp = { wrap, btn, detail };
+    document.addEventListener("click", closeHeaderHelp);
+  };
+  return wrap;
+}
+
+// src/dateField.ts
+function formatDateFieldLabel(value, kind, placeholder) {
+  if (!value) return placeholder ?? "";
+  const locale = getLocale();
+  if (kind === "date") return formatDateDisplay(value, locale);
+  const date = value.slice(0, 10);
+  const time = value.slice(11, 16);
+  return time ? `${formatDateDisplay(date, locale)} ${time}` : formatDateDisplay(date, locale);
+}
+function createDateField(opts) {
+  const wrap = document.createElement("div");
+  wrap.addClass("accounting-datefield");
+  if (opts.cls) {
+    for (const c of opts.cls.split(/\s+/).filter(Boolean)) wrap.addClass(c);
+  }
+  const input = document.createElement("input");
+  input.addClass("accounting-datefield-native");
+  input.type = opts.kind;
+  input.value = opts.value;
+  wrap.appendChild(input);
+  const label = wrap.createSpan({ cls: "accounting-datefield-label" });
+  const render = () => {
+    label.textContent = formatDateFieldLabel(input.value, opts.kind, opts.placeholder);
+  };
+  render();
+  input.addEventListener("change", () => {
+    render();
+    opts.onChange(input.value);
+  });
+  input.addEventListener("input", render);
+  input.addEventListener("click", () => {
+    const el = input;
+    try {
+      el.showPicker?.();
+    } catch {
+    }
+  });
+  return wrap;
+}
+
+// src/adjustBalanceModal.ts
+var AdjustBalanceModal = class extends import_obsidian9.Modal {
+  constructor(app, adapter, account, currentBalance, accounts, categories, onSubmitted) {
+    super(app);
+    this.adapter = adapter;
+    this.account = account;
+    this.currentBalance = currentBalance;
+    this.accounts = accounts;
+    this.categories = categories;
+    this.onSubmitted = onSubmitted;
+  }
+  targetEl;
+  noteEl;
+  categoryEl;
+  deltaEl;
+  errorEl;
+  keyboardAvoidance;
+  adjustCat = t("seed.category.adjust");
+  selectedCategory = this.adjustCat;
+  /** 交易时间（datetime-local 表单值）；默认当前时刻，提交时转本地偏移 ISO 写入 ts */
+  tsValue = nowDatetimeLocal();
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.modalEl.addClass("accounting-sub-modal");
+    if (!import_obsidian9.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    contentEl.addClass("accounting-adjust-modal");
+    const titleRow = contentEl.createDiv({ cls: "accounting-adjust-title-row" });
+    titleRow.createEl("div", {
+      text: t("adjust.title", { name: this.account.name }),
+      cls: "accounting-adjust-title"
+    });
+    appendHeaderHelp(titleRow, {
+      detail: t("adjust.detail"),
+      ariaLabel: t("adjust.ariaLabel")
+    });
+    contentEl.createEl("div", {
+      text: t("adjust.currentBalance", { balance: formatMoney(this.currentBalance, this.account.currency) }),
+      cls: "accounting-adjust-current"
+    });
+    const targetRow = contentEl.createDiv({ cls: "accounting-adjust-row" });
+    targetRow.createEl("label", { text: t("adjust.targetLabel"), cls: "accounting-adjust-label" });
+    this.targetEl = targetRow.createEl("input", { cls: "accounting-adjust-input" });
+    this.targetEl.type = "number";
+    this.targetEl.step = "0.01";
+    this.targetEl.inputMode = "decimal";
+    this.targetEl.value = String(round2(this.currentBalance));
+    this.targetEl.addEventListener("input", () => this.updateDelta());
+    this.targetEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") this.submit();
+      if (e.key === "Escape") this.close();
+    });
+    this.deltaEl = contentEl.createEl("div", { cls: "accounting-adjust-delta" });
+    this.updateDelta();
+    const categoryRow = contentEl.createDiv({ cls: "accounting-adjust-row" });
+    categoryRow.createEl("label", { text: t("entry.field.category"), cls: "accounting-adjust-label" });
+    this.categoryEl = categoryRow.createEl("select", { cls: "accounting-adjust-input" });
+    this.categoryEl.addEventListener("change", () => {
+      this.selectedCategory = this.categoryEl.value;
+    });
+    this.renderCategoryOptions();
+    const noteRow = contentEl.createDiv({ cls: "accounting-adjust-row" });
+    noteRow.createEl("label", { text: t("entry.field.note"), cls: "accounting-adjust-label" });
+    this.noteEl = noteRow.createEl("input", { cls: "accounting-adjust-input" });
+    this.noteEl.type = "text";
+    this.noteEl.placeholder = t("adjust.notePlaceholder");
+    this.noteEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") this.submit();
+      if (e.key === "Escape") this.close();
+    });
+    const timeRow = contentEl.createDiv({ cls: "accounting-adjust-row" });
+    timeRow.createEl("label", { text: t("entry.field.ts"), cls: "accounting-adjust-label" });
+    timeRow.appendChild(createDateField({
+      kind: "datetime-local",
+      value: this.tsValue,
+      cls: "accounting-adjust-input",
+      onChange: (iso) => {
+        this.tsValue = iso;
+      }
+    }));
+    this.errorEl = contentEl.createDiv();
+    const footer = contentEl.createDiv({ cls: "accounting-adjust-footer" });
+    const cancel = footer.createEl("button", { text: t("common.cancel"), cls: "accounting-btn-secondary" });
+    cancel.onclick = () => this.close();
+    const submit = footer.createEl("button", { text: t("adjust.submitBtn"), cls: "accounting-btn-primary" });
+    submit.onclick = () => this.submit();
+    this.keyboardAvoidance = bindKeyboardAvoidance({
+      rootEl: contentEl,
+      modalEl: this.modalEl,
+      mode: "top"
+    });
+    window.setTimeout(() => {
+      this.targetEl.focus();
+      this.targetEl.select();
+    }, 50);
+  }
+  updateDelta() {
+    const res = evaluateAmount(this.targetEl.value);
+    if (!res.ok) {
+      this.deltaEl.setText("");
+      this.renderCategoryOptions();
+      return;
+    }
+    const delta = round2(res.value - this.currentBalance);
+    if (delta === 0) {
+      this.deltaEl.setText(t("adjust.deltaZero"));
+    } else if (delta > 0) {
+      this.deltaEl.setText(t("adjust.deltaIncome", { amt: formatMoney(delta, this.account.currency), cur: this.account.currency }));
+    } else {
+      this.deltaEl.setText(t("adjust.deltaExpense", { amt: formatMoney(delta, this.account.currency), cur: this.account.currency }));
+    }
+    this.renderCategoryOptions();
+  }
+  /** 按当前差额方向重算分类下拉可选项；方向翻转时把所选分类回落到「余额调整」 */
+  renderCategoryOptions() {
+    if (!this.categoryEl) return;
+    const res = evaluateAmount(this.targetEl.value);
+    const delta = res.ok ? round2(res.value - this.currentBalance) : 0;
+    const flow = delta > 0 ? "income" : "expense";
+    const opts = adjustCategoryOptions(this.categories, flow, this.adjustCat);
+    this.categoryEl.empty();
+    for (const cat of opts) {
+      const o = this.categoryEl.createEl("option", { text: cat.name });
+      o.value = cat.name;
+    }
+    this.selectedCategory = resolveAdjustCategory(this.selectedCategory, this.categories, flow, this.adjustCat);
+    this.categoryEl.value = this.selectedCategory;
+  }
+  showError(msg) {
+    this.errorEl.empty();
+    this.errorEl.createEl("div", { text: msg, cls: "accounting-error" });
+  }
+  async ensureCategory() {
+    const flows = ["expense", "income"];
+    let next = [...this.categories];
+    let changed = false;
+    for (const f of flows) {
+      const existing = next.find((c) => c.flow === f && c.name === this.adjustCat);
+      if (!existing) {
+        next = [...next, { id: newCategoryId(), flow: f, name: this.adjustCat }];
+        changed = true;
+      } else if (existing.active === false) {
+        next = next.map((c) => c.id === existing.id ? { ...c, active: true } : c);
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    await this.adapter.writeMeta({ accounts: this.accounts, categories: next });
+    this.categories.length = 0;
+    this.categories.push(...next);
+  }
+  async submit() {
+    const targetRaw = this.targetEl.value;
+    if (!targetRaw) return this.showError(t("adjust.errEmptyTarget"));
+    const targetRes = evaluateAmount(targetRaw);
+    const target = targetRes.ok ? round2(targetRes.value) : Number.NaN;
+    if (Number.isNaN(target)) return this.showError(t("adjust.errInvalidTarget"));
+    const delta = round2(target - this.currentBalance);
+    if (delta === 0) {
+      this.close();
+      return;
+    }
+    const category = resolveAdjustCategory(this.selectedCategory, this.categories, delta > 0 ? "income" : "expense", this.adjustCat);
+    if (category === this.adjustCat) {
+      await this.ensureCategory();
+    }
+    const userNote = this.noteEl.value.trim();
+    const noteText = `${this.adjustCat} ${this.currentBalance.toFixed(2)}\u2192${target.toFixed(2)}${userNote ? "\uFF5C" + userNote : ""}`;
+    const now = nowISO();
+    const ev = {
+      op: "upsert",
+      id: newTxId(),
+      type: delta > 0 ? "income" : "expense",
+      ts: datetimeLocalToISO(this.tsValue),
+      amount: Math.abs(delta),
+      currency: this.account.currency,
+      account: this.account.id,
+      category,
+      note: noteText,
+      createdAt: now,
+      updatedAt: now,
+      source: "manual"
+    };
+    try {
+      await this.adapter.appendEvents([ev]);
+      this.onSubmitted();
+      this.close();
+    } catch (err) {
+      this.showError(t("adjust.writeFailed", { msg: formatError(err) }));
+    }
+  }
+  onClose() {
+    this.keyboardAvoidance?.dispose();
+    this.keyboardAvoidance = void 0;
+    this.contentEl.empty();
+  }
 };
 
 // src/navBar.ts
-var import_obsidian3 = require("obsidian");
+var import_obsidian10 = require("obsidian");
 function navIndex(p) {
   switch (p) {
     case "entry":
@@ -5724,7 +6681,7 @@ function slideClass(slide) {
 }
 function presetModalChrome(modalEl, containerEl) {
   modalEl.addClass("accounting-fullscreen");
-  if (!import_obsidian3.Platform.isMobile) modalEl.addClass("accounting-desktop");
+  if (!import_obsidian10.Platform.isMobile) modalEl.addClass("accounting-desktop");
   containerEl.addClass("accounting-app");
   const m = modalEl;
   const c = containerEl;
@@ -5760,7 +6717,7 @@ function renderNavBar(container, current, ctx, closeSelf) {
     const btn = bar.createEl("button", {
       cls: `accounting-nav-btn${isCurrent ? " accounting-nav-current" : ""}`
     });
-    (0, import_obsidian3.setIcon)(btn, it.icon);
+    (0, import_obsidian10.setIcon)(btn, it.icon);
     btn.createSpan({ text: it.label });
     if (isCurrent) {
       btn.disabled = true;
@@ -5781,34 +6738,283 @@ function renderNavOrBack(container, page, navCtx, closeSelf, drillDown) {
   else if (navCtx) renderNavBar(container, page, navCtx, closeSelf);
 }
 
-// src/transactionDetailModal.ts
-var import_obsidian7 = require("obsidian");
+// src/balanceModal.ts
+var BalanceModal = class extends import_obsidian11.Modal {
+  constructor(app, adapter, navCtx, slide, onSwitchLedger, onOpened) {
+    super(app);
+    this.adapter = adapter;
+    this.navCtx = navCtx;
+    this.slide = slide;
+    this.onSwitchLedger = onSwitchLedger;
+    this.onOpened = onOpened;
+  }
+  opened = false;
+  closing = false;
+  accountTypeSettings = defaultAccountTypeSettings();
+  /** 本位币（默认 CNY）：净资产折算目标，refresh 时从账本读取 */
+  baseCurrency = "CNY";
+  /** 账户名搜索关键词（与桌面端同口径：仅匹配 name，不区分大小写）。refresh 重渲染后回填输入框。 */
+  keyword = "";
+  /** 账户类型筛选（'' = 全部类型；与桌面端同口径 a.type === typeFilter）。 */
+  typeFilter = "";
+  /** 全部分组展开开关（false = 默认收纳）：点「全部展开/折叠」切换；筛选激活时渲染强制展开（见 renderGroups）。 */
+  allGroupsExpanded = false;
+  /** 在挂载到 DOM 前就预设全屏类与禁用 Obsidian 默认 modal-pop 动画，避免「先上跳再滑入」。 */
+  open() {
+    presetModalChrome(this.modalEl, this.containerEl);
+    super.open();
+  }
+  async onOpen() {
+    this.opened = true;
+    prepareModalContainer(this.containerEl);
+    this.modalEl.addClass("accounting-fullscreen");
+    this.onOpened?.();
+    const sc = slideClass(this.slide);
+    if (sc) this.contentEl.addClass(sc);
+    if (this.onSwitchLedger) {
+      const ledgerAlias = await this.adapter.readActiveLedgerAlias();
+      mountLedgerPill(this.modalEl, this.app, this.adapter, ledgerAlias, (name) => {
+        this.onSwitchLedger?.(name, () => this.close());
+      });
+      this.contentEl.addClass("accounting-has-ledger-pill");
+    }
+    await this.refresh();
+  }
+  async refresh() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("accounting-balance-modal");
+    this.renderNav();
+    let snap;
+    try {
+      snap = await this.loadSnapshot();
+    } catch {
+      contentEl.createEl("div", {
+        text: t("txList.loadFailed"),
+        cls: "accounting-empty"
+      });
+      return;
+    }
+    if (snap.accounts.length === 0 && snap.transactions.length === 0) {
+      contentEl.createEl("div", {
+        text: t("balance.emptyNoAccounts"),
+        cls: "accounting-empty"
+      });
+      const createAccountEl2 = contentEl.createDiv({ cls: "accounting-create-account-row" });
+      const createBtn2 = createAccountEl2.createEl("button", {
+        text: t("balance.createAccountBtn"),
+        cls: "accounting-ledger-create"
+      });
+      createBtn2.onclick = () => {
+        new AccountCreateModal(
+          this.app,
+          this.adapter,
+          snap.accounts,
+          snap.categories,
+          this.accountTypeSettings,
+          () => this.refresh()
+        ).open();
+      };
+      return;
+    }
+    const storedTypes = await this.adapter.readAccountTypeSettings();
+    this.accountTypeSettings = storedTypes ? normalizeAccountTypeSettings(storedTypes) : defaultAccountTypeSettings();
+    this.baseCurrency = await this.adapter.readBaseCurrency();
+    const rates = await this.adapter.readRates();
+    const balances = computeBalances(snap.transactions, snap.accounts);
+    const nw = computeNetWorth(snap.transactions, snap.accounts, { rates, base: this.baseCurrency, accountTypeSettings: this.accountTypeSettings });
+    const baseBalances = convertBalancesToBase(balances, snap.accounts, rates, this.baseCurrency);
+    const totalRec = nw.receivables.reduce((s, r) => s + r.amount, 0);
+    const totalPay = nw.payables.reduce((s, p) => s + p.amount, 0);
+    const negative = nw.netWorth < 0;
+    const hero = contentEl.createDiv({ cls: `accounting-nw-hero${negative ? " accounting-nw-hero--neg" : ""}` });
+    hero.createEl("div", { text: this.baseCurrency !== "CNY" ? t("balance.netWorthWithCur", { cur: this.baseCurrency }) : t("balance.netWorth"), cls: "accounting-nw-hero-label" });
+    hero.createEl("div", { text: formatMoneyInt(nw.netWorth, this.baseCurrency), cls: "accounting-nw-hero-value" });
+    const sub = hero.createDiv({ cls: "accounting-nw-hero-sub" });
+    const assetCell = sub.createDiv({ cls: "accounting-nw-hero-cell" });
+    assetCell.createEl("div", { text: t("balance.totalAssets"), cls: "accounting-nw-hero-cell-label" });
+    assetCell.createEl("div", { text: formatMoneyInt(nw.totalAssets, this.baseCurrency), cls: "accounting-nw-hero-cell-value accounting-nw-hero-asset" });
+    const liabCell = sub.createDiv({ cls: "accounting-nw-hero-cell accounting-nw-hero-cell--last" });
+    liabCell.createEl("div", { text: t("balance.totalLiabilities"), cls: "accounting-nw-hero-cell-label" });
+    liabCell.createEl("div", { text: formatMoneyInt(nw.totalLiabilities, this.baseCurrency), cls: "accounting-nw-hero-cell-value accounting-nw-hero-liab" });
+    const sum = contentEl.createDiv({ cls: "accounting-summary" });
+    sum.createEl("span", { text: t("balance.creditPayable", { amount: formatMoney(nw.creditPayable, this.baseCurrency) }) });
+    sum.createEl("span", { text: t("balance.receivablesPayables", { rec: formatMoney(totalRec, this.baseCurrency), pay: formatMoney(totalPay, this.baseCurrency) }) });
+    if (this.typeFilter && !this.accountTypeSettings.types.some((at) => at.type === this.typeFilter)) {
+      this.typeFilter = "";
+    }
+    const groupingRow = contentEl.createDiv({ cls: "accounting-grouping-row" });
+    const searchWrap = groupingRow.createDiv({ cls: "accounting-search-wrap" });
+    const keywordInput = searchWrap.createEl("input", {
+      type: "text",
+      value: this.keyword,
+      placeholder: t("balance.searchPlaceholder"),
+      cls: "accounting-search-input"
+    });
+    const commitSearch = () => {
+      const v = keywordInput.value;
+      if (v === this.keyword) return;
+      this.keyword = v;
+      void this.refresh();
+    };
+    keywordInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") commitSearch();
+    });
+    keywordInput.addEventListener("blur", commitSearch);
+    const keywordClear = searchWrap.createEl("button", {
+      text: "\xD7",
+      cls: `accounting-search-clear${this.keyword ? "" : " accounting-search-clear-hidden"}`
+    });
+    keywordClear.setAttribute("aria-label", t("balance.ariaClearSearch"));
+    keywordClear.onclick = () => {
+      if (!this.keyword) return;
+      this.keyword = "";
+      void this.refresh();
+    };
+    const typeField = groupingRow.createDiv({ cls: "accounting-grouping-field" });
+    typeField.createSpan({ text: t("balance.typeLabel"), cls: "accounting-filter-label" });
+    const typeSel = typeField.createEl("select", { cls: "accounting-grouping-select", attr: { "aria-label": t("balance.typeFilterLabel") } });
+    const allTypeOpt = typeSel.createEl("option", { text: t("balance.allTypes") });
+    allTypeOpt.value = "";
+    if (!this.typeFilter) allTypeOpt.selected = true;
+    for (const at of this.accountTypeSettings.types) {
+      const o = typeSel.createEl("option", { text: displayTypeLabel2(at.type, at.label), value: at.type });
+      if (at.type === this.typeFilter) o.selected = true;
+    }
+    typeSel.addEventListener("change", () => {
+      this.typeFilter = typeSel.value;
+      void this.refresh();
+    });
+    const groupField = groupingRow.createDiv({ cls: "accounting-grouping-field" });
+    groupField.createSpan({ text: t("accountGrouping.modeLabelShort"), cls: "accounting-filter-label" });
+    const groupSel = groupField.createEl("select", { cls: "accounting-grouping-select", attr: { "aria-label": t("accountGrouping.modeLabel") } });
+    for (const [value, key] of [
+      ["type-group", "accountGrouping.mode.typeGroup"],
+      ["type", "accountGrouping.mode.type"],
+      ["currency", "accountGrouping.mode.currency"],
+      ["tag", "accountGrouping.mode.tag"]
+    ]) {
+      const o = groupSel.createEl("option", { text: t(key), value });
+      if (value === accountGroupingMode()) o.selected = true;
+    }
+    groupSel.onchange = () => {
+      void setAccountGroupingMode(groupSel.value).then(() => this.refresh());
+    };
+    const filterActive = !!(this.keyword.trim() || this.typeFilter);
+    if (!filterActive) {
+      const expandBtn = groupingRow.createEl("button", {
+        text: this.allGroupsExpanded ? t("balance.collapseAll") : t("balance.expandAll"),
+        cls: "accounting-collapse-toggle"
+      });
+      expandBtn.onclick = () => {
+        this.allGroupsExpanded = !this.allGroupsExpanded;
+        void this.refresh();
+      };
+    }
+    const ql = this.keyword.trim().toLowerCase();
+    const matchKeyword = (a) => !ql || a.name.toLowerCase().includes(ql);
+    const matchType = (a) => !this.typeFilter || a.type === this.typeFilter;
+    const active = snap.accounts.filter((a) => a.active && matchKeyword(a) && matchType(a));
+    const hidden = snap.accounts.filter((a) => !a.active && matchKeyword(a) && matchType(a));
+    this.renderGroups(contentEl, active, balances, baseBalances, snap, filterActive || this.allGroupsExpanded);
+    if ((ql || this.typeFilter) && active.length === 0) {
+      contentEl.createEl("div", { text: t("balance.noMatch"), cls: "accounting-empty" });
+    }
+    const createAccountEl = contentEl.createDiv({ cls: "accounting-create-account-row" });
+    const createBtn = createAccountEl.createEl("button", {
+      text: t("balance.createAccountBtn"),
+      cls: "accounting-ledger-create"
+    });
+    createBtn.onclick = () => {
+      new AccountCreateModal(
+        this.app,
+        this.adapter,
+        snap.accounts,
+        snap.categories,
+        this.accountTypeSettings,
+        () => this.refresh()
+      ).open();
+    };
+    if (hidden.length > 0) {
+      const h = contentEl.createEl("details", { cls: "accounting-hidden" });
+      if (filterActive) h.open = true;
+      h.createEl("summary", { text: t("balance.hiddenSummary"), cls: "accounting-collapsible-head" });
+      this.renderGroups(h, hidden, balances, baseBalances, snap, filterActive || this.allGroupsExpanded);
+    }
+  }
+  /** 统一底部导航条（由 CSS 固定到底部，内容区预留 safe-area）。 */
+  renderNav() {
+    renderNavBar(this.modalEl, "balance", this.navCtx, () => this.close());
+  }
+  renderGroups(parent, accounts, balances, baseBalances, snap, expandAll) {
+    const mode = accountGroupingMode();
+    const kindBadgeMode = mode === "type-group" || mode === "type";
+    const groups = groupAccountsOf(mode, accounts, this.accountTypeSettings, this.baseCurrency);
+    for (const g of groups) {
+      const group = parent.createEl("details", { cls: "accounting-group" });
+      const head = group.createEl("summary", { cls: "accounting-group-head" });
+      const groupTotal = g.items.reduce((s, a) => s + (baseBalances.get(a.id) ?? 0), 0);
+      if (expandAll) group.open = true;
+      const title = kindBadgeMode ? `${displayAccountGroupLabel(g)} \xB7 ${g.hasLiability ? t("balance.kindLiability") : t("balance.kindAsset")}` : displayAccountGroupLabel(g);
+      head.createEl("span", { text: title, cls: "accounting-group-head-title" });
+      head.createEl("span", { text: formatMoney(groupTotal, this.baseCurrency) });
+      for (const a of g.items) {
+        const row = group.createDiv({ cls: "accounting-row" });
+        const name = row.createEl("span", { cls: "accounting-row-name" });
+        const label = name.createEl("span", { text: a.name, cls: "accounting-row-name-label" });
+        if (a.tag) label.createSpan({ text: ` #${a.tag}`, cls: "accounting-muted" });
+        if (a.note) label.createSpan({ text: ` ${a.note}`, cls: "accounting-muted" });
+        name.title = t("balance.accountOptionsHint");
+        name.onclick = () => {
+          new AccountActionModal(
+            this.app,
+            this.adapter,
+            a,
+            snap.accounts,
+            snap.categories,
+            this.accountTypeSettings,
+            this.navCtx,
+            () => this.refresh()
+          ).open();
+        };
+        const balance = balances.get(a.id) ?? 0;
+        const amountEl = row.createEl("span", { text: formatMoney(balance, a.currency ?? "CNY"), cls: "accounting-row-amount" });
+        amountEl.title = t("balance.adjustHint");
+        amountEl.onclick = () => {
+          new AdjustBalanceModal(
+            this.app,
+            this.adapter,
+            a,
+            balance,
+            snap.accounts,
+            snap.categories,
+            () => this.refresh()
+          ).open();
+        };
+      }
+    }
+  }
+  async loadSnapshot() {
+    const events = await this.adapter.loadLog();
+    const transactions = foldEvents(events);
+    const meta = await this.adapter.readMeta();
+    return { transactions, accounts: meta.accounts, categories: meta.categories };
+  }
+  /** 走 Obsidian 原生关闭：pop 全局 keymap scope（Modal.open 时 push 的 Escape/Tab 捕获）并恢复焦点，
+   *  再由基类回调 onClose。默认关闭动画已被 inline animation/transition:none 中和，仍是即时摘除——
+   *  若绕过 super.close() 只 detach 容器，scope 不弹、焦点不恢复，会导致关闭后 Obsidian 笔记无法正常编辑。 */
+  close() {
+    if (this.closing) return;
+    this.closing = true;
+    super.close();
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
 
 // src/entryModal.ts
-var import_obsidian6 = require("obsidian");
-
-// src/settlement.ts
-async function ensureCategories(adapter, accounts, categories, items) {
-  const { next, changed } = mergeEnsureCategories(categories, items);
-  if (!changed) return categories;
-  await adapter.writeMeta({ accounts, categories: next });
-  return next;
-}
-async function saveSettlement(adapter, accounts, categories, input) {
-  const labels = settlementLabels();
-  const outcome = deriveSettlementDiff(input.outstanding, input.paid, input.direction, labels);
-  if (outcome.kind === "writeoff") {
-    await ensureCategories(adapter, accounts, categories, [{ flow: outcome.type, name: outcome.category }]);
-  }
-  const { events } = buildSettlementEvents({
-    outcome,
-    collect: input.collect,
-    now: nowISO(),
-    baseUpdatedAtById: /* @__PURE__ */ new Map(),
-    writeoffNotePrefix: labels.writeoffNotePrefix
-  });
-  await adapter.appendEvents(events);
-}
+var import_obsidian13 = require("obsidian");
 
 // src/calculatorKeypad.ts
 var KEYS = [
@@ -5883,8 +7089,31 @@ function mountCalculatorKeypad(host, h) {
   renderPreview();
 }
 
+// src/settlement.ts
+async function ensureCategories(adapter, accounts, categories, items) {
+  const { next, changed } = mergeEnsureCategories(categories, items);
+  if (!changed) return categories;
+  await adapter.writeMeta({ accounts, categories: next });
+  return next;
+}
+async function saveSettlement(adapter, accounts, categories, input) {
+  const labels = settlementLabels();
+  const outcome = deriveSettlementDiff(input.outstanding, input.paid, input.direction, labels);
+  if (outcome.kind === "writeoff") {
+    await ensureCategories(adapter, accounts, categories, [{ flow: outcome.type, name: outcome.category }]);
+  }
+  const { events } = buildSettlementEvents({
+    outcome,
+    collect: input.collect,
+    now: nowISO(),
+    baseUpdatedAtById: /* @__PURE__ */ new Map(),
+    writeoffNotePrefix: labels.writeoffNotePrefix
+  });
+  await adapter.appendEvents(events);
+}
+
 // src/swipeTabs.ts
-var import_obsidian4 = require("obsidian");
+var import_obsidian12 = require("obsidian");
 function decideSwipe(dx, dy, dt, opts) {
   const minDistance = opts?.minDistance ?? 60;
   const maxDuration = opts?.maxDuration ?? 700;
@@ -5896,7 +7125,7 @@ function decideSwipe(dx, dy, dt, opts) {
 }
 function bindSwipeTabs(opts) {
   const { host, onNext, onPrev } = opts;
-  if (!import_obsidian4.Platform.isMobile) {
+  if (!import_obsidian12.Platform.isMobile) {
     return { dispose() {
     } };
   }
@@ -5952,81 +7181,8 @@ function bindSwipeTabs(opts) {
   };
 }
 
-// src/ledgerHeader.ts
-var import_obsidian5 = require("obsidian");
-var LedgerSwitchModal = class extends import_obsidian5.Modal {
-  constructor(app, current, ledgers, onPick) {
-    super(app);
-    this.current = current;
-    this.ledgers = ledgers;
-    this.onPick = onPick;
-  }
-  onOpen() {
-    const { contentEl } = this;
-    contentEl.empty();
-    this.modalEl.addClass("accounting-ledger-switch-modal");
-    this.modalEl.addClass("accounting-sub-modal");
-    contentEl.createEl("h2", { text: t("entry.switchLedger") });
-    if (this.ledgers.length === 0) {
-      contentEl.createEl("p", { text: t("entry.switchLedgerEmpty"), cls: "accounting-ledger-empty" });
-      const emptyCloseWrap = contentEl.createDiv({ cls: "accounting-modal-close" });
-      const emptyClose = emptyCloseWrap.createEl("button", { text: t("common.close"), cls: "accounting-btn-secondary" });
-      emptyClose.onclick = () => this.close();
-      return;
-    }
-    const card = contentEl.createDiv({ cls: "accounting-ledger-card" });
-    if (!this.ledgers.some((l) => l.name === this.current)) {
-      card.createEl("p", { text: t("entry.switchLedgerNoneCurrent"), cls: "accounting-ledger-empty" });
-    }
-    const list = card.createDiv({ cls: "accounting-ledger-list" });
-    for (const { name, alias } of this.ledgers) {
-      const isCurrent = name === this.current;
-      const item = list.createDiv({ cls: "accounting-ledger-item" });
-      if (isCurrent) {
-        item.classList.add("accounting-ledger-current");
-      } else {
-        item.classList.add("accounting-ledger-pickable");
-      }
-      const info = item.createDiv({ cls: "accounting-ledger-info" });
-      info.createEl("div", { text: alias, cls: "accounting-ledger-name" });
-      info.createEl("div", { text: ObsidianDataAdapter.formatLedgerName(name), cls: "accounting-ledger-folder" });
-      if (isCurrent) {
-        item.createEl("span", { text: t("entry.switchLedgerCurrent"), cls: "accounting-ledger-badge" });
-      } else {
-        item.createEl("span", { text: "\u203A", cls: "accounting-ledger-chevron" });
-        item.onclick = () => {
-          this.close();
-          this.onPick(name);
-        };
-      }
-    }
-    const closeWrap = contentEl.createDiv({ cls: "accounting-modal-close" });
-    const closeBtn = closeWrap.createEl("button", { text: t("common.close"), cls: "accounting-btn-secondary" });
-    closeBtn.onclick = () => this.close();
-  }
-  onClose() {
-    this.contentEl.empty();
-  }
-};
-function mountLedgerPill(modalEl, app, adapter, alias, onPick) {
-  const pill = modalEl.createDiv({ cls: "accounting-entry-ledger accounting-entry-ledger-clickable" });
-  pill.createEl("span", { cls: "accounting-entry-ledger-name", text: alias });
-  pill.createEl("span", { cls: "accounting-entry-ledger-caret", text: "\u25BE" });
-  pill.onclick = async () => {
-    try {
-      const names = await adapter.listLedgers();
-      const ledgers = await Promise.all(
-        names.map(async (name) => ({ name, alias: await adapter.readLedgerAlias(name) }))
-      );
-      new LedgerSwitchModal(app, adapter.activeLedger, ledgers, onPick).open();
-    } catch {
-    }
-  };
-  return pill;
-}
-
 // src/entryModal.ts
-var TYPES2 = [
+var TYPES = [
   { key: "expense", i18nKey: "tx.type.expense" },
   { key: "income", i18nKey: "tx.type.income" },
   { key: "transfer", i18nKey: "tx.type.transfer" },
@@ -6052,7 +7208,7 @@ function flashAmountError(el) {
     }
   }, 160);
 }
-var EntryModal = class extends import_obsidian6.Modal {
+var EntryModal = class extends import_obsidian13.Modal {
   constructor(app, adapter, accounts, categories, onSubmitted, initialTx, isCopy = true, navCtx, slide, onSwitchLedger, recurring, onRecurringSaved, onOpened) {
     super(app);
     this.adapter = adapter;
@@ -6126,6 +7282,11 @@ var EntryModal = class extends import_obsidian6.Modal {
   /** 本位币（默认 CNY）与汇率表（当前汇率），onOpen 时从账本读取，供外币录入预填与折算口径 */
   baseCurrency = "CNY";
   rates = {};
+  /** 账户/分类默认值推断的 touched 标记：用户手动改过对应字段后置 true，推断不再覆盖（程序写入不置）。提交即关 Modal，无需重置。 */
+  accountTouched = false;
+  categoryTouched = false;
+  fromTouched = false;
+  toTouched = false;
   txToState(tx) {
     return {
       type: tx.type,
@@ -6191,6 +7352,7 @@ var EntryModal = class extends import_obsidian6.Modal {
     this.transactions = foldEvents(await this.adapter.loadLog());
     this.baseCurrency = await this.adapter.readBaseCurrency();
     this.rates = await this.adapter.readRates();
+    this.maybeInferDefaults();
     this.typeRow = contentEl.createDiv({ cls: "accounting-entry-type" });
     this.renderTypeButtons();
     this.fieldContainer = contentEl.createDiv({ cls: "accounting-entry-fields" });
@@ -6240,18 +7402,52 @@ var EntryModal = class extends import_obsidian6.Modal {
   };
   renderTypeButtons() {
     this.typeRow.empty();
-    for (const tp of TYPES2) {
+    for (const tp of TYPES) {
       const active = this.state.type === tp.key;
       const btn = this.typeRow.createEl("button", {
         text: t(tp.i18nKey),
         cls: `accounting-settings-tab${active ? " accounting-settings-tab-active" : ""}`
       });
-      btn.onclick = () => {
-        if (this.state.type === tp.key) return;
-        this.state.type = tp.key;
-        this.renderTypeButtons();
-        this.rerender();
-      };
+      btn.onclick = () => this.switchType(tp.key);
+    }
+  }
+  /** 切交易类型：改 state.type → 未 touched 时按新类型重推账户/分类默认值 → 重渲染（tab 点按与轻扫共用）。 */
+  switchType(key) {
+    if (this.state.type === key) return;
+    this.state.type = key;
+    this.maybeInferDefaults();
+    this.renderTypeButtons();
+    this.rerender();
+  }
+  /**
+   * 账户/分类默认值推断（仅纯新建）：编辑/复制（originalTxId 必赋值）与周期账聚焦模式跳过。
+   * 单向联动贴合表单填写顺序「先账户后分类」：账户按该类型历史最常用推断；分类默认值跟随当前
+   * 账户，按「类型×账户」历史推断（账户变更时端侧重新推断）。transfer 按 history 常见有序对
+   * 推断双侧（一侧被手动改过则整组跳过，v1 无单侧补全）。外币账户推断后必须走 rate 预填，
+   * 与手动选账户路径对齐。调用时机：onOpen 日志加载后（首帧渲染前）、切类型后。
+   */
+  maybeInferDefaults() {
+    if (this.originalTxId || this.recurringMode !== "none") return;
+    if (this.state.type === "transfer") {
+      if (this.fromTouched || this.toTouched) return;
+      const pair = inferTransferAccounts(this.transactions, this.accounts);
+      if (pair.fromAccount && pair.toAccount) {
+        this.state.fromAccount = pair.fromAccount;
+        this.state.toAccount = pair.toAccount;
+      }
+      return;
+    }
+    if (!this.accountTouched) {
+      const id = inferDefaultAccount(this.transactions, this.accounts, { type: this.state.type });
+      if (id) {
+        this.state.account = id;
+        this.applyRatePrefill();
+      }
+    }
+    const tp = this.state.type;
+    if ((tp === "expense" || tp === "income") && !this.categoryTouched) {
+      const cat = inferDefaultCategory(this.transactions, this.categories, { type: tp, account: this.state.account || void 0 });
+      if (cat) this.state.category = cat;
     }
   }
   rerender() {
@@ -6259,18 +7455,15 @@ var EntryModal = class extends import_obsidian6.Modal {
     this.renderFields();
   }
   /** 移动端轻扫按方向（+1 下一个 / -1 上一个）切交易类型 tab：在 TYPES 顺序内夹界、不循环。
-   *  与点按 tab 同路径——改 state.type 后 renderTypeButtons + rerender。 */
+   *  与点按 tab 同路径——switchType 内改 state.type 后 renderTypeButtons + rerender。 */
   stepType(dir) {
-    const idx = TYPES2.findIndex((tp) => tp.key === this.state.type);
+    const idx = TYPES.findIndex((tp) => tp.key === this.state.type);
     if (idx < 0) return;
     const next = idx + dir;
-    if (next < 0 || next >= TYPES2.length) return;
-    if (TYPES2[next]?.key === this.state.type) return;
-    const nextKey = TYPES2[next]?.key;
-    if (!nextKey) return;
-    this.state.type = nextKey;
-    this.renderTypeButtons();
-    this.rerender();
+    if (next < 0 || next >= TYPES.length) return;
+    const nextKey = TYPES[next]?.key;
+    if (!nextKey || nextKey === this.state.type) return;
+    this.switchType(nextKey);
   }
   /** expense/income/loan 金额币种=所选账户币种 */
   accCurrency() {
@@ -6381,8 +7574,14 @@ var EntryModal = class extends import_obsidian6.Modal {
     this.fromNoteHintEl.hide();
     this.updateFromNoteHint();
     if (s.type === "expense" || s.type === "income") {
+      const flowType = s.type;
       this.accountSelectRow(wrap, t("entry.field.account"), s.account, includeHidden, (v) => {
+        this.accountTouched = true;
         s.account = v;
+        if (!this.categoryTouched) {
+          const c = inferDefaultCategory(this.transactions, this.categories, { type: flowType, account: v });
+          if (c) s.category = c;
+        }
         this.applyRatePrefill();
         this.rerender();
       }, void 0, odFor(s.account));
@@ -6390,14 +7589,19 @@ var EntryModal = class extends import_obsidian6.Modal {
       this.selectRow(wrap, t("entry.field.category"), s.category, [
         { value: "", label: t("account.selectPlaceholder") },
         ...cats.map((c) => ({ value: c.name, label: c.name }))
-      ], (v) => s.category = v);
+      ], (v) => {
+        this.categoryTouched = true;
+        s.category = v;
+      });
       this.renderRateRow(wrap);
     } else if (s.type === "transfer") {
       this.accountSelectRow(wrap, t("entry.field.fromAccount"), s.fromAccount, includeHidden, (v) => {
+        this.fromTouched = true;
         s.fromAccount = v;
         this.rerender();
       }, void 0, odFor(s.fromAccount));
       this.accountSelectRow(wrap, t("entry.field.toAccount"), s.toAccount, includeHidden, (v) => {
+        this.toTouched = true;
         s.toAccount = v;
         this.rerender();
       }, void 0, odFor(s.toAccount));
@@ -6417,6 +7621,7 @@ var EntryModal = class extends import_obsidian6.Modal {
         this.rerender();
       });
       this.accountSelectRow(wrap, t("entry.field.selfAccount"), s.account, includeHidden, (v) => {
+        this.accountTouched = true;
         s.account = v;
         this.applyRatePrefill();
         this.rerender();
@@ -6876,7 +8081,7 @@ var EntryModal = class extends import_obsidian6.Modal {
       if (generated.length > 0) {
         await this.adapter.appendEvents(generated);
       }
-      new import_obsidian6.Notice(
+      new import_obsidian13.Notice(
         generated.length > 0 ? t("entry.ruleSavedGenerated", { n: generated.length }) : t("entry.ruleSavedNoDue")
       );
     } catch (e) {
@@ -6968,2035 +8173,8 @@ var EntryModal = class extends import_obsidian6.Modal {
   }
 };
 
-// src/transactionDetailModal.ts
-var TransactionDetailModal = class extends import_obsidian7.Modal {
-  constructor(app, adapter, transaction, accounts, categories, allTransactions, onUpdated, navCtx) {
-    super(app);
-    this.adapter = adapter;
-    this.accounts = accounts;
-    this.categories = categories;
-    this.allTransactions = allTransactions;
-    this.onUpdated = onUpdated;
-    this.navCtx = navCtx;
-    this.state = transaction;
-  }
-  state;
-  opened = false;
-  closing = false;
-  /** 此交易后各账户的历史余额快照（renderView 时一次性算出），账户行内联展示。 */
-  snapshot = null;
-  /** 本位币（默认 CNY），onOpen 时从账本读取，供外币折算展示 */
-  baseCurrency = "CNY";
-  async onOpen() {
-    this.opened = true;
-    this.modalEl.addClass("accounting-detail-sheet");
-    if (!import_obsidian7.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
-    this.contentEl.addClass("accounting-modal");
-    this.containerEl.addEventListener("click", this.onBackdropClick);
-    try {
-      this.baseCurrency = await this.adapter.readBaseCurrency();
-    } catch {
-    }
-    this.renderView();
-  }
-  onBackdropClick = (e) => {
-    if (!e.target?.closest(".modal")) {
-      this.close();
-    }
-  };
-  /** 滑下后再走 Obsidian 原生关闭（与开启的滑上对称，div transform 在 WKWebView 可靠）。
-   *  走 super.close() 而非手搓 onClose()+detach：补 pop Modal.open 时 push 的全局 keymap scope +
-   *  恢复焦点，避免关闭后 Obsidian 笔记无法正常编辑。 */
-  close() {
-    if (this.closing) return;
-    this.closing = true;
-    if (!this.opened) {
-      super.close();
-      return;
-    }
-    this.containerEl.removeEventListener("click", this.onBackdropClick);
-    this.modalEl.addClass("accounting-detail-closing");
-    setTimeout(() => {
-      try {
-        super.close();
-      } catch (e) {
-        console.error(e);
-      }
-    }, 200);
-  }
-  renderView() {
-    const { contentEl } = this;
-    contentEl.empty();
-    contentEl.createDiv({ cls: "accounting-detail-grabber" });
-    const titleRow = contentEl.createDiv({ cls: "accounting-detail-title-row" });
-    titleRow.createEl("h2", { text: t("txDetail.title") });
-    this.renderDetailView();
-  }
-  /** 编辑/复制后就地刷新背后的列表实例（筛选拟保留）。 */
-  afterDetailChange() {
-    this.onUpdated();
-  }
-  /** 编辑/复制：详情抽屉不关，EntryModal 以聚焦模式叠在详情之上（右下角「‹ 返回」回详情、✕ 隐藏）；
-   *  保存→就地刷新本详情（新交易）+ 刷新背后列表；取消（点返回）→详情原样保留。 */
-  openEntry(isCopy) {
-    const entry = new EntryModal(
-      this.app,
-      this.adapter,
-      this.accounts,
-      this.categories,
-      async (newTxId2) => {
-        this.afterDetailChange();
-        if (newTxId2) await this.refreshFromLog(newTxId2);
-      },
-      this.state,
-      isCopy,
-      this.navCtx
-    );
-    entry.drillDown = true;
-    entry.open();
-  }
-  /** 以最新日志就地刷新本详情：编辑后显示更新内容、复制后显示新交易；
-   *  allTransactions 用最新折叠结果，账户行内联余额快照随最新日志重算。 */
-  async refreshFromLog(txId) {
-    let folded;
-    try {
-      folded = foldEvents(await this.adapter.loadLog());
-    } catch (err) {
-      console.error("\u5237\u65B0\u8BE6\u60C5\u52A0\u8F7D\u65E5\u5FD7\u5931\u8D25:", err);
-      return;
-    }
-    const tx = folded.find((t2) => t2.id === txId);
-    if (!tx) return;
-    this.state = tx;
-    this.allTransactions = folded;
-    this.renderView();
-  }
-  renderDetailView() {
-    const { contentEl } = this;
-    const tx = this.state;
-    this.snapshot = computeBalancesUpTo(this.allTransactions, this.accounts, tx.id);
-    const detailEl = contentEl.createDiv({ cls: "accounting-detail-content" });
-    this.addRow(detailEl, t("txDetail.type"), this.typeLabel(tx.type));
-    this.addRow(detailEl, t("entry.field.ts"), this.formatTime(tx.ts));
-    this.addRow(detailEl, t("entry.field.amount"), formatMoney(tx.amount, tx.currency));
-    if (tx.rate != null && tx.currency !== this.baseCurrency) {
-      this.addRow(detailEl, t("txDetail.rate"), `1 ${tx.currency} = ${tx.rate} ${this.baseCurrency}`);
-      this.addRow(detailEl, t("txDetail.converted", { base: this.baseCurrency }), formatMoney(txBaseAmount(tx, this.baseCurrency), this.baseCurrency));
-    }
-    if (tx.type === "transfer" && tx.toAmount != null) {
-      const fromCur = this.accounts.find((a) => a.id === tx.fromAccount)?.currency ?? this.baseCurrency;
-      const toCur = this.accounts.find((a) => a.id === tx.toAccount)?.currency ?? this.baseCurrency;
-      this.addRow(detailEl, t("txDetail.toAmount"), formatMoney(tx.toAmount, toCur));
-      if (fromCur !== toCur && tx.amount > 0) {
-        this.addRow(detailEl, t("txDetail.impliedRate"), `1 ${fromCur} = ${round2(tx.toAmount / tx.amount)} ${toCur}`);
-      }
-    }
-    if (tx.type === "expense" || tx.type === "income") {
-      this.addRow(detailEl, t("entry.field.account"), this.accountNameWithBalance(tx.account));
-      this.addRow(detailEl, t("entry.field.category"), tx.category || "");
-    } else if (tx.type === "transfer") {
-      this.addRow(detailEl, t("entry.field.fromAccount"), this.accountNameWithBalance(tx.fromAccount));
-      this.addRow(detailEl, t("entry.field.toAccount"), this.accountNameWithBalance(tx.toAccount));
-    } else if (tx.type === "loan") {
-      this.addRow(detailEl, t("entry.field.direction"), this.directionLabel(tx.direction));
-      this.addRow(detailEl, t("entry.field.selfAccount"), this.accountNameWithBalance(tx.account));
-      this.addRow(detailEl, t("txDetail.counterparty"), this.accountNameWithBalance(tx.person));
-    }
-    if (tx.note) {
-      this.addRow(detailEl, t("entry.field.note"), tx.note);
-    }
-    const btnRow = contentEl.createDiv({ cls: "accounting-detail-buttons" });
-    btnRow.createEl("button", { text: t("common.edit"), cls: "accounting-btn-secondary" }).onclick = () => {
-      if (this.isSettlementLoan()) {
-        alert(t("txDetail.settlementEditBlock"));
-        return;
-      }
-      this.openEntry(false);
-    };
-    btnRow.createEl("button", { text: t("common.copy"), cls: "accounting-btn-secondary" }).onclick = () => {
-      if (this.isSettlementLoan()) {
-        alert(t("txDetail.settlementCopyBlock"));
-        return;
-      }
-      this.openEntry(true);
-    };
-    btnRow.createEl("button", {
-      text: t("common.delete"),
-      cls: "accounting-btn-danger"
-    }).onclick = async () => {
-      await this.deleteTransaction();
-    };
-    btnRow.createEl("button", { text: t("common.close"), cls: "accounting-btn-secondary accounting-detail-sheet-close" }).onclick = () => this.close();
-  }
-  addRow(parent, label, value, desc) {
-    const row = parent.createDiv({ cls: "accounting-detail-row" });
-    const labelEl = row.createDiv({ cls: "accounting-detail-label" });
-    labelEl.textContent = label;
-    const valueEl = row.createDiv({ cls: "accounting-detail-value" });
-    valueEl.textContent = value;
-    if (desc) {
-      const descEl = row.createDiv({ cls: "accounting-detail-desc" });
-      descEl.textContent = desc;
-    }
-  }
-  async deleteTransaction() {
-    if (!confirm(t("txDetail.deleteConfirm"))) {
-      return;
-    }
-    const now = nowISO();
-    const idsToDelete = [this.state.id];
-    if (this.state.linkId) {
-      try {
-        const folded = foldEvents(await this.adapter.loadLog());
-        const partner = folded.find((tx) => tx.linkId === this.state.linkId && tx.id !== this.state.id);
-        if (partner) idsToDelete.push(partner.id);
-      } catch (err) {
-        console.error("\u52A0\u8F7D\u65E5\u5FD7\u67E5\u627E\u7ED3\u6E05\u914D\u5BF9\u5931\u8D25:", err);
-      }
-    }
-    const events = idsToDelete.map((id) => ({
-      op: "delete",
-      targetId: id,
-      updatedAt: now,
-      source: "manual"
-    }));
-    try {
-      await this.adapter.appendEvents(events);
-      this.close();
-      this.afterDetailChange();
-    } catch (err) {
-      console.error("\u5220\u9664\u6D41\u6C34\u5931\u8D25:", err);
-      this.showError(t("txDetail.deleteFailed"));
-    }
-  }
-  directionLabel(d) {
-    switch (d) {
-      case "lend":
-        return t("entry.direction.lend");
-      case "borrow":
-        return t("entry.direction.borrow");
-      case "collect":
-        return t("entry.direction.collect");
-      case "repay":
-        return t("entry.direction.repay");
-      default:
-        return "\u2014";
-    }
-  }
-  /** 结清类借贷（collect/repay）：移动端不支持编辑，避免破坏桌面端创建的结清对。 */
-  isSettlementLoan() {
-    return this.state.type === "loan" && (this.state.direction === "collect" || this.state.direction === "repay");
-  }
-  typeLabel(type) {
-    const labels = {
-      expense: t("tx.type.expense"),
-      income: t("tx.type.income"),
-      transfer: t("tx.type.transfer"),
-      loan: t("tx.type.loan")
-    };
-    return labels[type] || type;
-  }
-  accountName(id) {
-    if (!id) return "";
-    const acc = this.accounts.find((a) => a.id === id);
-    return acc ? acc.name : id;
-  }
-  accountCurrency(id) {
-    if (!id) return "CNY";
-    return this.accounts.find((a) => a.id === id)?.currency ?? "CNY";
-  }
-  /** 账户名 + 内联「此交易后」余额：「招行储蓄（余额 ¥1,234.50）」。
-   *  snapshot=null（target 不在日志，脏数据/已删）或账户 id 缺失 → 退化为仅名称，不报错。 */
-  accountNameWithBalance(id) {
-    const name = this.accountName(id);
-    if (!name || !id || !this.snapshot) return name;
-    const bal = this.snapshot.get(id);
-    if (bal === void 0) return name;
-    return `${name}${t("txDetail.balanceSuffix", { balance: formatMoney(bal, this.accountCurrency(id)) })}`;
-  }
-  formatTime(iso) {
-    const d = new Date(iso);
-    const pad = (x) => String(x).padStart(2, "0");
-    return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
-  showError(msg) {
-    const { contentEl } = this;
-    const errorEl = contentEl.createDiv({ cls: "accounting-error" });
-    errorEl.textContent = msg;
-    setTimeout(() => errorEl.remove(), 3e3);
-  }
-  onClose() {
-    this.contentEl.empty();
-  }
-};
-
-// src/transactionListModal.ts
-var SORT_OPTIONS = [
-  { value: "time-desc", i18nKey: "txList.sort.timeDesc" },
-  { value: "time-asc", i18nKey: "txList.sort.timeAsc" },
-  { value: "amount-desc", i18nKey: "txList.sort.amountDesc" },
-  { value: "amount-asc", i18nKey: "txList.sort.amountAsc" }
-];
-var PAGE_SIZE = 50;
-function nextConflictNotice(prevSig, conflicts) {
-  if (conflicts.length === 0) return { sig: "", notify: false };
-  const sig = conflicts.map((c) => c.id).slice().sort().join(",");
-  return { sig, notify: sig !== prevSig };
-}
-var TransactionListModal = class extends import_obsidian8.Modal {
-  constructor(app, adapter, presetAccountId, navCtx, slide, presetRecurringRuleId, drillDown, categoryDrill, onDataChanged, onSwitchLedger, onOpened) {
-    super(app);
-    this.adapter = adapter;
-    this.navCtx = navCtx;
-    this.slide = slide;
-    this.drillDown = drillDown;
-    this.categoryDrill = categoryDrill;
-    this.onDataChanged = onDataChanged;
-    this.onSwitchLedger = onSwitchLedger;
-    this.onOpened = onOpened;
-    const hasCategoryPreset = !!categoryDrill;
-    const hasPreset = !!presetAccountId || !!presetRecurringRuleId || hasCategoryPreset;
-    this.filter = {
-      // preset 跳转（账户、周期账规则、报表分类）：使用传入范围或默认全部历史；否则默认近6月
-      // 结束日 = 当天，配合「整天包含」语义把今天完整包进来
-      start: categoryDrill?.start ?? (hasPreset ? "1970-01-01" : monthsAgoDateInput(6)),
-      end: categoryDrill?.end ?? todayDateInput(),
-      types: categoryDrill ? [categoryDrill.flow] : [],
-      keyword: "",
-      accountId: presetAccountId ?? "",
-      recurringRuleId: presetRecurringRuleId ?? "",
-      category: categoryDrill?.uncategorized ? "" : categoryDrill?.category ?? "",
-      uncategorized: categoryDrill?.uncategorized ?? false,
-      quickActive: hasCategoryPreset ? null : hasPreset ? "all" : "halfYear",
-      sort: "time-desc"
-    };
-  }
-  accounts = [];
-  accountTypeSettings = defaultAccountTypeSettings();
-  categories = [];
-  transactions = [];
-  filteredTransactions = [];
-  filter;
-  recurringRules = [];
-  /** 本位币（onOpen 读 ledger.json，失败兜底 CNY）；月分组全账户口径折算与月末余额币种用。 */
-  baseCurrency = "CNY";
-  accountById = /* @__PURE__ */ new Map();
-  opened = false;
-  closing = false;
-  renderedCount = 0;
-  listEl = null;
-  sentinelEl = null;
-  loadMoreObserver = null;
-  selectMode = false;
-  /** 月份分组批量展开态：null=默认（仅最新月 open）/ true=全展开 / false=全折叠；手动单月 toggle 不改此字段。 */
-  allMonthsExpanded = null;
-  /** 每个月分组的 <details> → 该月流水；懒渲染用：折叠月只在用户展开时才建行 DOM，避免「全部」时一次建数万节点卡顿。 */
-  monthTxsByDetails = /* @__PURE__ */ new WeakMap();
-  selectedIds = /* @__PURE__ */ new Set();
-  updatedAtById = /* @__PURE__ */ new Map();
-  deleting = false;
-  /** 打平冲突（同 id 同 updatedAt）：折叠结果取决于文件顺序，行内 ⚠️ 标记 + 一次性 Notice 提示 */
-  tiedConflicts = [];
-  conflictIds = /* @__PURE__ */ new Set();
-  /** 上次 Notice 时的冲突签名，用于「同集合不重复打扰」 */
-  prevConflictSig = "";
-  /** 在挂载到 DOM 前就预设全屏类与禁用 Obsidian 默认 modal-pop 动画，避免「先上跳再滑入」。 */
-  open() {
-    presetModalChrome(this.modalEl, this.containerEl);
-    super.open();
-  }
-  async onOpen() {
-    this.opened = true;
-    prepareModalContainer(this.containerEl);
-    this.modalEl.addClass("accounting-fullscreen");
-    if (this.drillDown) this.modalEl.addClass("accounting-drilldown");
-    this.onOpened?.();
-    const { contentEl } = this;
-    contentEl.empty();
-    contentEl.addClass("accounting-transaction-modal");
-    const sc = slideClass(this.slide);
-    if (sc) contentEl.addClass(sc);
-    if (!this.drillDown && this.onSwitchLedger) {
-      const ledgerAlias = await this.adapter.readActiveLedgerAlias();
-      mountLedgerPill(this.modalEl, this.app, this.adapter, ledgerAlias, (name) => {
-        this.onSwitchLedger?.(name, () => this.close());
-      });
-      contentEl.addClass("accounting-has-ledger-pill");
-    }
-    try {
-      const events = await this.adapter.loadLog();
-      this.applyEvents(events);
-      const meta = await this.adapter.readMeta();
-      this.accounts = meta.accounts;
-      this.accountById = new Map(this.accounts.map((a) => [a.id, a]));
-      this.categories = meta.categories;
-      this.recurringRules = await this.adapter.readRecurringRules();
-      try {
-        this.baseCurrency = await this.adapter.readBaseCurrency();
-      } catch {
-        this.baseCurrency = "CNY";
-      }
-      const storedTypes = await this.adapter.readAccountTypeSettings();
-      this.accountTypeSettings = storedTypes ? normalizeAccountTypeSettings(storedTypes) : defaultAccountTypeSettings();
-      if (this.transactions.length === 0) {
-        this.renderNav();
-        contentEl.createEl("h2", { text: t("nav.list") });
-        contentEl.createEl("div", {
-          text: t("txList.empty"),
-          cls: "accounting-empty"
-        });
-        return;
-      }
-      this.applyFilter();
-      this.render();
-    } catch (err) {
-      console.error("\u52A0\u8F7D\u6D41\u6C34\u5931\u8D25:", err);
-      console.error("\u9519\u8BEF\u5806\u6808:", err instanceof Error ? err.stack : "\u65E0\u5806\u6808");
-      contentEl.empty();
-      this.renderNav();
-      contentEl.createEl("h2", { text: t("nav.list") });
-      contentEl.createEl("div", {
-        text: t("txList.loadFailed"),
-        cls: "accounting-empty"
-      });
-      contentEl.createEl("div", {
-        text: t("txList.errorDetail", { msg: formatError(err) }),
-        cls: "accounting-error"
-      });
-    }
-  }
-  render() {
-    const { contentEl } = this;
-    contentEl.empty();
-    contentEl.addClass("accounting-transaction-modal");
-    this.renderNav();
-    this.renderFilters(contentEl);
-    this.renderSortBar(contentEl);
-    if (this.selectMode) this.renderBatchBar(contentEl);
-    this.renderList(contentEl);
-  }
-  /** 顶层流水：底部导航条；drill-down（账户下钻/周期账查看）：聚焦模式，右下角「‹ 返回」回父页（无导航条、隐藏右上角✕）。 */
-  renderNav() {
-    renderNavOrBack(this.modalEl, "list", this.navCtx, () => this.close(), !!this.drillDown);
-  }
-  renderFilters(container) {
-    const filterBox = container.createDiv({ cls: "accounting-filter-box" });
-    const timeRow = filterBox.createDiv({ cls: "accounting-filter-row" });
-    timeRow.createSpan({ text: t("txList.rangeTime"), cls: "accounting-filter-label" });
-    const timeControls = timeRow.createDiv({ cls: "accounting-filter-controls" });
-    const quickOptions = [
-      { key: "halfYear", label: t("txList.lastMonths", { n: 6 }), start: monthsAgoDateInput(6) },
-      { key: "year", label: t("txList.lastMonths", { n: 12 }), start: monthsAgoDateInput(12) },
-      { key: "all", label: t("txList.allTime"), start: "1970-01-01" }
-    ];
-    for (const opt of quickOptions) {
-      const active = this.filter.quickActive === opt.key;
-      const btn = timeControls.createEl("button", {
-        text: opt.label,
-        cls: `accounting-filter-quick-btn${active ? " accounting-filter-btn-active" : ""}`
-      });
-      btn.onclick = () => {
-        this.filter.start = opt.start;
-        this.filter.end = todayDateInput();
-        this.filter.quickActive = opt.key;
-        this.applyFilter();
-        this.render();
-      };
-    }
-    const dateRangeWrap = timeControls.createDiv({ cls: "accounting-date-range-wrap" });
-    const startInput = createDateField({
-      kind: "date",
-      value: this.filter.start,
-      onChange: (iso) => {
-        this.filter.start = iso;
-        this.filter.quickActive = null;
-        this.applyFilter();
-        this.render();
-      }
-    });
-    dateRangeWrap.appendChild(startInput);
-    dateRangeWrap.createSpan({ text: "\u2013" });
-    const endInput = createDateField({
-      kind: "date",
-      value: this.filter.end,
-      onChange: (iso) => {
-        this.filter.end = iso;
-        this.filter.quickActive = null;
-        this.applyFilter();
-        this.render();
-      }
-    });
-    dateRangeWrap.appendChild(endInput);
-    const typeRow = filterBox.createDiv({ cls: "accounting-filter-row" });
-    typeRow.createSpan({ text: t("txList.rangeType"), cls: "accounting-filter-label" });
-    const typeWrap = typeRow.createDiv({ cls: "accounting-filter-controls" });
-    const types = [
-      { key: "expense", label: t("tx.type.expense") },
-      { key: "income", label: t("tx.type.income") },
-      { key: "transfer", label: t("tx.type.transfer") },
-      { key: "loan", label: t("tx.type.loan") }
-    ];
-    const allBtn = typeWrap.createEl("button", {
-      text: t("common.all"),
-      cls: `accounting-filter-type-btn${this.filter.types.length === 0 ? " accounting-filter-btn-active" : ""}`
-    });
-    allBtn.onclick = () => {
-      this.filter.types = [];
-      this.applyFilter();
-      this.render();
-    };
-    for (const tp of types) {
-      const active = this.filter.types.includes(tp.key);
-      const btn = typeWrap.createEl("button", {
-        text: tp.label,
-        cls: `accounting-filter-type-btn${active ? " accounting-filter-btn-active" : ""}`
-      });
-      btn.onclick = () => {
-        if (active) {
-          this.filter.types = this.filter.types.filter((x) => x !== tp.key);
-        } else {
-          this.filter.types.push(tp.key);
-        }
-        this.applyFilter();
-        this.render();
-      };
-    }
-    const comboRow = filterBox.createDiv({ cls: "accounting-filter-row" });
-    comboRow.createSpan({ text: t("txList.rangeAccountNote"), cls: "accounting-filter-label" });
-    const comboControls = comboRow.createDiv({ cls: "accounting-filter-controls" });
-    const accountSelect = comboControls.createEl("select", { cls: "accounting-filter-account-select" });
-    const allOpt = accountSelect.createEl("option", { text: t("txList.allAccounts") });
-    allOpt.value = "";
-    if (!this.filter.accountId) allOpt.selected = true;
-    fillAccountOptions(accountSelect, this.accounts, this.filter.accountId, true, this.accountTypeSettings);
-    accountSelect.addEventListener("change", () => {
-      this.filter.accountId = accountSelect.value;
-      this.applyFilter();
-      this.render();
-    });
-    const searchWrap = comboControls.createDiv({ cls: "accounting-search-wrap" });
-    const keywordInput = searchWrap.createEl("input", {
-      type: "text",
-      value: this.filter.keyword,
-      placeholder: t("txList.searchPlaceholder"),
-      cls: "accounting-search-input"
-    });
-    const commitSearch = () => {
-      this.filter.keyword = keywordInput.value;
-      this.applyFilter();
-      this.render();
-    };
-    keywordInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") commitSearch();
-    });
-    keywordInput.addEventListener("blur", commitSearch);
-    const keywordClear = searchWrap.createEl("button", {
-      text: "\xD7",
-      cls: `accounting-search-clear${this.filter.keyword ? "" : " accounting-search-clear-hidden"}`
-    });
-    keywordClear.setAttribute("aria-label", t("txList.ariaClearKeyword"));
-    keywordClear.onclick = () => {
-      keywordInput.value = "";
-      this.filter.keyword = "";
-      this.applyFilter();
-      this.render();
-    };
-    if (this.hasActiveFilter()) {
-      const clearAllBtn = comboControls.createEl("button", {
-        text: t("common.clear"),
-        cls: "accounting-filter-clear-all"
-      });
-      clearAllBtn.setAttribute("aria-label", t("txList.ariaClearAllFilters"));
-      clearAllBtn.onclick = () => {
-        this.resetFilter();
-        this.applyFilter();
-        this.render();
-      };
-    }
-    if (this.filter.recurringRuleId) {
-      const ruleName = this.recurringRules.find((r) => r.id === this.filter.recurringRuleId)?.name ?? t("txList.recurringDefault");
-      filterBox.createDiv({
-        text: `${t("txList.recurringPrefix")}${ruleName}${t("txList.countSuffix", { n: this.filteredTransactions.length })}`,
-        cls: "accounting-recurring-stats"
-      });
-    }
-    if (this.filter.category || this.filter.uncategorized) {
-      const catName = this.filter.uncategorized ? t("txList.uncategorized") : this.filter.category;
-      filterBox.createDiv({
-        text: `${t("txList.categoryDrillPrefix")}${catName}${t("txList.countSuffix", { n: this.filteredTransactions.length })}`,
-        cls: "accounting-recurring-stats"
-      });
-    }
-  }
-  /** 排序栏：独立于筛选卡片（排序是 ordering 而非筛选维度），置于卡片下方、「排序」+下拉同一行；弱化样式。 */
-  renderSortBar(container) {
-    const bar = container.createDiv({ cls: "accounting-sort-bar" });
-    bar.createSpan({ text: t("txList.sortLabel"), cls: "accounting-sort-label" });
-    const curKey = SORT_OPTIONS.find((o) => o.value === this.filter.sort)?.i18nKey;
-    const cur = curKey ? t(curKey) : "";
-    const btn = bar.createSpan({ cls: "accounting-sort-btn", attr: { role: "button", tabindex: "0" } });
-    btn.createSpan({ text: cur });
-    btn.createSpan({ text: "\u25BE", cls: "accounting-sort-caret" });
-    const open = () => this.openSortMenu(btn);
-    btn.onclick = open;
-    btn.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        open();
-      }
-    });
-    const selectBtn = bar.createEl("button", {
-      text: this.selectMode ? t("common.done") : t("txList.select"),
-      cls: "accounting-batch-toggle"
-    });
-    selectBtn.onclick = () => {
-      this.selectMode = !this.selectMode;
-      if (!this.selectMode) this.selectedIds.clear();
-      this.render();
-    };
-    const isTimeSort = this.filter.sort === "time-desc" || this.filter.sort === "time-asc";
-    if (!isTimeSort) {
-      bar.createSpan({ text: t("txList.flatSortHint"), cls: "accounting-sort-hint" });
-      return;
-    }
-    if (this.filteredTransactions.length === 0) return;
-    const expandBtn = bar.createEl("button", {
-      text: this.allMonthsExpanded === true ? t("txList.collapseAll") : t("txList.expandAll"),
-      cls: "accounting-collapse-toggle"
-    });
-    expandBtn.onclick = () => {
-      const groups = this.contentEl.querySelectorAll("details.accounting-month-group");
-      if (groups.length === 0) return;
-      const wantExpand = this.allMonthsExpanded !== true;
-      this.allMonthsExpanded = wantExpand;
-      groups.forEach((d) => {
-        const det = d;
-        det.open = wantExpand;
-        if (wantExpand) this.ensureMonthRows(det);
-      });
-      expandBtn.textContent = wantExpand ? t("txList.collapseAll") : t("txList.expandAll");
-    };
-  }
-  /** 多选操作栏：全选（覆盖全部 filtered）· 取消 · 已选 N 条 · 批量修改/删除；操作组 margin-left:auto 固定靠右。 */
-  renderBatchBar(container) {
-    const bar = container.createDiv({ cls: "accounting-batch-bar" });
-    const selected = this.selectedTxs();
-    const typeSet = new Set(selected.map((tx) => tx.type));
-    const canBatch = selected.length > 0 && typeSet.size === 1;
-    const allBtn = bar.createEl("button", { text: t("txList.selectAll"), cls: "accounting-batch-sec" });
-    allBtn.onclick = () => {
-      this.selectedIds = new Set(this.filteredTransactions.map((tx) => tx.id));
-      this.render();
-    };
-    const clearBtn = bar.createEl("button", { text: t("common.cancel"), cls: "accounting-batch-sec" });
-    clearBtn.onclick = () => {
-      this.selectedIds.clear();
-      this.render();
-    };
-    bar.createSpan({ text: t("txList.selectedN", { n: selected.length }), cls: "accounting-batch-count" });
-    const batchBtn = bar.createEl("button", {
-      text: t("txList.batchModify"),
-      cls: `accounting-batch-go${canBatch ? "" : " accounting-batch-go-disabled"}`
-    });
-    if (!canBatch) {
-      batchBtn.setAttribute("disabled", "true");
-      batchBtn.setAttribute("title", typeSet.size > 1 ? t("txList.batchModifyOnlySameType") : t("txList.selectFirst"));
-    } else {
-      batchBtn.onclick = () => this.openBatchModify();
-    }
-    const delDisabled = selected.length === 0;
-    const delBtn = bar.createEl("button", {
-      text: t("txList.batchDelete"),
-      cls: delDisabled ? "accounting-batch-go accounting-batch-go-disabled" : "accounting-batch-go accounting-batch-go-danger"
-    });
-    if (delDisabled) {
-      delBtn.setAttribute("disabled", "true");
-      delBtn.setAttribute("title", t("txList.selectFirst"));
-    } else {
-      delBtn.onclick = () => this.openBatchDelete();
-    }
-  }
-  /** 选中集合对应的 Transaction[]（按 filteredTransactions 顺序，保证稳定）。 */
-  selectedTxs() {
-    if (this.selectedIds.size === 0) return [];
-    return this.filteredTransactions.filter((tx) => this.selectedIds.has(tx.id));
-  }
-  openBatchModify() {
-    const selected = this.selectedTxs();
-    if (selected.length === 0) return;
-    new BatchModifyModal(
-      this.app,
-      this.adapter,
-      selected,
-      this.updatedAtById,
-      this.accounts,
-      this.categories,
-      this.accountTypeSettings,
-      () => this.onBatchDone()
-    ).open();
-  }
-  /** 批量修改完成回调：刷新列表、清选择、退出多选。 */
-  async onBatchDone() {
-    this.selectedIds.clear();
-    this.selectMode = false;
-    await this.reloadAndRender();
-  }
-  /** 批量删除选中流水：展开结清对端、二次确认、写前备份 + 全有或全无并发检测 + 追加 delete 事件。 */
-  async openBatchDelete() {
-    if (this.deleting) return;
-    const selected = this.selectedTxs();
-    if (selected.length === 0) return;
-    const { ids, partnerExtra } = planBatchDeleteTargets(selected, this.transactions);
-    const msg = partnerExtra > 0 ? t("txList.batchDeleteConfirmPartner", { selected: selected.length, partner: partnerExtra, total: ids.length }) : t("txList.batchDeleteConfirm", { n: selected.length });
-    if (!confirm(msg)) return;
-    this.deleting = true;
-    try {
-      await this.adapter.backup("pre-batch-delete");
-      const fresh = await this.adapter.loadLog();
-      const latestUpdatedAt = latestUpdatedAtById(fresh);
-      for (const id of ids) {
-        if (hasUpdatedSince(latestUpdatedAt.get(id), this.updatedAtById.get(id) ?? "")) {
-          new import_obsidian8.Notice(t("txList.concurrencyConflict"));
-          await this.reloadAndRender();
-          return;
-        }
-      }
-      const now = nowISO();
-      const events = ids.map((id) => ({ op: "delete", targetId: id, updatedAt: now, source: "manual" }));
-      await this.adapter.appendEvents(events);
-      new import_obsidian8.Notice(t("txList.deletedN", { n: events.length }));
-      await this.onBatchDone();
-    } catch (e) {
-      const m = t("txList.batchDeleteFailed", { msg: formatError(e) });
-      new import_obsidian8.Notice(m);
-    } finally {
-      this.deleting = false;
-    }
-  }
-  /** 排序下拉菜单：浮于 document.body（fixed，不受 .modal-content transform 影响），锚定按钮下方；点选项应用并重渲，点遮罩关闭。 */
-  openSortMenu(anchor) {
-    this.closeSortMenu();
-    const overlay = document.body.createEl("div", { cls: "accounting-sort-overlay" });
-    overlay.onclick = () => this.closeSortMenu();
-    const rect = anchor.getBoundingClientRect();
-    const menu = overlay.createEl("div", { cls: "accounting-sort-menu" });
-    menu.onclick = (e) => e.stopPropagation();
-    const MENU_W = 150;
-    const left = Math.min(rect.left, Math.max(8, window.innerWidth - 8 - MENU_W));
-    menu.style.left = `${left}px`;
-    menu.style.top = `${rect.bottom + 4}px`;
-    for (const opt of SORT_OPTIONS) {
-      const active = opt.value === this.filter.sort;
-      const item = menu.createEl("div", {
-        cls: `accounting-sort-item${active ? " accounting-sort-item-active" : ""}`,
-        text: t(opt.i18nKey)
-      });
-      item.onclick = (e) => {
-        e.stopPropagation();
-        this.filter.sort = opt.value;
-        this.closeSortMenu();
-        this.applyFilter();
-        this.render();
-      };
-    }
-  }
-  closeSortMenu() {
-    document.body.querySelectorAll(".accounting-sort-overlay").forEach((el) => el.detach());
-  }
-  renderList(container) {
-    this.teardownObserver();
-    const listEl = container.createDiv({ cls: "accounting-transaction-list" });
-    this.listEl = listEl;
-    if (this.filteredTransactions.length === 0) {
-      listEl.createEl("div", {
-        text: this.filter.recurringRuleId ? t("txList.emptyRecurring") : t("txList.emptyFiltered"),
-        cls: "accounting-empty"
-      });
-      return;
-    }
-    const isTimeSort = this.filter.sort === "time-desc" || this.filter.sort === "time-asc";
-    if (isTimeSort) {
-      this.renderMonthGroups(listEl);
-      return;
-    }
-    this.renderedCount = 0;
-    this.appendChunk();
-    if (this.renderedCount < this.filteredTransactions.length) {
-      this.setupInfiniteScroll();
-    }
-  }
-  /**
-   * 时间序按月分组渲染：每月一个可折叠 `<details>`，标题=月份+笔数+收入/支出（+单账户月末累计余额）。
-   * 原生 `<details>` 单月 toggle 免 JS state；批量「展开/折叠全部」由 allMonthsExpanded 字段驱动（render 重建按其复位 open，默认仅最新月）。
-   * 懒渲染：折叠的 `<details>` 子节点虽不可见但仍占 DOM，故初始只为 open 的月份建行；折叠月在用户展开时（toggle 事件 / 展开全部按钮）才补建，
-   * 把「全部」默认场景的 DOM 量从 O(N) 降到 O(最新月)，避免一次同步建数万节点卡顿。
-   */
-  renderMonthGroups(listEl) {
-    const accountId = this.filter.accountId;
-    const singleAccount = !!accountId;
-    const balanceByTxId = singleAccount ? computeRunningBalanceForAccount(this.transactions, this.accounts, accountId) : null;
-    const groups = buildMonthGroups(this.filteredTransactions, {
-      sort: this.filter.sort === "time-desc" ? "time-desc" : "time-asc",
-      base: this.baseCurrency,
-      singleAccount,
-      accountId,
-      balanceByTxId
-    });
-    const latestYm = groups.reduce((m, g) => g.ym > m ? g.ym : m, "");
-    const fmtInt = (n) => {
-      const sign = n < 0 ? "-" : "";
-      return sign + Math.round(Math.abs(n)).toLocaleString("zh-CN", { maximumFractionDigits: 0 });
-    };
-    for (const g of groups) {
-      const details = listEl.createEl("details", { cls: "accounting-month-group" });
-      const shouldOpen = this.allMonthsExpanded === true ? true : this.allMonthsExpanded === false ? false : g.ym === latestYm;
-      details.open = shouldOpen;
-      this.monthTxsByDetails.set(details, g.txs);
-      const head = details.createEl("summary", { cls: "accounting-collapsible-head accounting-month-head" });
-      const label = head.createDiv({ cls: "accounting-month-label" });
-      label.createSpan({ text: formatMonthDisplay(g.ym, getLocale()) });
-      label.createSpan({ text: `(${g.txs.length})`, cls: "accounting-month-count" });
-      const totals = head.createDiv({ cls: "accounting-month-totals" });
-      const inLabel = singleAccount ? t("txList.monthIn") : t("txList.monthIncome");
-      const outLabel = singleAccount ? t("txList.monthOut") : t("txList.monthExpense");
-      totals.createSpan({ text: `${inLabel} ${fmtInt(g.income)}`, cls: "accounting-amount-positive" });
-      totals.createSpan({ text: `${outLabel} ${fmtInt(g.expense)}`, cls: "accounting-amount-negative" });
-      if (g.endBalance != null) {
-        totals.createSpan({
-          text: t("txList.balancePrefix", { amount: fmtInt(g.endBalance) }),
-          cls: g.endBalance < 0 ? "accounting-amount-negative" : "accounting-month-balance",
-          attr: { title: t("txList.monthBalanceTitle", { account: this.accountById.get(accountId)?.name ?? accountId }) }
-        });
-      }
-      if (shouldOpen) {
-        this.renderMonthRows(details);
-      } else {
-        details.addEventListener("toggle", () => {
-          if (details.open) this.ensureMonthRows(details);
-        });
-      }
-    }
-  }
-  /** 立即把某月所有流水行挂到其 <details>（首次渲染）。 */
-  renderMonthRows(details) {
-    const txs = this.monthTxsByDetails.get(details);
-    if (!txs) return;
-    for (const tx of txs) this.renderTransaction(details, tx);
-    details.dataset.rendered = "1";
-  }
-  /** 幂等补建：仅在该月尚未渲染过时建行（折叠→展开的懒入口：toggle 事件 / 展开全部按钮）。 */
-  ensureMonthRows(details) {
-    if (details.dataset.rendered) return;
-    this.renderMonthRows(details);
-  }
-  /** 追加下一批流水到列表尾部；首批与滚动触达预载区时复用。加载到顶即收尾观察者。 */
-  appendChunk() {
-    const listEl = this.listEl;
-    if (!listEl) return;
-    const total = this.filteredTransactions.length;
-    const end = Math.min(this.renderedCount + PAGE_SIZE, total);
-    for (let i = this.renderedCount; i < end; i++) {
-      const tx = this.filteredTransactions[i];
-      if (!tx) break;
-      this.renderTransaction(listEl, tx);
-    }
-    this.renderedCount = end;
-    if (this.renderedCount >= total) {
-      this.teardownObserver();
-    } else if (this.sentinelEl) {
-      listEl.appendChild(this.sentinelEl);
-    }
-  }
-  /** 列表尾部放哨兵，进入 root 下方 300px 预载区即追加下一批，直到全部加载完。 */
-  setupInfiniteScroll() {
-    const listEl = this.listEl;
-    if (!listEl) return;
-    const sentinel = listEl.createDiv({ cls: "accounting-load-more", text: t("txList.loadMore") });
-    this.sentinelEl = sentinel;
-    this.loadMoreObserver = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) this.appendChunk();
-        }
-      },
-      { root: listEl, rootMargin: "0px 0px 300px 0px" }
-    );
-    this.loadMoreObserver.observe(sentinel);
-  }
-  /** 断开滚动观察者并清空列表引用；filter 重渲、关闭弹窗时调用，避免泄漏与误触发。 */
-  teardownObserver() {
-    if (this.loadMoreObserver) {
-      this.loadMoreObserver.disconnect();
-      this.loadMoreObserver = null;
-    }
-    if (this.sentinelEl) {
-      this.sentinelEl.remove();
-      this.sentinelEl = null;
-    }
-    this.listEl = null;
-  }
-  renderTransaction(container, tx) {
-    const selected = this.selectedIds.has(tx.id);
-    const row = container.createDiv({ cls: `accounting-transaction-row${this.selectMode ? " accounting-tx-select-mode" : ""}${selected ? " accounting-tx-selected" : ""}` });
-    row.onclick = () => {
-      if (this.selectMode) {
-        if (this.selectedIds.has(tx.id)) {
-          this.selectedIds.delete(tx.id);
-        } else {
-          this.selectedIds.add(tx.id);
-        }
-        this.render();
-        return;
-      }
-      new TransactionDetailModal(
-        this.app,
-        this.adapter,
-        tx,
-        this.accounts,
-        this.categories,
-        this.transactions,
-        () => this.reloadAndRender(),
-        this.navCtx
-      ).open();
-    };
-    if (this.selectMode) {
-      const check = row.createDiv({ cls: `accounting-tx-check${selected ? " accounting-tx-check-on" : ""}` });
-      check.createSpan({ text: selected ? "\u2713" : "" });
-    }
-    const left = row.createDiv({ cls: "accounting-tx-left" });
-    left.createEl("span", {
-      text: this.typeLabel(tx.type),
-      cls: `accounting-tx-type accounting-tx-${tx.type}`
-    });
-    if (this.conflictIds.has(tx.id)) {
-      left.createEl("span", {
-        text: "\u26A0\uFE0F",
-        cls: "accounting-tx-conflict-mark",
-        attr: { title: t("tiedConflict.badgeTip"), "aria-label": t("tiedConflict.badgeTip") }
-      });
-    }
-    const middle = row.createDiv({ cls: "accounting-tx-middle" });
-    const detail = middle.createDiv({ cls: "accounting-tx-detail" });
-    if (tx.type === "expense" || tx.type === "income") {
-      const acc = tx.account ? this.accountById.get(tx.account) : void 0;
-      detail.appendText(acc ? acc.name : tx.account ?? "");
-      detail.appendText(" \xB7 ");
-      detail.createEl("span", { text: tx.category || "", cls: "accounting-tx-cat" });
-    } else {
-      detail.appendText(this.formatDetail(tx));
-    }
-    middle.createEl("div", {
-      text: this.formatTime(tx.ts),
-      cls: "accounting-tx-note"
-    });
-    const right = row.createDiv({ cls: "accounting-tx-right" });
-    right.createEl("span", {
-      text: formatMoney(tx.amount, tx.currency),
-      cls: `accounting-tx-amount ${this.amountClass(tx)}`
-    });
-  }
-  /** 是否有任意筛选项生效（决定是否显示统一「清除」按钮；对齐桌面 hasFilter）。 */
-  hasActiveFilter() {
-    const f = this.filter;
-    return f.types.length > 0 || !!f.accountId || !!f.keyword || !!f.recurringRuleId || !!f.category || f.uncategorized || f.quickActive !== "halfYear" || f.start !== monthsAgoDateInput(6) || f.end !== todayDateInput();
-  }
-  /** 重置所有筛选项到默认（近6月 + 全部类型/账户 + 无关键词 + 无周期账；对齐桌面 clearAll）。 */
-  resetFilter() {
-    this.filter = {
-      start: monthsAgoDateInput(6),
-      end: todayDateInput(),
-      types: [],
-      keyword: "",
-      accountId: "",
-      recurringRuleId: "",
-      category: "",
-      uncategorized: false,
-      quickActive: "halfYear",
-      sort: this.filter.sort
-      // 排序非筛选维度，清除时保留（对齐桌面 clearAll 不动 sort）
-    };
-  }
-  applyFilter() {
-    this.filteredTransactions = filterAndSortTransactions(this.transactions, {
-      types: this.filter.types,
-      account: this.filter.accountId,
-      category: this.filter.category,
-      uncategorized: this.filter.uncategorized ? true : void 0,
-      recurringRuleId: this.filter.recurringRuleId,
-      minAmount: null,
-      maxAmount: null,
-      from: this.filter.start,
-      to: this.filter.end,
-      query: this.filter.keyword,
-      sort: this.filter.sort
-    });
-  }
-  /** 应用 freshly-loaded 事件：折叠交易 + 更新 updatedAt 索引 + 检测打平冲突（行角标 + 一次性 Notice）。 */
-  applyEvents(events) {
-    this.updatedAtById = latestUpdatedAtById(events);
-    this.transactions = foldEvents(events);
-    this.tiedConflicts = detectTiedConflicts(events);
-    this.conflictIds = new Set(this.tiedConflicts.map((c) => c.id));
-    const { sig, notify } = nextConflictNotice(this.prevConflictSig, this.tiedConflicts);
-    if (notify) {
-      new import_obsidian8.Notice(t("tiedConflict.notice", { count: this.tiedConflicts.length }), 5e3);
-    }
-    this.prevConflictSig = sig;
-  }
-  async reloadAndRender() {
-    try {
-      const events = await this.adapter.loadLog();
-      this.applyEvents(events);
-      this.accountById = new Map(this.accounts.map((a) => [a.id, a]));
-      this.applyFilter();
-      this.render();
-      this.onDataChanged?.();
-    } catch (err) {
-      console.error("\u91CD\u65B0\u52A0\u8F7D\u6D41\u6C34\u5931\u8D25:", err);
-    }
-  }
-  typeLabel(type) {
-    const labels = {
-      expense: t("tx.type.expense"),
-      income: t("tx.type.income"),
-      transfer: t("tx.type.transfer"),
-      loan: t("tx.type.loan")
-    };
-    return labels[type];
-  }
-  formatTime(iso) {
-    return formatLocalTimestamp(iso, getLocale());
-  }
-  formatDetail(tx) {
-    const accountName = (id) => {
-      if (!id) return "";
-      const acc = this.accountById.get(id);
-      return acc ? acc.name : id;
-    };
-    switch (tx.type) {
-      case "expense":
-      case "income":
-        return `${accountName(tx.account)} \xB7 ${tx.category || ""}`;
-      case "transfer":
-        return `${accountName(tx.fromAccount)} \u2192 ${accountName(tx.toAccount)}`;
-      case "loan": {
-        const dir = tx.direction === "lend" ? t("txList.loanDir.lend") : tx.direction === "borrow" ? t("txList.loanDir.borrow") : tx.direction === "collect" ? t("txList.loanDir.collect") : t("txList.loanDir.repay");
-        return `${dir} \xB7 ${accountName(tx.person)}`;
-      }
-      default:
-        return "";
-    }
-  }
-  /** 金额颜色：borrow/collect = 钱进己方（正向），lend/repay = 钱出己方（负向）。 */
-  amountClass(tx) {
-    if (tx.type === "expense" || tx.type === "transfer") return "accounting-amount-negative";
-    if (tx.type === "income") return "accounting-amount-positive";
-    return loanCashIn(tx.direction) ? "accounting-amount-positive" : "accounting-amount-negative";
-  }
-  /** 走 Obsidian 原生关闭：pop 全局 keymap scope（Modal.open 时 push 的 Escape/Tab 捕获）并恢复焦点，
-   *  再由基类回调 onClose。默认关闭动画已被 inline animation/transition:none 中和，仍是即时摘除——
-   *  若绕过 super.close() 只 detach 容器，scope 不弹、焦点不恢复，会导致关闭后 Obsidian 笔记无法正常编辑。 */
-  close() {
-    if (this.closing) return;
-    this.closing = true;
-    super.close();
-  }
-  onClose() {
-    this.closeSortMenu();
-    this.teardownObserver();
-    this.contentEl.empty();
-  }
-};
-
-// src/balanceModal.ts
-var import_obsidian14 = require("obsidian");
-
-// src/adjustBalanceModal.ts
-var import_obsidian9 = require("obsidian");
-var AdjustBalanceModal = class extends import_obsidian9.Modal {
-  constructor(app, adapter, account, currentBalance, accounts, categories, onSubmitted) {
-    super(app);
-    this.adapter = adapter;
-    this.account = account;
-    this.currentBalance = currentBalance;
-    this.accounts = accounts;
-    this.categories = categories;
-    this.onSubmitted = onSubmitted;
-  }
-  targetEl;
-  noteEl;
-  categoryEl;
-  deltaEl;
-  errorEl;
-  keyboardAvoidance;
-  adjustCat = t("seed.category.adjust");
-  selectedCategory = this.adjustCat;
-  /** 交易时间（datetime-local 表单值）；默认当前时刻，提交时转本地偏移 ISO 写入 ts */
-  tsValue = nowDatetimeLocal();
-  onOpen() {
-    const { contentEl } = this;
-    contentEl.empty();
-    this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian9.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
-    contentEl.addClass("accounting-adjust-modal");
-    const titleRow = contentEl.createDiv({ cls: "accounting-adjust-title-row" });
-    titleRow.createEl("div", {
-      text: t("adjust.title", { name: this.account.name }),
-      cls: "accounting-adjust-title"
-    });
-    appendHeaderHelp(titleRow, {
-      detail: t("adjust.detail"),
-      ariaLabel: t("adjust.ariaLabel")
-    });
-    contentEl.createEl("div", {
-      text: t("adjust.currentBalance", { balance: formatMoney(this.currentBalance, this.account.currency) }),
-      cls: "accounting-adjust-current"
-    });
-    const targetRow = contentEl.createDiv({ cls: "accounting-adjust-row" });
-    targetRow.createEl("label", { text: t("adjust.targetLabel"), cls: "accounting-adjust-label" });
-    this.targetEl = targetRow.createEl("input", { cls: "accounting-adjust-input" });
-    this.targetEl.type = "number";
-    this.targetEl.step = "0.01";
-    this.targetEl.inputMode = "decimal";
-    this.targetEl.value = String(round2(this.currentBalance));
-    this.targetEl.addEventListener("input", () => this.updateDelta());
-    this.targetEl.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") this.submit();
-      if (e.key === "Escape") this.close();
-    });
-    this.deltaEl = contentEl.createEl("div", { cls: "accounting-adjust-delta" });
-    this.updateDelta();
-    const categoryRow = contentEl.createDiv({ cls: "accounting-adjust-row" });
-    categoryRow.createEl("label", { text: t("entry.field.category"), cls: "accounting-adjust-label" });
-    this.categoryEl = categoryRow.createEl("select", { cls: "accounting-adjust-input" });
-    this.categoryEl.addEventListener("change", () => {
-      this.selectedCategory = this.categoryEl.value;
-    });
-    this.renderCategoryOptions();
-    const noteRow = contentEl.createDiv({ cls: "accounting-adjust-row" });
-    noteRow.createEl("label", { text: t("entry.field.note"), cls: "accounting-adjust-label" });
-    this.noteEl = noteRow.createEl("input", { cls: "accounting-adjust-input" });
-    this.noteEl.type = "text";
-    this.noteEl.placeholder = t("adjust.notePlaceholder");
-    this.noteEl.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") this.submit();
-      if (e.key === "Escape") this.close();
-    });
-    const timeRow = contentEl.createDiv({ cls: "accounting-adjust-row" });
-    timeRow.createEl("label", { text: t("entry.field.ts"), cls: "accounting-adjust-label" });
-    timeRow.appendChild(createDateField({
-      kind: "datetime-local",
-      value: this.tsValue,
-      cls: "accounting-adjust-input",
-      onChange: (iso) => {
-        this.tsValue = iso;
-      }
-    }));
-    this.errorEl = contentEl.createDiv();
-    const footer = contentEl.createDiv({ cls: "accounting-adjust-footer" });
-    const cancel = footer.createEl("button", { text: t("common.cancel"), cls: "accounting-btn-secondary" });
-    cancel.onclick = () => this.close();
-    const submit = footer.createEl("button", { text: t("adjust.submitBtn"), cls: "accounting-btn-primary" });
-    submit.onclick = () => this.submit();
-    this.keyboardAvoidance = bindKeyboardAvoidance({
-      rootEl: contentEl,
-      modalEl: this.modalEl,
-      mode: "top"
-    });
-    window.setTimeout(() => {
-      this.targetEl.focus();
-      this.targetEl.select();
-    }, 50);
-  }
-  updateDelta() {
-    const res = evaluateAmount(this.targetEl.value);
-    if (!res.ok) {
-      this.deltaEl.setText("");
-      this.renderCategoryOptions();
-      return;
-    }
-    const delta = round2(res.value - this.currentBalance);
-    if (delta === 0) {
-      this.deltaEl.setText(t("adjust.deltaZero"));
-    } else if (delta > 0) {
-      this.deltaEl.setText(t("adjust.deltaIncome", { amt: formatMoney(delta, this.account.currency), cur: this.account.currency }));
-    } else {
-      this.deltaEl.setText(t("adjust.deltaExpense", { amt: formatMoney(delta, this.account.currency), cur: this.account.currency }));
-    }
-    this.renderCategoryOptions();
-  }
-  /** 按当前差额方向重算分类下拉可选项；方向翻转时把所选分类回落到「余额调整」 */
-  renderCategoryOptions() {
-    if (!this.categoryEl) return;
-    const res = evaluateAmount(this.targetEl.value);
-    const delta = res.ok ? round2(res.value - this.currentBalance) : 0;
-    const flow = delta > 0 ? "income" : "expense";
-    const opts = adjustCategoryOptions(this.categories, flow, this.adjustCat);
-    this.categoryEl.empty();
-    for (const cat of opts) {
-      const o = this.categoryEl.createEl("option", { text: cat.name });
-      o.value = cat.name;
-    }
-    this.selectedCategory = resolveAdjustCategory(this.selectedCategory, this.categories, flow, this.adjustCat);
-    this.categoryEl.value = this.selectedCategory;
-  }
-  showError(msg) {
-    this.errorEl.empty();
-    this.errorEl.createEl("div", { text: msg, cls: "accounting-error" });
-  }
-  async ensureCategory() {
-    const flows = ["expense", "income"];
-    let next = [...this.categories];
-    let changed = false;
-    for (const f of flows) {
-      const existing = next.find((c) => c.flow === f && c.name === this.adjustCat);
-      if (!existing) {
-        next = [...next, { id: newCategoryId(), flow: f, name: this.adjustCat }];
-        changed = true;
-      } else if (existing.active === false) {
-        next = next.map((c) => c.id === existing.id ? { ...c, active: true } : c);
-        changed = true;
-      }
-    }
-    if (!changed) return;
-    await this.adapter.writeMeta({ accounts: this.accounts, categories: next });
-    this.categories.length = 0;
-    this.categories.push(...next);
-  }
-  async submit() {
-    const targetRaw = this.targetEl.value;
-    if (!targetRaw) return this.showError(t("adjust.errEmptyTarget"));
-    const targetRes = evaluateAmount(targetRaw);
-    const target = targetRes.ok ? round2(targetRes.value) : Number.NaN;
-    if (Number.isNaN(target)) return this.showError(t("adjust.errInvalidTarget"));
-    const delta = round2(target - this.currentBalance);
-    if (delta === 0) {
-      this.close();
-      return;
-    }
-    const category = resolveAdjustCategory(this.selectedCategory, this.categories, delta > 0 ? "income" : "expense", this.adjustCat);
-    if (category === this.adjustCat) {
-      await this.ensureCategory();
-    }
-    const userNote = this.noteEl.value.trim();
-    const noteText = `${this.adjustCat} ${this.currentBalance.toFixed(2)}\u2192${target.toFixed(2)}${userNote ? "\uFF5C" + userNote : ""}`;
-    const now = nowISO();
-    const ev = {
-      op: "upsert",
-      id: newTxId(),
-      type: delta > 0 ? "income" : "expense",
-      ts: datetimeLocalToISO(this.tsValue),
-      amount: Math.abs(delta),
-      currency: this.account.currency,
-      account: this.account.id,
-      category,
-      note: noteText,
-      createdAt: now,
-      updatedAt: now,
-      source: "manual"
-    };
-    try {
-      await this.adapter.appendEvents([ev]);
-      this.onSubmitted();
-      this.close();
-    } catch (err) {
-      this.showError(t("adjust.writeFailed", { msg: formatError(err) }));
-    }
-  }
-  onClose() {
-    this.keyboardAvoidance?.dispose();
-    this.keyboardAvoidance = void 0;
-    this.contentEl.empty();
-  }
-};
-
-// src/accountActionModal.ts
-var import_obsidian12 = require("obsidian");
-
-// src/accountPropertiesModal.ts
-var import_obsidian10 = require("obsidian");
-var AccountPropertiesModal = class extends import_obsidian10.Modal {
-  constructor(app, adapter, account, accounts, categories, accountTypeSettings, onSaved) {
-    super(app);
-    this.adapter = adapter;
-    this.account = account;
-    this.accounts = accounts;
-    this.categories = categories;
-    this.accountTypeSettings = accountTypeSettings;
-    this.onSaved = onSaved;
-  }
-  nameEl;
-  typeEl;
-  openingEl;
-  currencyEl;
-  noteEl;
-  creditLimitEl;
-  billingDayEl;
-  repaymentEl;
-  creditBlockEl;
-  footerEl;
-  editing = false;
-  rates = {};
-  baseCurrency = "CNY";
-  keyboardAvoidance;
-  async onOpen() {
-    const { contentEl } = this;
-    contentEl.empty();
-    try {
-      this.rates = await this.adapter.readRates();
-      this.baseCurrency = await this.adapter.readBaseCurrency();
-    } catch {
-    }
-    this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian10.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
-    contentEl.addClass("accounting-adjust-modal");
-    contentEl.createEl("div", { text: t("account.properties.title", { name: this.account.name }), cls: "accounting-adjust-title" });
-    const nameRow = this.row(t("account.field.name"));
-    this.nameEl = this.input(nameRow, "text");
-    const typeRow = this.row(t("account.field.type"));
-    this.typeEl = this.select(typeRow);
-    this.typeEl.onchange = () => this.toggleCredit();
-    const openRow = this.row(t("account.field.openingBalance"));
-    this.openingEl = this.input(openRow, "number", "0.01");
-    const curRow = this.row(t("account.field.currencyLocked"));
-    this.currencyEl = this.currencySelect(curRow);
-    this.currencyEl.title = t("account.field.currencyLockedHint");
-    const noteRow = this.row(t("account.field.note"));
-    this.noteEl = this.input(noteRow, "text");
-    this.creditBlockEl = contentEl.createDiv({ cls: "accounting-credit-block" });
-    const clRow = this.row(t("account.field.creditLimit"), this.creditBlockEl);
-    this.creditLimitEl = this.input(clRow, "number", "0.01");
-    const bdRow = this.row(t("account.field.billingDay"), this.creditBlockEl);
-    this.billingDayEl = this.input(bdRow, "number");
-    this.billingDayEl.min = "1";
-    this.billingDayEl.max = "31";
-    this.billingDayEl.placeholder = "1-31";
-    const rdRow = this.row(t("account.field.repaymentDay"), this.creditBlockEl);
-    this.repaymentEl = this.input(rdRow, "number");
-    this.repaymentEl.min = "1";
-    this.repaymentEl.max = "31";
-    this.repaymentEl.placeholder = "1-31";
-    contentEl.createEl("div", {
-      text: t("account.properties.timestamps", { created: fmtTime(this.account.createdAt), modified: fmtTime(this.account.updatedAt) }),
-      cls: "accounting-adjust-current"
-    });
-    this.footerEl = contentEl.createDiv({ cls: "accounting-adjust-footer" });
-    this.refillFrom(this.account);
-    this.setEditable(false);
-    this.renderFooter();
-    contentEl.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") {
-        if (this.editing) this.cancelEdit();
-        else this.close();
-      }
-    });
-    this.keyboardAvoidance = bindKeyboardAvoidance({
-      rootEl: contentEl,
-      modalEl: this.modalEl,
-      mode: "top"
-    });
-  }
-  row(label, parent) {
-    const host = parent ?? this.contentEl;
-    const r = host.createDiv({ cls: "accounting-adjust-row" });
-    r.createEl("label", { text: label, cls: "accounting-adjust-label" });
-    return r;
-  }
-  input(parent, type, step) {
-    const el = parent.createEl("input", { cls: "accounting-adjust-input" });
-    el.type = type;
-    if (step) el.step = step;
-    if (type === "number") el.inputMode = "decimal";
-    return el;
-  }
-  select(parent) {
-    const el = parent.createEl("select", { cls: "accounting-adjust-input" });
-    for (const at of this.accountTypeSettings.types) {
-      el.createEl("option", { text: displayTypeLabel2(at.type, at.label), value: at.type });
-    }
-    return el;
-  }
-  currencySelect(parent) {
-    const el = parent.createEl("select", { cls: "accounting-adjust-input" });
-    const currencies = currencyOptions(this.rates, this.accounts, this.baseCurrency);
-    for (const c of currencies) {
-      el.createEl("option", { text: c, value: c });
-    }
-    return el;
-  }
-  toggleCredit() {
-    this.creditBlockEl.style.display = this.typeEl.value === "credit" ? "" : "none";
-  }
-  /** 用指定账户的值重填所有字段（初始填充 / 取消恢复 / 保存后刷新查看态） */
-  refillFrom(a) {
-    this.nameEl.value = a.name;
-    for (const opt of Array.from(this.typeEl.options)) {
-      opt.selected = opt.value === a.type;
-    }
-    this.openingEl.value = String(a.openingBalance);
-    for (const opt of Array.from(this.currencyEl.options)) {
-      opt.selected = opt.value === (a.currency || "CNY");
-    }
-    this.noteEl.value = a.note ?? "";
-    this.creditLimitEl.value = a.creditLimit != null ? String(a.creditLimit) : "";
-    this.billingDayEl.value = a.billingDay != null ? String(a.billingDay) : "";
-    this.repaymentEl.value = a.repaymentDay != null ? String(a.repaymentDay) : "";
-    this.toggleCredit();
-  }
-  /** 切换查看/编辑态：禁用或启用所有字段（币种除外——创建后不可变更，始终只读） */
-  setEditable(editable) {
-    this.editing = editable;
-    const els = [
-      this.nameEl,
-      this.typeEl,
-      this.openingEl,
-      this.noteEl,
-      this.creditLimitEl,
-      this.billingDayEl,
-      this.repaymentEl
-    ];
-    for (const el of els) el.disabled = !editable;
-    this.currencyEl.disabled = true;
-  }
-  /** 按当前态重渲染底部按钮：查看态=「关闭 / 编辑」，编辑态=「取消 / 保存」 */
-  renderFooter() {
-    this.footerEl.empty();
-    if (this.editing) {
-      const cancel = this.footerEl.createEl("button", { text: t("common.cancel"), cls: "accounting-btn-secondary" });
-      cancel.onclick = () => this.cancelEdit();
-      const save = this.footerEl.createEl("button", { text: t("common.save"), cls: "accounting-btn-primary" });
-      save.onclick = () => void this.submit();
-    } else {
-      const close = this.footerEl.createEl("button", { text: t("common.close"), cls: "accounting-btn-secondary" });
-      close.onclick = () => this.close();
-      const edit = this.footerEl.createEl("button", { text: t("common.edit"), cls: "accounting-btn-primary" });
-      edit.onclick = () => this.enterEdit();
-    }
-  }
-  enterEdit() {
-    this.setEditable(true);
-    this.renderFooter();
-    this.nameEl.focus();
-    this.nameEl.select();
-  }
-  /** 取消编辑：恢复字段为账户当前值，回查看态 */
-  cancelEdit() {
-    this.refillFrom(this.account);
-    this.setEditable(false);
-    this.renderFooter();
-    this.keyboardAvoidance?.reset();
-  }
-  async submit() {
-    const edits = {
-      name: this.nameEl.value,
-      type: this.typeEl.value,
-      openingBalance: this.openingEl.value,
-      currency: this.currencyEl.value || "CNY",
-      note: this.noteEl.value,
-      creditLimit: this.creditLimitEl.value,
-      billingDay: this.billingDayEl.value,
-      repaymentDay: this.repaymentEl.value
-    };
-    const updated = applyAccountEdits(this.account, edits, nowISO());
-    try {
-      await this.adapter.writeMeta({
-        accounts: this.accounts.map((a) => a.id === this.account.id ? updated : a),
-        categories: this.categories
-      });
-      new import_obsidian10.Notice(t("account.properties.savedNotif"));
-      this.account = updated;
-      this.onSaved();
-      this.refillFrom(this.account);
-      this.setEditable(false);
-      this.renderFooter();
-      this.keyboardAvoidance?.reset();
-    } catch (err) {
-      new import_obsidian10.Notice(t("entry.saveFailed", { msg: formatError(err) }));
-    }
-  }
-  onClose() {
-    this.keyboardAvoidance?.dispose();
-    this.keyboardAvoidance = void 0;
-    this.contentEl.empty();
-  }
-};
-function fmtTime(iso) {
-  if (!iso) return "\u2014";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const pad = (x) => String(x).padStart(2, "0");
-  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-// src/accountMergeModal.ts
-var import_obsidian11 = require("obsidian");
-var AccountMergeModal = class extends import_obsidian11.Modal {
-  constructor(app, adapter, source, allAccounts, onDone) {
-    super(app);
-    this.adapter = adapter;
-    this.source = source;
-    this.allAccounts = allAccounts;
-    this.onDone = onDone;
-  }
-  targetSelect;
-  errorEl;
-  submitting = false;
-  onOpen() {
-    const { contentEl } = this;
-    contentEl.empty();
-    this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian11.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
-    contentEl.createEl("h2", { text: t("account.merge.title") });
-    contentEl.createEl("div", {
-      text: t("account.merge.intro", { name: this.source.name }),
-      cls: "accounting-ledger-folder"
-    });
-    contentEl.createEl("div", {
-      text: t("account.merge.currencyHint", { cur: this.source.currency }),
-      cls: "accounting-ledger-folder"
-    });
-    const targets = this.allAccounts.filter((a) => a.id !== this.source.id && canMergeAccount(this.source, a));
-    this.targetSelect = contentEl.createEl("select", { cls: "accounting-ledger-input" });
-    this.targetSelect.createEl("option", { value: "", text: t("account.merge.targetPlaceholder") });
-    for (const tgt of targets) {
-      this.targetSelect.createEl("option", {
-        value: tgt.id,
-        text: tgt.active === false ? t("account.merge.targetHidden", { name: tgt.name }) : tgt.name
-      });
-    }
-    this.errorEl = contentEl.createEl("div", { cls: "accounting-ledger-error" });
-    const actions = contentEl.createDiv("accounting-modal-actions");
-    const cancelBtn = actions.createEl("button", { text: t("common.cancel"), cls: "accounting-btn-secondary" });
-    cancelBtn.onclick = () => this.close();
-    const submitBtn = actions.createEl("button", { text: t("account.merge.confirmBtn"), cls: "accounting-btn-primary" });
-    submitBtn.onclick = () => void this.submit();
-    setTimeout(() => this.targetSelect.focus(), 0);
-  }
-  async submit() {
-    if (this.submitting) return;
-    const toId = this.targetSelect.value;
-    if (!toId) {
-      this.errorEl.setText(t("account.merge.errNoTarget"));
-      return;
-    }
-    const target = this.allAccounts.find((a) => a.id === toId);
-    const targetName = target?.name ?? toId;
-    if (!confirm(
-      t("account.merge.confirmMsg", { source: this.source.name, target: targetName })
-    )) {
-      return;
-    }
-    this.submitting = true;
-    try {
-      const events = await this.adapter.loadLog();
-      const meta = await this.adapter.readMeta();
-      const plan = planMergeAccount({
-        events,
-        accounts: meta.accounts,
-        fromId: this.source.id,
-        toId,
-        now: nowISO()
-      });
-      if (plan.events.length > 0) {
-        await this.adapter.backup("pre-merge");
-        await this.adapter.appendEvents(plan.events);
-      }
-      await this.adapter.writeMeta({ accounts: plan.accounts, categories: meta.categories });
-      const parts = [t("account.merge.resultRewritten", { n: plan.rewritten })];
-      if (plan.deleted > 0) parts.push(t("account.merge.resultDeleted", { n: plan.deleted }));
-      parts.push(t("account.merge.resultMerged", { source: this.source.name, target: targetName }));
-      new import_obsidian11.Notice(parts.join(t("account.merge.resultSep")));
-      this.close();
-      this.onDone();
-    } catch (err) {
-      this.submitting = false;
-      console.error("\u5408\u5E76\u8D26\u6237\u5931\u8D25:", err);
-      this.errorEl.setText(t("account.merge.failed", { msg: formatError(err) }));
-    }
-  }
-  onClose() {
-    this.contentEl.empty();
-  }
-};
-
-// src/accountActionModal.ts
-var AccountActionModal = class extends import_obsidian12.Modal {
-  constructor(app, adapter, account, accounts, categories, accountTypeSettings, navCtx, onSaved) {
-    super(app);
-    this.adapter = adapter;
-    this.account = account;
-    this.accounts = accounts;
-    this.categories = categories;
-    this.accountTypeSettings = accountTypeSettings;
-    this.navCtx = navCtx;
-    this.onSaved = onSaved;
-  }
-  onOpen() {
-    const { contentEl } = this;
-    contentEl.empty();
-    this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian12.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
-    contentEl.createEl("div", { text: this.account.name, cls: "accounting-action-title" });
-    const list = contentEl.createDiv({ cls: "accounting-action-list" });
-    const txItem = list.createEl("button", { cls: "accounting-action-item" });
-    txItem.createEl("span", { text: t("account.action.viewTx"), cls: "accounting-action-item-text" });
-    txItem.title = t("account.action.viewTxHint");
-    txItem.onclick = () => {
-      this.close();
-      this.navCtx.openList(this.account.id, void 0, true, void 0, this.onSaved);
-    };
-    const propItem = list.createEl("button", { cls: "accounting-action-item" });
-    propItem.createEl("span", { text: t("account.action.viewProps"), cls: "accounting-action-item-text" });
-    propItem.title = t("account.action.viewPropsHint");
-    propItem.onclick = () => {
-      this.close();
-      new AccountPropertiesModal(
-        this.app,
-        this.adapter,
-        this.account,
-        this.accounts,
-        this.categories,
-        this.accountTypeSettings,
-        this.onSaved
-      ).open();
-    };
-    const toggleActiveItem = list.createEl("button", { cls: "accounting-action-item" });
-    const nextActive = !this.account.active;
-    toggleActiveItem.createEl("span", { text: nextActive ? t("account.action.enable") : t("account.action.hide"), cls: "accounting-action-item-text" });
-    toggleActiveItem.title = nextActive ? t("account.action.enableHint") : t("account.action.hideHint");
-    toggleActiveItem.onclick = () => {
-      void this.toggleAccountActive(nextActive);
-    };
-    if (this.accounts.filter((a) => a.id !== this.account.id).length > 0) {
-      const mergeItem = list.createEl("button", { cls: "accounting-action-item" });
-      mergeItem.createEl("span", { text: t("account.action.merge"), cls: "accounting-action-item-text" });
-      mergeItem.title = t("account.action.mergeHint");
-      mergeItem.onclick = () => {
-        this.close();
-        new AccountMergeModal(this.app, this.adapter, this.account, this.accounts, this.onSaved).open();
-      };
-    }
-    const closeWrap = contentEl.createDiv({ cls: "accounting-modal-close" });
-    const closeBtn = closeWrap.createEl("button", { text: t("common.close"), cls: "accounting-btn-secondary" });
-    closeBtn.onclick = () => this.close();
-  }
-  async toggleAccountActive(active) {
-    try {
-      const meta = await this.adapter.readMeta();
-      const target = meta.accounts.find((a) => a.id === this.account.id);
-      if (!target) {
-        new import_obsidian12.Notice(t("account.action.notFound"));
-        this.close();
-        this.onSaved();
-        return;
-      }
-      await this.adapter.writeMeta({
-        accounts: meta.accounts.map((a) => a.id === this.account.id ? { ...a, active } : a),
-        categories: meta.categories
-      });
-      new import_obsidian12.Notice(active ? t("account.action.enabledNotif", { name: target.name }) : t("account.action.hiddenNotif", { name: target.name }));
-      this.close();
-      this.onSaved();
-    } catch (err) {
-      new import_obsidian12.Notice(t("account.action.updateFailed", { msg: formatError(err) }));
-    }
-  }
-  onClose() {
-    this.contentEl.empty();
-  }
-};
-
-// src/accountCreateModal.ts
-var import_obsidian13 = require("obsidian");
-var AccountCreateModal = class extends import_obsidian13.Modal {
-  constructor(app, adapter, accounts, categories, accountTypeSettings, onSaved) {
-    super(app);
-    this.adapter = adapter;
-    this.accounts = accounts;
-    this.categories = categories;
-    this.accountTypeSettings = accountTypeSettings;
-    this.onSaved = onSaved;
-  }
-  nameEl;
-  typeEl;
-  openingEl;
-  currencyEl;
-  noteEl;
-  creditLimitEl;
-  billingDayEl;
-  repaymentEl;
-  creditBlockEl;
-  footerEl;
-  rates = {};
-  baseCurrency = "CNY";
-  keyboardAvoidance;
-  async onOpen() {
-    const { contentEl } = this;
-    contentEl.empty();
-    try {
-      this.rates = await this.adapter.readRates();
-      this.baseCurrency = await this.adapter.readBaseCurrency();
-    } catch {
-    }
-    this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian13.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
-    contentEl.addClass("accounting-adjust-modal");
-    contentEl.createEl("div", { text: t("account.create.title"), cls: "accounting-adjust-title" });
-    const nameRow = this.row(t("account.field.name"));
-    this.nameEl = this.input(nameRow, "text");
-    const typeRow = this.row(t("account.field.type"));
-    this.typeEl = this.select(typeRow);
-    this.typeEl.onchange = () => this.toggleCredit();
-    const openRow = this.row(t("account.field.openingBalance"));
-    this.openingEl = this.input(openRow, "number", "0.01");
-    const curRow = this.row(t("account.field.currency"));
-    this.currencyEl = this.currencySelect(curRow);
-    const noteRow = this.row(t("account.field.note"));
-    this.noteEl = this.input(noteRow, "text");
-    this.creditBlockEl = contentEl.createDiv({ cls: "accounting-credit-block" });
-    const clRow = this.row(t("account.field.creditLimit"), this.creditBlockEl);
-    this.creditLimitEl = this.input(clRow, "number", "0.01");
-    const bdRow = this.row(t("account.field.billingDay"), this.creditBlockEl);
-    this.billingDayEl = this.input(bdRow, "number");
-    this.billingDayEl.min = "1";
-    this.billingDayEl.max = "31";
-    this.billingDayEl.placeholder = "1-31";
-    const rdRow = this.row(t("account.field.repaymentDay"), this.creditBlockEl);
-    this.repaymentEl = this.input(rdRow, "number");
-    this.repaymentEl.min = "1";
-    this.repaymentEl.max = "31";
-    this.repaymentEl.placeholder = "1-31";
-    this.footerEl = contentEl.createDiv({ cls: "accounting-adjust-footer" });
-    this.initializeDefaults();
-    this.renderFooter();
-    contentEl.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") {
-        this.close();
-      }
-    });
-    this.keyboardAvoidance = bindKeyboardAvoidance({
-      rootEl: contentEl,
-      modalEl: this.modalEl,
-      mode: "top"
-    });
-  }
-  row(label, parent) {
-    const host = parent ?? this.contentEl;
-    const r = host.createDiv({ cls: "accounting-adjust-row" });
-    r.createEl("label", { text: label, cls: "accounting-adjust-label" });
-    return r;
-  }
-  input(parent, type, step) {
-    const el = parent.createEl("input", { cls: "accounting-adjust-input" });
-    el.type = type;
-    if (step) el.step = step;
-    if (type === "number") el.inputMode = "decimal";
-    return el;
-  }
-  select(parent) {
-    const el = parent.createEl("select", { cls: "accounting-adjust-input" });
-    for (const at of this.accountTypeSettings.types) {
-      el.createEl("option", { text: displayTypeLabel2(at.type, at.label), value: at.type });
-    }
-    return el;
-  }
-  currencySelect(parent) {
-    const el = parent.createEl("select", { cls: "accounting-adjust-input" });
-    const currencies = currencyOptions(this.rates, this.accounts, this.baseCurrency);
-    for (const c of currencies) {
-      el.createEl("option", { text: c, value: c });
-    }
-    return el;
-  }
-  toggleCredit() {
-    this.creditBlockEl.style.display = this.typeEl.value === "credit" ? "" : "none";
-  }
-  /** 初始化默认值：币种按界面语言（中文→CNY，其他→USD，偏好不在可选集时回落本位币），类型=第一个启用类型，其他为空 */
-  initializeDefaults() {
-    const pref = getLocale().toLowerCase().startsWith("zh") ? "CNY" : "USD";
-    const opts = Array.from(this.currencyEl.options).map((o) => o.value);
-    const defaultCur = opts.includes(pref) ? pref : this.baseCurrency;
-    for (const opt of Array.from(this.currencyEl.options)) {
-      opt.selected = opt.value === defaultCur;
-    }
-    const firstEnabled = this.accountTypeSettings.types.find((at) => at.active !== false);
-    if (firstEnabled) {
-      for (const opt of Array.from(this.typeEl.options)) {
-        opt.selected = opt.value === firstEnabled.type;
-      }
-    }
-    this.openingEl.value = "0";
-    this.toggleCredit();
-    this.nameEl.addEventListener("input", () => this.updateSaveButton());
-    this.updateSaveButton();
-  }
-  /** 更新保存按钮状态（名称为空时禁用） */
-  updateSaveButton() {
-    const saveBtn = this.footerEl?.querySelector(".accounting-btn-primary");
-    if (saveBtn) {
-      saveBtn.disabled = !this.nameEl.value.trim();
-    }
-  }
-  /** 渲染底部按钮：取消 / 保存 */
-  renderFooter() {
-    this.footerEl.empty();
-    const cancel = this.footerEl.createEl("button", { text: t("common.cancel"), cls: "accounting-btn-secondary" });
-    cancel.onclick = () => this.close();
-    const save = this.footerEl.createEl("button", { text: t("common.save"), cls: "accounting-btn-primary" });
-    save.disabled = true;
-    save.onclick = () => void this.submit();
-  }
-  async submit() {
-    const name = this.nameEl.value.trim();
-    const type = this.typeEl.value;
-    const openingBalance = this.openingEl.value;
-    const currency = this.currencyEl.value || "CNY";
-    const note = this.noteEl.value;
-    const creditLimit = this.creditLimitEl.value;
-    const billingDay = this.billingDayEl.value;
-    const repaymentDay = this.repaymentEl.value;
-    if (billingDay && (parseInt(billingDay) < 1 || parseInt(billingDay) > 31)) {
-      new import_obsidian13.Notice(t("account.err.billingDayRange"));
-      return;
-    }
-    if (repaymentDay && (parseInt(repaymentDay) < 1 || parseInt(repaymentDay) > 31)) {
-      new import_obsidian13.Notice(t("account.err.repaymentDayRange"));
-      return;
-    }
-    const id = crypto.randomUUID();
-    const now = nowISO();
-    const newAccount = {
-      id,
-      name,
-      type,
-      openingBalance: parseFloat(openingBalance) || 0,
-      currency,
-      note: note || void 0,
-      creditLimit: type === "credit" ? parseFloat(creditLimit) || void 0 : void 0,
-      billingDay: type === "credit" ? parseInt(billingDay) || void 0 : void 0,
-      repaymentDay: type === "credit" ? parseInt(repaymentDay) || void 0 : void 0,
-      active: true,
-      createdAt: now,
-      updatedAt: now
-    };
-    try {
-      await this.adapter.writeMeta({
-        accounts: [...this.accounts, newAccount],
-        categories: this.categories
-      });
-      new import_obsidian13.Notice(t("account.createdNotif", { name }));
-      this.onSaved();
-      this.close();
-    } catch (err) {
-      new import_obsidian13.Notice(t("account.createFailed", { msg: formatError(err) }));
-    }
-  }
-  onClose() {
-    this.keyboardAvoidance?.dispose();
-    this.keyboardAvoidance = void 0;
-    this.contentEl.empty();
-  }
-};
-
-// src/balanceModal.ts
-var BalanceModal = class extends import_obsidian14.Modal {
-  constructor(app, adapter, navCtx, slide, onSwitchLedger, onOpened) {
-    super(app);
-    this.adapter = adapter;
-    this.navCtx = navCtx;
-    this.slide = slide;
-    this.onSwitchLedger = onSwitchLedger;
-    this.onOpened = onOpened;
-  }
-  opened = false;
-  closing = false;
-  accountTypeSettings = defaultAccountTypeSettings();
-  /** 本位币（默认 CNY）：净资产折算目标，refresh 时从账本读取 */
-  baseCurrency = "CNY";
-  /** 在挂载到 DOM 前就预设全屏类与禁用 Obsidian 默认 modal-pop 动画，避免「先上跳再滑入」。 */
-  open() {
-    presetModalChrome(this.modalEl, this.containerEl);
-    super.open();
-  }
-  async onOpen() {
-    this.opened = true;
-    prepareModalContainer(this.containerEl);
-    this.modalEl.addClass("accounting-fullscreen");
-    this.onOpened?.();
-    const sc = slideClass(this.slide);
-    if (sc) this.contentEl.addClass(sc);
-    if (this.onSwitchLedger) {
-      const ledgerAlias = await this.adapter.readActiveLedgerAlias();
-      mountLedgerPill(this.modalEl, this.app, this.adapter, ledgerAlias, (name) => {
-        this.onSwitchLedger?.(name, () => this.close());
-      });
-      this.contentEl.addClass("accounting-has-ledger-pill");
-    }
-    await this.refresh();
-  }
-  async refresh() {
-    const { contentEl } = this;
-    contentEl.empty();
-    contentEl.addClass("accounting-balance-modal");
-    this.renderNav();
-    let snap;
-    try {
-      snap = await this.loadSnapshot();
-    } catch {
-      contentEl.createEl("div", {
-        text: t("txList.loadFailed"),
-        cls: "accounting-empty"
-      });
-      return;
-    }
-    if (snap.accounts.length === 0 && snap.transactions.length === 0) {
-      contentEl.createEl("div", {
-        text: t("balance.emptyNoAccounts"),
-        cls: "accounting-empty"
-      });
-      const createAccountEl2 = contentEl.createDiv({ cls: "accounting-create-account-row" });
-      const createBtn2 = createAccountEl2.createEl("button", {
-        text: t("balance.createAccountBtn"),
-        cls: "accounting-ledger-create"
-      });
-      createBtn2.onclick = () => {
-        new AccountCreateModal(
-          this.app,
-          this.adapter,
-          snap.accounts,
-          snap.categories,
-          this.accountTypeSettings,
-          () => this.refresh()
-        ).open();
-      };
-      return;
-    }
-    const storedTypes = await this.adapter.readAccountTypeSettings();
-    this.accountTypeSettings = storedTypes ? normalizeAccountTypeSettings(storedTypes) : defaultAccountTypeSettings();
-    this.baseCurrency = await this.adapter.readBaseCurrency();
-    const rates = await this.adapter.readRates();
-    const balances = computeBalances(snap.transactions, snap.accounts);
-    const nw = computeNetWorth(snap.transactions, snap.accounts, { rates, base: this.baseCurrency, accountTypeSettings: this.accountTypeSettings });
-    const baseBalances = convertBalancesToBase(balances, snap.accounts, rates, this.baseCurrency);
-    const totalRec = nw.receivables.reduce((s, r) => s + r.amount, 0);
-    const totalPay = nw.payables.reduce((s, p) => s + p.amount, 0);
-    const negative = nw.netWorth < 0;
-    const hero = contentEl.createDiv({ cls: `accounting-nw-hero${negative ? " accounting-nw-hero--neg" : ""}` });
-    hero.createEl("div", { text: this.baseCurrency !== "CNY" ? t("balance.netWorthWithCur", { cur: this.baseCurrency }) : t("balance.netWorth"), cls: "accounting-nw-hero-label" });
-    hero.createEl("div", { text: formatMoneyInt(nw.netWorth, this.baseCurrency), cls: "accounting-nw-hero-value" });
-    const sub = hero.createDiv({ cls: "accounting-nw-hero-sub" });
-    const assetCell = sub.createDiv({ cls: "accounting-nw-hero-cell" });
-    assetCell.createEl("div", { text: t("balance.totalAssets"), cls: "accounting-nw-hero-cell-label" });
-    assetCell.createEl("div", { text: formatMoneyInt(nw.totalAssets, this.baseCurrency), cls: "accounting-nw-hero-cell-value accounting-nw-hero-asset" });
-    const liabCell = sub.createDiv({ cls: "accounting-nw-hero-cell accounting-nw-hero-cell--last" });
-    liabCell.createEl("div", { text: t("balance.totalLiabilities"), cls: "accounting-nw-hero-cell-label" });
-    liabCell.createEl("div", { text: formatMoneyInt(nw.totalLiabilities, this.baseCurrency), cls: "accounting-nw-hero-cell-value accounting-nw-hero-liab" });
-    const sum = contentEl.createDiv({ cls: "accounting-summary" });
-    sum.createEl("span", { text: t("balance.creditPayable", { amount: formatMoney(nw.creditPayable, this.baseCurrency) }) });
-    sum.createEl("span", { text: t("balance.receivablesPayables", { rec: formatMoney(totalRec, this.baseCurrency), pay: formatMoney(totalPay, this.baseCurrency) }) });
-    const active = snap.accounts.filter((a) => a.active);
-    const hidden = snap.accounts.filter((a) => !a.active);
-    this.renderGroups(contentEl, active, balances, baseBalances, snap);
-    const createAccountEl = contentEl.createDiv({ cls: "accounting-create-account-row" });
-    const createBtn = createAccountEl.createEl("button", {
-      text: t("balance.createAccountBtn"),
-      cls: "accounting-ledger-create"
-    });
-    createBtn.onclick = () => {
-      new AccountCreateModal(
-        this.app,
-        this.adapter,
-        snap.accounts,
-        snap.categories,
-        this.accountTypeSettings,
-        () => this.refresh()
-      ).open();
-    };
-    if (hidden.length > 0) {
-      const h = contentEl.createEl("details", { cls: "accounting-hidden" });
-      h.createEl("summary", { text: t("balance.hiddenSummary"), cls: "accounting-collapsible-head" });
-      this.renderGroups(h, hidden, balances, baseBalances, snap);
-    }
-  }
-  /** 统一底部导航条（由 CSS 固定到底部，内容区预留 safe-area）。 */
-  renderNav() {
-    renderNavBar(this.modalEl, "balance", this.navCtx, () => this.close());
-  }
-  renderGroups(parent, accounts, balances, baseBalances, snap) {
-    const typeToGroupId = /* @__PURE__ */ new Map();
-    for (const at of this.accountTypeSettings.types) typeToGroupId.set(at.type, at.groupId);
-    const byGroup = /* @__PURE__ */ new Map();
-    for (const a of accounts) {
-      const gid = typeToGroupId.get(a.type) ?? "";
-      const arr = byGroup.get(gid) ?? [];
-      arr.push(a);
-      byGroup.set(gid, arr);
-    }
-    for (const g of resolveTypeGroups(this.accountTypeSettings)) {
-      const items = (byGroup.get(g.id) ?? []).slice().sort((a, b) => a.name.localeCompare(b.name, "zh"));
-      if (items.length === 0) continue;
-      const group = parent.createEl("details", { cls: "accounting-group" });
-      const head = group.createEl("summary", { cls: "accounting-group-head" });
-      const groupTotal = items.reduce((s, a) => s + (baseBalances.get(a.id) ?? 0), 0);
-      const hasLiability = g.types.some((at) => accountKindOf(this.accountTypeSettings, at.type) === "liability");
-      head.createEl("span", { text: `${displayGroupLabel2(g.id, g.label)} \xB7 ${hasLiability ? t("balance.kindLiability") : t("balance.kindAsset")}`, cls: "accounting-group-head-title" });
-      head.createEl("span", { text: formatMoney(groupTotal, this.baseCurrency) });
-      for (const a of items) {
-        const row = group.createDiv({ cls: "accounting-row" });
-        const name = row.createEl("span", { cls: "accounting-row-name" });
-        const label = name.createEl("span", { text: a.name, cls: "accounting-row-name-label" });
-        if (a.note) label.createSpan({ text: ` ${a.note}`, cls: "accounting-muted" });
-        name.title = t("balance.accountOptionsHint");
-        name.onclick = () => {
-          new AccountActionModal(
-            this.app,
-            this.adapter,
-            a,
-            snap.accounts,
-            snap.categories,
-            this.accountTypeSettings,
-            this.navCtx,
-            () => this.refresh()
-          ).open();
-        };
-        const balance = balances.get(a.id) ?? 0;
-        const amountEl = row.createEl("span", { text: formatMoney(balance, a.currency ?? "CNY"), cls: "accounting-row-amount" });
-        amountEl.title = t("balance.adjustHint");
-        amountEl.onclick = () => {
-          new AdjustBalanceModal(
-            this.app,
-            this.adapter,
-            a,
-            balance,
-            snap.accounts,
-            snap.categories,
-            () => this.refresh()
-          ).open();
-        };
-      }
-    }
-  }
-  async loadSnapshot() {
-    const events = await this.adapter.loadLog();
-    const transactions = foldEvents(events);
-    const meta = await this.adapter.readMeta();
-    return { transactions, accounts: meta.accounts, categories: meta.categories };
-  }
-  /** 走 Obsidian 原生关闭：pop 全局 keymap scope（Modal.open 时 push 的 Escape/Tab 捕获）并恢复焦点，
-   *  再由基类回调 onClose。默认关闭动画已被 inline animation/transition:none 中和，仍是即时摘除——
-   *  若绕过 super.close() 只 detach 容器，scope 不弹、焦点不恢复，会导致关闭后 Obsidian 笔记无法正常编辑。 */
-  close() {
-    if (this.closing) return;
-    this.closing = true;
-    super.close();
-  }
-  onClose() {
-    this.contentEl.empty();
-  }
-};
-
 // src/reportModal.ts
-var import_obsidian15 = require("obsidian");
+var import_obsidian14 = require("obsidian");
 var RANGE_OPTIONS = [
   { key: "thisMonth", i18nKey: "report.range.thisMonth" },
   { key: "last1m", i18nKey: "report.range.last1m" },
@@ -9010,7 +8188,7 @@ function formatAxisAmount(n, currency) {
   const sign = n < 0 ? "-" : "";
   const abs = Math.abs(n);
   const r1 = (x) => Math.round(x * 10) / 10;
-  if (currency === "CNY") {
+  if (currency === "CNY" && getLocale() === "zh") {
     if (abs >= 1e8) return `${sign}${r1(abs / 1e8)}\u4EBF`;
     if (abs >= 1e4) return abs >= 1e6 ? `${sign}${Math.round(abs / 1e4)}\u4E07` : `${sign}${r1(abs / 1e4)}\u4E07`;
     return `${sign}${Math.round(abs)}`;
@@ -9019,7 +8197,7 @@ function formatAxisAmount(n, currency) {
   if (abs >= 1e3) return `${sign}${r1(abs / 1e3)}k`;
   return `${sign}${Math.round(abs)}`;
 }
-var ReportModal = class extends import_obsidian15.Modal {
+var ReportModal = class extends import_obsidian14.Modal {
   constructor(app, adapter, navCtx, slide, onSwitchLedger, onOpened) {
     super(app);
     this.adapter = adapter;
@@ -9037,7 +8215,7 @@ var ReportModal = class extends import_obsidian15.Modal {
   accounts = [];
   /** 汇率表（多币种折算到本位币）；reloadData 时从 rates.json 读取，缺失为空表（各币种按 1 回退） */
   rates = {};
-  /** 支出/收入分类是否展开全部（默认折叠到 TOP_N，点「展开其他」逐项显示，不再合并为「其他」） */
+  /** 支出/收入分类是否展开（默认折叠到 TOP_N，点「展开其他」逐项显示，不再合并为「其他」） */
   expandedExpense = false;
   expandedIncome = false;
   /** 本位币（聚合折算目标 + 金额符号；reloadData 时从 ledger.json 读取，默认 CNY） */
@@ -9581,8 +8759,8 @@ var ReportModal = class extends import_obsidian15.Modal {
 };
 
 // src/settingsModal.ts
-var import_obsidian16 = require("obsidian");
-var SettingsModal = class extends import_obsidian16.Modal {
+var import_obsidian15 = require("obsidian");
+var SettingsModal = class extends import_obsidian15.Modal {
   constructor(app, settingsTab, navCtx, slide, onSwitchLedger, onOpened) {
     super(app);
     this.settingsTab = settingsTab;
@@ -9650,6 +8828,1391 @@ var SettingsModal = class extends import_obsidian16.Modal {
   }
 };
 
+// src/transactionListModal.ts
+var import_obsidian18 = require("obsidian");
+
+// src/batchModifyModal.ts
+var import_obsidian16 = require("obsidian");
+var TYPES2 = [
+  { key: "expense", i18nKey: "tx.type.expense" },
+  { key: "income", i18nKey: "tx.type.income" },
+  { key: "transfer", i18nKey: "tx.type.transfer" },
+  { key: "loan", i18nKey: "tx.type.loan" }
+];
+var BatchModifyModal = class extends import_obsidian16.Modal {
+  constructor(app, adapter, transactions, baseUpdatedAtById, accounts, categories, accountTypeSettings, onDone) {
+    super(app);
+    this.adapter = adapter;
+    this.transactions = transactions;
+    this.baseUpdatedAtById = baseUpdatedAtById;
+    this.accounts = accounts;
+    this.categories = categories;
+    this.accountTypeSettings = accountTypeSettings;
+    this.onDone = onDone;
+    this.originalType = this.transactions[0]?.type ?? "expense";
+    this.state = {
+      type: this.originalType,
+      amount: "",
+      account: "",
+      category: "",
+      fromAccount: "",
+      toAccount: "",
+      person: "",
+      direction: "",
+      ts: "",
+      note: ""
+    };
+  }
+  state;
+  errorEl = null;
+  fieldContainer = null;
+  originalType;
+  submitting = false;
+  keyboardAvoidance;
+  keyboardBound = false;
+  onOpen() {
+    this.modalEl.addClass("accounting-sub-modal");
+    if (!import_obsidian16.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("accounting-modal");
+    this.renderView();
+  }
+  renderView() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h2", { text: t("batch.title", { n: this.transactions.length }) });
+    const hint = contentEl.createDiv({ cls: "accounting-batch-hint" });
+    hint.createEl("div", { text: t("batch.hint") });
+    const typeChanged = this.state.type !== this.originalType;
+    if (typeChanged) {
+      hint.createEl("div", {
+        text: t("batch.typeChangedWarn"),
+        cls: "accounting-batch-warn"
+      });
+    }
+    this.renderTypePills(contentEl);
+    this.fieldContainer = contentEl.createDiv({ cls: "accounting-batch-fields" });
+    this.renderFields();
+    this.errorEl = contentEl.createDiv({ cls: "accounting-error" });
+    this.errorEl.style.display = "none";
+    this.bindKeyboardAvoidance();
+    const footer = contentEl.createDiv({ cls: "accounting-batch-footer" });
+    const submitBtn = footer.createEl("button", {
+      text: t("batch.submitBtn", { n: this.transactions.length }),
+      cls: "accounting-btn-primary"
+    });
+    submitBtn.onclick = () => this.submit();
+    const cancelBtn = footer.createEl("button", { text: t("common.cancel"), cls: "accounting-btn-secondary" });
+    cancelBtn.onclick = () => this.close();
+  }
+  renderTypePills(container) {
+    const row = container.createDiv({ cls: "accounting-type-pills" });
+    for (const tp of TYPES2) {
+      const active = this.state.type === tp.key;
+      const pill = row.createEl("button", {
+        text: t(tp.i18nKey),
+        cls: `accounting-type-pill${active ? " accounting-type-pill-active" : ""}`
+      });
+      pill.onclick = () => {
+        this.state.type = tp.key;
+        this.renderView();
+      };
+    }
+  }
+  renderFields() {
+    const fc = this.fieldContainer;
+    if (!fc) return;
+    fc.empty();
+    const s = this.state;
+    const typeChanged = s.type !== this.originalType;
+    const keepHint = typeChanged ? t("account.selectPlaceholder") : t("batch.keepHint");
+    this.addField(fc, t("entry.amount"), (wrap) => {
+      const input = wrap.createEl("input", {
+        type: "text",
+        value: s.amount,
+        cls: "accounting-input",
+        attr: { placeholder: t("batch.keepHint"), inputmode: "decimal" }
+      });
+      input.oninput = () => {
+        s.amount = input.value;
+      };
+    });
+    if (s.type === "expense" || s.type === "income") {
+      const cats = this.categories.filter((c) => c.flow === (s.type === "expense" ? "expense" : "income")).slice().sort((a, b) => a.name.localeCompare(b.name, "zh"));
+      this.addField(fc, t("entry.field.account"), (wrap) => {
+        const sel = wrap.createEl("select", { cls: "accounting-input" });
+        sel.createEl("option", { text: keepHint }).value = "";
+        fillAccountOptions(sel, this.accounts, s.account, false, this.accountTypeSettings);
+        sel.onchange = () => {
+          s.account = sel.value;
+        };
+      });
+      this.addField(fc, t("entry.field.category"), (wrap) => {
+        const sel = wrap.createEl("select", { cls: "accounting-input" });
+        sel.createEl("option", { text: keepHint }).value = "";
+        for (const c of cats) {
+          const o = sel.createEl("option", { text: c.name });
+          o.value = c.name;
+          if (c.name === s.category) o.selected = true;
+        }
+        sel.onchange = () => {
+          s.category = sel.value;
+        };
+      });
+    } else if (s.type === "transfer") {
+      this.addField(fc, t("entry.field.fromAccount"), (wrap) => {
+        const sel = wrap.createEl("select", { cls: "accounting-input" });
+        sel.createEl("option", { text: keepHint }).value = "";
+        fillAccountOptions(sel, this.accounts, s.fromAccount, false, this.accountTypeSettings);
+        sel.onchange = () => {
+          s.fromAccount = sel.value;
+        };
+      });
+      this.addField(fc, t("entry.field.toAccount"), (wrap) => {
+        const sel = wrap.createEl("select", { cls: "accounting-input" });
+        sel.createEl("option", { text: keepHint }).value = "";
+        fillAccountOptions(sel, this.accounts, s.toAccount, false, this.accountTypeSettings);
+        sel.onchange = () => {
+          s.toAccount = sel.value;
+        };
+      });
+    } else if (s.type === "loan") {
+      this.addField(fc, t("entry.field.direction"), (wrap) => {
+        const sel = wrap.createEl("select", { cls: "accounting-input" });
+        sel.createEl("option", { text: keepHint }).value = "";
+        const lend = sel.createEl("option", { text: t("entry.direction.lend") });
+        lend.value = "lend";
+        const borrow = sel.createEl("option", { text: t("entry.direction.borrow") });
+        borrow.value = "borrow";
+        if (s.direction === "lend") lend.selected = true;
+        if (s.direction === "borrow") borrow.selected = true;
+        sel.onchange = () => {
+          s.direction = sel.value;
+        };
+      });
+      this.addField(fc, t("entry.field.selfAccount"), (wrap) => {
+        const sel = wrap.createEl("select", { cls: "accounting-input" });
+        sel.createEl("option", { text: keepHint }).value = "";
+        fillAccountOptions(sel, this.accounts, s.account, false, this.accountTypeSettings);
+        sel.onchange = () => {
+          s.account = sel.value;
+        };
+      });
+      this.addField(fc, t("batch.field.personAccount"), (wrap) => {
+        const sel = wrap.createEl("select", { cls: "accounting-input" });
+        sel.createEl("option", { text: keepHint }).value = "";
+        for (const a of this.accounts.filter((a2) => a2.type === "person" && a2.active).slice().sort((a2, b) => a2.name.localeCompare(b.name, "zh"))) {
+          const o = sel.createEl("option", { text: a.name });
+          o.value = a.id;
+          if (a.id === s.person) o.selected = true;
+        }
+        sel.onchange = () => {
+          s.person = sel.value;
+        };
+      });
+    }
+    this.addField(fc, t("entry.field.ts"), (wrap) => {
+      wrap.appendChild(createDateField({
+        kind: "datetime-local",
+        value: s.ts,
+        cls: "accounting-input",
+        onChange: (iso) => {
+          s.ts = iso;
+        }
+      }));
+    });
+    this.addField(fc, t("entry.field.note"), (wrap) => {
+      const ta = wrap.createEl("textarea", { cls: "accounting-input" });
+      ta.value = s.note;
+      ta.setAttr("rows", "2");
+      ta.oninput = () => {
+        s.note = ta.value;
+      };
+    });
+  }
+  addField(container, label, renderControl) {
+    const wrap = container.createDiv({ cls: "accounting-batch-field" });
+    wrap.createEl("div", { text: label, cls: "accounting-batch-field-label" });
+    renderControl(wrap);
+  }
+  showError(msg) {
+    if (!this.errorEl) return;
+    this.errorEl.setText(msg);
+    this.errorEl.style.display = "";
+  }
+  buildPatch() {
+    const s = this.state;
+    const patch = {};
+    const typeChanged = s.type !== this.originalType;
+    if (typeChanged) patch.type = s.type;
+    if (s.amount.trim() !== "") {
+      const amt = evaluateAmount(s.amount);
+      if (!amt.ok || amt.value <= 0) {
+        this.showError(t("batch.err.amount"));
+        return null;
+      }
+      patch.amount = round2(amt.value);
+    }
+    if (s.account) patch.account = s.account;
+    if (s.category) patch.category = s.category;
+    if (s.fromAccount) patch.fromAccount = s.fromAccount;
+    if (s.toAccount) patch.toAccount = s.toAccount;
+    if (s.person) patch.person = s.person;
+    if (s.direction) patch.direction = s.direction;
+    if (s.ts) {
+      const iso = datetimeLocalToISOStrict(s.ts);
+      if (!iso) {
+        this.showError(t("batch.err.tsFormat"));
+        return null;
+      }
+      patch.ts = iso;
+    }
+    if (s.note.trim() !== "") patch.note = s.note.trim();
+    if (Object.keys(patch).length === 0) {
+      this.showError(t("batch.err.empty"));
+      return null;
+    }
+    if (typeChanged) {
+      if (s.type === "expense" || s.type === "income") {
+        if (!s.account) {
+          this.showError(t("batch.err.tcAccount"));
+          return null;
+        }
+        if (!s.category) {
+          this.showError(t("batch.err.tcCategory"));
+          return null;
+        }
+      } else if (s.type === "transfer") {
+        if (!s.fromAccount) {
+          this.showError(t("batch.err.tcFromAccount"));
+          return null;
+        }
+        if (!s.toAccount) {
+          this.showError(t("batch.err.tcToAccount"));
+          return null;
+        }
+        if (s.fromAccount === s.toAccount) {
+          this.showError(t("entry.err.sameAccount"));
+          return null;
+        }
+      } else if (s.type === "loan") {
+        if (!s.account) {
+          this.showError(t("batch.err.tcSelfAccount"));
+          return null;
+        }
+        if (!s.person) {
+          this.showError(t("batch.err.tcPerson"));
+          return null;
+        }
+        if (!s.direction) {
+          this.showError(t("batch.err.tcDirection"));
+          return null;
+        }
+      }
+    }
+    return patch;
+  }
+  async submit() {
+    if (this.submitting) return;
+    const patch = this.buildPatch();
+    if (!patch) return;
+    this.submitting = true;
+    try {
+      await this.adapter.backup("pre-batch-modify");
+      const fresh = await this.adapter.loadLog();
+      const latestUpdatedAt = latestUpdatedAtById(fresh);
+      for (const tx of this.transactions) {
+        const current = latestUpdatedAt.get(tx.id);
+        const base = this.baseUpdatedAtById.get(tx.id) ?? "";
+        if (hasUpdatedSince(current, base)) {
+          new import_obsidian16.Notice(t("txList.concurrencyConflict"));
+          this.onDone();
+          this.close();
+          return;
+        }
+      }
+      const folded = foldEvents(fresh);
+      const ids = this.transactions.map((tx) => tx.id);
+      const { events } = buildBatchUpsertEvents({
+        folded,
+        ids,
+        patch,
+        latestUpdatedAtById: latestUpdatedAt,
+        now: nowISO()
+      });
+      if (events.length > 0) {
+        await this.adapter.appendEvents(events);
+      }
+      new import_obsidian16.Notice(t("batch.updatedN", { n: events.length }));
+      this.onDone();
+      this.close();
+    } catch (e) {
+      const msg = t("batch.failed", { msg: formatError(e) });
+      this.showError(msg);
+      new import_obsidian16.Notice(msg);
+    } finally {
+      this.submitting = false;
+    }
+  }
+  onClose() {
+    this.keyboardAvoidance?.dispose();
+    this.keyboardAvoidance = void 0;
+    this.contentEl.empty();
+  }
+  bindKeyboardAvoidance() {
+    if (this.keyboardBound) return;
+    this.keyboardBound = true;
+    this.keyboardAvoidance = bindKeyboardAvoidance({
+      rootEl: this.contentEl,
+      modalEl: this.modalEl,
+      mode: "top"
+    });
+  }
+};
+
+// src/transactionDetailModal.ts
+var import_obsidian17 = require("obsidian");
+var TransactionDetailModal = class extends import_obsidian17.Modal {
+  constructor(app, adapter, transaction, accounts, categories, allTransactions, onUpdated, navCtx) {
+    super(app);
+    this.adapter = adapter;
+    this.accounts = accounts;
+    this.categories = categories;
+    this.allTransactions = allTransactions;
+    this.onUpdated = onUpdated;
+    this.navCtx = navCtx;
+    this.state = transaction;
+  }
+  state;
+  opened = false;
+  closing = false;
+  /** 此交易后各账户的历史余额快照（renderView 时一次性算出），账户行内联展示。 */
+  snapshot = null;
+  /** 本位币（默认 CNY），onOpen 时从账本读取，供外币折算展示 */
+  baseCurrency = "CNY";
+  async onOpen() {
+    this.opened = true;
+    this.modalEl.addClass("accounting-detail-sheet");
+    if (!import_obsidian17.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    this.contentEl.addClass("accounting-modal");
+    this.containerEl.addEventListener("click", this.onBackdropClick);
+    try {
+      this.baseCurrency = await this.adapter.readBaseCurrency();
+    } catch {
+    }
+    this.renderView();
+  }
+  onBackdropClick = (e) => {
+    if (!e.target?.closest(".modal")) {
+      this.close();
+    }
+  };
+  /** 滑下后再走 Obsidian 原生关闭（与开启的滑上对称，div transform 在 WKWebView 可靠）。
+   *  走 super.close() 而非手搓 onClose()+detach：补 pop Modal.open 时 push 的全局 keymap scope +
+   *  恢复焦点，避免关闭后 Obsidian 笔记无法正常编辑。 */
+  close() {
+    if (this.closing) return;
+    this.closing = true;
+    if (!this.opened) {
+      super.close();
+      return;
+    }
+    this.containerEl.removeEventListener("click", this.onBackdropClick);
+    this.modalEl.addClass("accounting-detail-closing");
+    setTimeout(() => {
+      try {
+        super.close();
+      } catch (e) {
+        console.error(e);
+      }
+    }, 200);
+  }
+  renderView() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createDiv({ cls: "accounting-detail-grabber" });
+    const titleRow = contentEl.createDiv({ cls: "accounting-detail-title-row" });
+    titleRow.createEl("h2", { text: t("txDetail.title") });
+    this.renderDetailView();
+  }
+  /** 编辑/复制后就地刷新背后的列表实例（筛选拟保留）。 */
+  afterDetailChange() {
+    this.onUpdated();
+  }
+  /** 编辑/复制：详情抽屉不关，EntryModal 以聚焦模式叠在详情之上（右下角「‹ 返回」回详情、✕ 隐藏）；
+   *  保存→就地刷新本详情（新交易）+ 刷新背后列表；取消（点返回）→详情原样保留。 */
+  openEntry(isCopy) {
+    const entry = new EntryModal(
+      this.app,
+      this.adapter,
+      this.accounts,
+      this.categories,
+      async (newTxId2) => {
+        this.afterDetailChange();
+        if (newTxId2) await this.refreshFromLog(newTxId2);
+      },
+      this.state,
+      isCopy,
+      this.navCtx
+    );
+    entry.drillDown = true;
+    entry.open();
+  }
+  /** 以最新日志就地刷新本详情：编辑后显示更新内容、复制后显示新交易；
+   *  allTransactions 用最新折叠结果，账户行内联余额快照随最新日志重算。 */
+  async refreshFromLog(txId) {
+    let folded;
+    try {
+      folded = foldEvents(await this.adapter.loadLog());
+    } catch (err) {
+      console.error("\u5237\u65B0\u8BE6\u60C5\u52A0\u8F7D\u65E5\u5FD7\u5931\u8D25:", err);
+      return;
+    }
+    const tx = folded.find((t2) => t2.id === txId);
+    if (!tx) return;
+    this.state = tx;
+    this.allTransactions = folded;
+    this.renderView();
+  }
+  renderDetailView() {
+    const { contentEl } = this;
+    const tx = this.state;
+    this.snapshot = computeBalancesUpTo(this.allTransactions, this.accounts, tx.id);
+    const detailEl = contentEl.createDiv({ cls: "accounting-detail-content" });
+    this.addRow(detailEl, t("txDetail.type"), this.typeLabel(tx.type));
+    this.addRow(detailEl, t("entry.field.ts"), this.formatTime(tx.ts));
+    this.addRow(detailEl, t("entry.field.amount"), formatMoney(tx.amount, tx.currency));
+    if (tx.rate != null && tx.currency !== this.baseCurrency) {
+      this.addRow(detailEl, t("txDetail.rate"), `1 ${tx.currency} = ${tx.rate} ${this.baseCurrency}`);
+      this.addRow(detailEl, t("txDetail.converted", { base: this.baseCurrency }), formatMoney(txBaseAmount(tx, this.baseCurrency), this.baseCurrency));
+    }
+    if (tx.type === "transfer" && tx.toAmount != null) {
+      const fromCur = this.accounts.find((a) => a.id === tx.fromAccount)?.currency ?? this.baseCurrency;
+      const toCur = this.accounts.find((a) => a.id === tx.toAccount)?.currency ?? this.baseCurrency;
+      this.addRow(detailEl, t("txDetail.toAmount"), formatMoney(tx.toAmount, toCur));
+      if (fromCur !== toCur && tx.amount > 0) {
+        this.addRow(detailEl, t("txDetail.impliedRate"), `1 ${fromCur} = ${round2(tx.toAmount / tx.amount)} ${toCur}`);
+      }
+    }
+    if (tx.type === "expense" || tx.type === "income") {
+      this.addRow(detailEl, t("entry.field.account"), this.accountNameWithBalance(tx.account));
+      this.addRow(detailEl, t("entry.field.category"), tx.category || "");
+    } else if (tx.type === "transfer") {
+      this.addRow(detailEl, t("entry.field.fromAccount"), this.accountNameWithBalance(tx.fromAccount));
+      this.addRow(detailEl, t("entry.field.toAccount"), this.accountNameWithBalance(tx.toAccount));
+    } else if (tx.type === "loan") {
+      this.addRow(detailEl, t("entry.field.direction"), this.directionLabel(tx.direction));
+      this.addRow(detailEl, t("entry.field.selfAccount"), this.accountNameWithBalance(tx.account));
+      this.addRow(detailEl, t("txDetail.counterparty"), this.accountNameWithBalance(tx.person));
+    }
+    if (tx.note) {
+      this.addRow(detailEl, t("entry.field.note"), tx.note);
+    }
+    const btnRow = contentEl.createDiv({ cls: "accounting-detail-buttons" });
+    btnRow.createEl("button", { text: t("common.edit"), cls: "accounting-btn-secondary" }).onclick = () => {
+      if (this.isSettlementLoan()) {
+        alert(t("txDetail.settlementEditBlock"));
+        return;
+      }
+      this.openEntry(false);
+    };
+    btnRow.createEl("button", { text: t("common.copy"), cls: "accounting-btn-secondary" }).onclick = () => {
+      if (this.isSettlementLoan()) {
+        alert(t("txDetail.settlementCopyBlock"));
+        return;
+      }
+      this.openEntry(true);
+    };
+    btnRow.createEl("button", {
+      text: t("common.delete"),
+      cls: "accounting-btn-danger"
+    }).onclick = async () => {
+      await this.deleteTransaction();
+    };
+    btnRow.createEl("button", { text: t("common.close"), cls: "accounting-btn-secondary accounting-detail-sheet-close" }).onclick = () => this.close();
+  }
+  addRow(parent, label, value, desc) {
+    const row = parent.createDiv({ cls: "accounting-detail-row" });
+    const labelEl = row.createDiv({ cls: "accounting-detail-label" });
+    labelEl.textContent = label;
+    const valueEl = row.createDiv({ cls: "accounting-detail-value" });
+    valueEl.textContent = value;
+    if (desc) {
+      const descEl = row.createDiv({ cls: "accounting-detail-desc" });
+      descEl.textContent = desc;
+    }
+  }
+  async deleteTransaction() {
+    if (!confirm(t("txDetail.deleteConfirm"))) {
+      return;
+    }
+    const now = nowISO();
+    const idsToDelete = [this.state.id];
+    if (this.state.linkId) {
+      try {
+        const folded = foldEvents(await this.adapter.loadLog());
+        const partner = folded.find((tx) => tx.linkId === this.state.linkId && tx.id !== this.state.id);
+        if (partner) idsToDelete.push(partner.id);
+      } catch (err) {
+        console.error("\u52A0\u8F7D\u65E5\u5FD7\u67E5\u627E\u7ED3\u6E05\u914D\u5BF9\u5931\u8D25:", err);
+      }
+    }
+    const events = idsToDelete.map((id) => ({
+      op: "delete",
+      targetId: id,
+      updatedAt: now,
+      source: "manual"
+    }));
+    try {
+      await this.adapter.appendEvents(events);
+      this.close();
+      this.afterDetailChange();
+    } catch (err) {
+      console.error("\u5220\u9664\u6D41\u6C34\u5931\u8D25:", err);
+      this.showError(t("txDetail.deleteFailed"));
+    }
+  }
+  directionLabel(d) {
+    switch (d) {
+      case "lend":
+        return t("entry.direction.lend");
+      case "borrow":
+        return t("entry.direction.borrow");
+      case "collect":
+        return t("entry.direction.collect");
+      case "repay":
+        return t("entry.direction.repay");
+      default:
+        return "\u2014";
+    }
+  }
+  /** 结清类借贷（collect/repay）：移动端不支持编辑，避免破坏桌面端创建的结清对。 */
+  isSettlementLoan() {
+    return this.state.type === "loan" && (this.state.direction === "collect" || this.state.direction === "repay");
+  }
+  typeLabel(type) {
+    const labels = {
+      expense: t("tx.type.expense"),
+      income: t("tx.type.income"),
+      transfer: t("tx.type.transfer"),
+      loan: t("tx.type.loan")
+    };
+    return labels[type] || type;
+  }
+  accountName(id) {
+    if (!id) return "";
+    const acc = this.accounts.find((a) => a.id === id);
+    return acc ? acc.name : id;
+  }
+  accountCurrency(id) {
+    if (!id) return "CNY";
+    return this.accounts.find((a) => a.id === id)?.currency ?? "CNY";
+  }
+  /** 账户名 + 内联「此交易后」余额：「招行储蓄（余额 ¥1,234.50）」。
+   *  snapshot=null（target 不在日志，脏数据/已删）或账户 id 缺失 → 退化为仅名称，不报错。 */
+  accountNameWithBalance(id) {
+    const name = this.accountName(id);
+    if (!name || !id || !this.snapshot) return name;
+    const bal = this.snapshot.get(id);
+    if (bal === void 0) return name;
+    return `${name}${t("txDetail.balanceSuffix", { balance: formatMoney(bal, this.accountCurrency(id)) })}`;
+  }
+  formatTime(iso) {
+    const d = new Date(iso);
+    const pad = (x) => String(x).padStart(2, "0");
+    return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  showError(msg) {
+    const { contentEl } = this;
+    const errorEl = contentEl.createDiv({ cls: "accounting-error" });
+    errorEl.textContent = msg;
+    setTimeout(() => errorEl.remove(), 3e3);
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+
+// src/transactionListModal.ts
+var SORT_OPTIONS = [
+  { value: "time-desc", i18nKey: "txList.sort.timeDesc" },
+  { value: "time-asc", i18nKey: "txList.sort.timeAsc" },
+  { value: "amount-desc", i18nKey: "txList.sort.amountDesc" },
+  { value: "amount-asc", i18nKey: "txList.sort.amountAsc" }
+];
+var PAGE_SIZE = 50;
+function nextConflictNotice(prevSig, conflicts) {
+  if (conflicts.length === 0) return { sig: "", notify: false };
+  const sig = conflicts.map((c) => c.id).slice().sort().join(",");
+  return { sig, notify: sig !== prevSig };
+}
+var TransactionListModal = class extends import_obsidian18.Modal {
+  constructor(app, adapter, presetAccountId, navCtx, slide, presetRecurringRuleId, drillDown, categoryDrill, onDataChanged, onSwitchLedger, onOpened) {
+    super(app);
+    this.adapter = adapter;
+    this.navCtx = navCtx;
+    this.slide = slide;
+    this.drillDown = drillDown;
+    this.categoryDrill = categoryDrill;
+    this.onDataChanged = onDataChanged;
+    this.onSwitchLedger = onSwitchLedger;
+    this.onOpened = onOpened;
+    const hasCategoryPreset = !!categoryDrill;
+    const hasPreset = !!presetAccountId || !!presetRecurringRuleId || hasCategoryPreset;
+    this.filter = {
+      // preset 跳转（账户、周期账规则、报表分类）：使用传入范围或默认全部历史；否则默认近6月
+      // 结束日 = 当天，配合「整天包含」语义把今天完整包进来
+      start: categoryDrill?.start ?? (hasPreset ? "1970-01-01" : monthsAgoDateInput(6)),
+      end: categoryDrill?.end ?? todayDateInput(),
+      types: categoryDrill ? [categoryDrill.flow] : [],
+      keyword: "",
+      accountId: presetAccountId ?? "",
+      recurringRuleId: presetRecurringRuleId ?? "",
+      category: categoryDrill?.uncategorized ? "" : categoryDrill?.category ?? "",
+      uncategorized: categoryDrill?.uncategorized ?? false,
+      quickActive: hasCategoryPreset ? null : hasPreset ? "all" : "halfYear",
+      sort: "time-desc"
+    };
+  }
+  accounts = [];
+  accountTypeSettings = defaultAccountTypeSettings();
+  categories = [];
+  transactions = [];
+  filteredTransactions = [];
+  filter;
+  recurringRules = [];
+  /** 本位币（onOpen 读 ledger.json，失败兜底 CNY）；月分组全账户口径折算与月末余额币种用。 */
+  baseCurrency = "CNY";
+  accountById = /* @__PURE__ */ new Map();
+  opened = false;
+  closing = false;
+  renderedCount = 0;
+  listEl = null;
+  sentinelEl = null;
+  loadMoreObserver = null;
+  selectMode = false;
+  /** 月份分组批量展开态：null=默认（仅最新月 open）/ true=全展开 / false=全折叠；手动单月 toggle 不改此字段。 */
+  allMonthsExpanded = null;
+  /** 每个月分组的 <details> → 该月流水；懒渲染用：折叠月只在用户展开时才建行 DOM，避免「全部」时一次建数万节点卡顿。 */
+  monthTxsByDetails = /* @__PURE__ */ new WeakMap();
+  selectedIds = /* @__PURE__ */ new Set();
+  updatedAtById = /* @__PURE__ */ new Map();
+  deleting = false;
+  /** 打平冲突（同 id 同 updatedAt）：折叠结果取决于文件顺序，行内 ⚠️ 标记 + 一次性 Notice 提示 */
+  tiedConflicts = [];
+  conflictIds = /* @__PURE__ */ new Set();
+  /** 上次 Notice 时的冲突签名，用于「同集合不重复打扰」 */
+  prevConflictSig = "";
+  /** 在挂载到 DOM 前就预设全屏类与禁用 Obsidian 默认 modal-pop 动画，避免「先上跳再滑入」。 */
+  open() {
+    presetModalChrome(this.modalEl, this.containerEl);
+    super.open();
+  }
+  async onOpen() {
+    this.opened = true;
+    prepareModalContainer(this.containerEl);
+    this.modalEl.addClass("accounting-fullscreen");
+    if (this.drillDown) this.modalEl.addClass("accounting-drilldown");
+    this.onOpened?.();
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("accounting-transaction-modal");
+    const sc = slideClass(this.slide);
+    if (sc) contentEl.addClass(sc);
+    if (!this.drillDown && this.onSwitchLedger) {
+      const ledgerAlias = await this.adapter.readActiveLedgerAlias();
+      mountLedgerPill(this.modalEl, this.app, this.adapter, ledgerAlias, (name) => {
+        this.onSwitchLedger?.(name, () => this.close());
+      });
+      contentEl.addClass("accounting-has-ledger-pill");
+    }
+    try {
+      const events = await this.adapter.loadLog();
+      this.applyEvents(events);
+      const meta = await this.adapter.readMeta();
+      this.accounts = meta.accounts;
+      this.accountById = new Map(this.accounts.map((a) => [a.id, a]));
+      this.categories = meta.categories;
+      this.recurringRules = await this.adapter.readRecurringRules();
+      try {
+        this.baseCurrency = await this.adapter.readBaseCurrency();
+      } catch {
+        this.baseCurrency = "CNY";
+      }
+      const storedTypes = await this.adapter.readAccountTypeSettings();
+      this.accountTypeSettings = storedTypes ? normalizeAccountTypeSettings(storedTypes) : defaultAccountTypeSettings();
+      if (this.transactions.length === 0) {
+        this.renderNav();
+        contentEl.createEl("h2", { text: t("nav.list") });
+        contentEl.createEl("div", {
+          text: t("txList.empty"),
+          cls: "accounting-empty"
+        });
+        return;
+      }
+      this.applyFilter();
+      this.render();
+    } catch (err) {
+      console.error("\u52A0\u8F7D\u6D41\u6C34\u5931\u8D25:", err);
+      console.error("\u9519\u8BEF\u5806\u6808:", err instanceof Error ? err.stack : "\u65E0\u5806\u6808");
+      contentEl.empty();
+      this.renderNav();
+      contentEl.createEl("h2", { text: t("nav.list") });
+      contentEl.createEl("div", {
+        text: t("txList.loadFailed"),
+        cls: "accounting-empty"
+      });
+      contentEl.createEl("div", {
+        text: t("txList.errorDetail", { msg: formatError(err) }),
+        cls: "accounting-error"
+      });
+    }
+  }
+  render() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("accounting-transaction-modal");
+    this.renderNav();
+    this.renderFilters(contentEl);
+    this.renderSortBar(contentEl);
+    if (this.selectMode) this.renderBatchBar(contentEl);
+    this.renderList(contentEl);
+  }
+  /** 顶层流水：底部导航条；drill-down（账户下钻/周期账查看）：聚焦模式，右下角「‹ 返回」回父页（无导航条、隐藏右上角✕）。 */
+  renderNav() {
+    renderNavOrBack(this.modalEl, "list", this.navCtx, () => this.close(), !!this.drillDown);
+  }
+  renderFilters(container) {
+    const filterBox = container.createDiv({ cls: "accounting-filter-box" });
+    const timeRow = filterBox.createDiv({ cls: "accounting-filter-row" });
+    timeRow.createSpan({ text: t("txList.rangeTime"), cls: "accounting-filter-label" });
+    const timeControls = timeRow.createDiv({ cls: "accounting-filter-controls" });
+    const quickOptions = [
+      { key: "halfYear", label: t("txList.lastMonths", { n: 6 }), start: monthsAgoDateInput(6) },
+      { key: "year", label: t("txList.lastMonths", { n: 12 }), start: monthsAgoDateInput(12) },
+      { key: "all", label: t("txList.allTime"), start: "1970-01-01" }
+    ];
+    for (const opt of quickOptions) {
+      const active = this.filter.quickActive === opt.key;
+      const btn = timeControls.createEl("button", {
+        text: opt.label,
+        cls: `accounting-filter-quick-btn${active ? " accounting-filter-btn-active" : ""}`
+      });
+      btn.onclick = () => {
+        this.filter.start = opt.start;
+        this.filter.end = todayDateInput();
+        this.filter.quickActive = opt.key;
+        this.applyFilter();
+        this.render();
+      };
+    }
+    const dateRangeWrap = timeControls.createDiv({ cls: "accounting-date-range-wrap" });
+    const startInput = createDateField({
+      kind: "date",
+      value: this.filter.start,
+      onChange: (iso) => {
+        this.filter.start = iso;
+        this.filter.quickActive = null;
+        this.applyFilter();
+        this.render();
+      }
+    });
+    dateRangeWrap.appendChild(startInput);
+    dateRangeWrap.createSpan({ text: "\u2013" });
+    const endInput = createDateField({
+      kind: "date",
+      value: this.filter.end,
+      onChange: (iso) => {
+        this.filter.end = iso;
+        this.filter.quickActive = null;
+        this.applyFilter();
+        this.render();
+      }
+    });
+    dateRangeWrap.appendChild(endInput);
+    const typeRow = filterBox.createDiv({ cls: "accounting-filter-row" });
+    typeRow.createSpan({ text: t("txList.rangeType"), cls: "accounting-filter-label" });
+    const typeWrap = typeRow.createDiv({ cls: "accounting-filter-controls" });
+    const types = [
+      { key: "expense", label: t("tx.type.expense") },
+      { key: "income", label: t("tx.type.income") },
+      { key: "transfer", label: t("tx.type.transfer") },
+      { key: "loan", label: t("tx.type.loan") }
+    ];
+    const allBtn = typeWrap.createEl("button", {
+      text: t("common.all"),
+      cls: `accounting-filter-type-btn${this.filter.types.length === 0 ? " accounting-filter-btn-active" : ""}`
+    });
+    allBtn.onclick = () => {
+      this.filter.types = [];
+      this.applyFilter();
+      this.render();
+    };
+    for (const tp of types) {
+      const active = this.filter.types.includes(tp.key);
+      const btn = typeWrap.createEl("button", {
+        text: tp.label,
+        cls: `accounting-filter-type-btn${active ? " accounting-filter-btn-active" : ""}`
+      });
+      btn.onclick = () => {
+        if (active) {
+          this.filter.types = this.filter.types.filter((x) => x !== tp.key);
+        } else {
+          this.filter.types.push(tp.key);
+        }
+        this.applyFilter();
+        this.render();
+      };
+    }
+    const comboRow = filterBox.createDiv({ cls: "accounting-filter-row" });
+    comboRow.createSpan({ text: t("txList.rangeAccountNote"), cls: "accounting-filter-label" });
+    const comboControls = comboRow.createDiv({ cls: "accounting-filter-controls" });
+    const accountSelect = comboControls.createEl("select", { cls: "accounting-filter-account-select" });
+    const allOpt = accountSelect.createEl("option", { text: t("txList.allAccounts") });
+    allOpt.value = "";
+    if (!this.filter.accountId) allOpt.selected = true;
+    fillAccountOptions(accountSelect, this.accounts, this.filter.accountId, true, this.accountTypeSettings);
+    accountSelect.addEventListener("change", () => {
+      this.filter.accountId = accountSelect.value;
+      this.applyFilter();
+      this.render();
+    });
+    const searchWrap = comboControls.createDiv({ cls: "accounting-search-wrap" });
+    const keywordInput = searchWrap.createEl("input", {
+      type: "text",
+      value: this.filter.keyword,
+      placeholder: t("txList.searchPlaceholder"),
+      cls: "accounting-search-input"
+    });
+    const commitSearch = () => {
+      this.filter.keyword = keywordInput.value;
+      this.applyFilter();
+      this.render();
+    };
+    keywordInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") commitSearch();
+    });
+    keywordInput.addEventListener("blur", commitSearch);
+    const keywordClear = searchWrap.createEl("button", {
+      text: "\xD7",
+      cls: `accounting-search-clear${this.filter.keyword ? "" : " accounting-search-clear-hidden"}`
+    });
+    keywordClear.setAttribute("aria-label", t("txList.ariaClearKeyword"));
+    keywordClear.onclick = () => {
+      keywordInput.value = "";
+      this.filter.keyword = "";
+      this.applyFilter();
+      this.render();
+    };
+    if (this.hasActiveFilter()) {
+      const clearAllBtn = comboControls.createEl("button", {
+        text: t("common.clear"),
+        cls: "accounting-filter-clear-all"
+      });
+      clearAllBtn.setAttribute("aria-label", t("txList.ariaClearAllFilters"));
+      clearAllBtn.onclick = () => {
+        this.resetFilter();
+        this.applyFilter();
+        this.render();
+      };
+    }
+    if (this.filter.recurringRuleId) {
+      const ruleName = this.recurringRules.find((r) => r.id === this.filter.recurringRuleId)?.name ?? t("txList.recurringDefault");
+      filterBox.createDiv({
+        text: `${t("txList.recurringPrefix")}${ruleName}${t("txList.countSuffix", { n: this.filteredTransactions.length })}`,
+        cls: "accounting-recurring-stats"
+      });
+    }
+    if (this.filter.category || this.filter.uncategorized) {
+      const catName = this.filter.uncategorized ? t("txList.uncategorized") : this.filter.category;
+      filterBox.createDiv({
+        text: `${t("txList.categoryDrillPrefix")}${catName}${t("txList.countSuffix", { n: this.filteredTransactions.length })}`,
+        cls: "accounting-recurring-stats"
+      });
+    }
+  }
+  /** 排序栏：独立于筛选卡片（排序是 ordering 而非筛选维度），置于卡片下方、「排序」+下拉同一行；弱化样式。 */
+  renderSortBar(container) {
+    const bar = container.createDiv({ cls: "accounting-sort-bar" });
+    bar.createSpan({ text: t("txList.sortLabel"), cls: "accounting-sort-label" });
+    const curKey = SORT_OPTIONS.find((o) => o.value === this.filter.sort)?.i18nKey;
+    const cur = curKey ? t(curKey) : "";
+    const btn = bar.createSpan({ cls: "accounting-sort-btn", attr: { role: "button", tabindex: "0" } });
+    btn.createSpan({ text: cur });
+    btn.createSpan({ text: "\u25BE", cls: "accounting-sort-caret" });
+    const open = () => this.openSortMenu(btn);
+    btn.onclick = open;
+    btn.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        open();
+      }
+    });
+    const selectBtn = bar.createEl("button", {
+      text: this.selectMode ? t("common.done") : t("txList.select"),
+      cls: "accounting-batch-toggle"
+    });
+    selectBtn.onclick = () => {
+      this.selectMode = !this.selectMode;
+      if (!this.selectMode) this.selectedIds.clear();
+      this.render();
+    };
+    const isTimeSort = this.filter.sort === "time-desc" || this.filter.sort === "time-asc";
+    if (!isTimeSort) {
+      bar.createSpan({ text: t("txList.flatSortHint"), cls: "accounting-sort-hint" });
+      return;
+    }
+    if (this.filteredTransactions.length === 0) return;
+    const expandBtn = bar.createEl("button", {
+      text: this.allMonthsExpanded === true ? t("txList.collapseAll") : t("txList.expandAll"),
+      cls: "accounting-collapse-toggle"
+    });
+    expandBtn.onclick = () => {
+      const groups = this.contentEl.querySelectorAll("details.accounting-month-group");
+      if (groups.length === 0) return;
+      const wantExpand = this.allMonthsExpanded !== true;
+      this.allMonthsExpanded = wantExpand;
+      groups.forEach((d) => {
+        const det = d;
+        det.open = wantExpand;
+        if (wantExpand) this.ensureMonthRows(det);
+      });
+      expandBtn.textContent = wantExpand ? t("txList.collapseAll") : t("txList.expandAll");
+    };
+  }
+  /** 多选操作栏：全选（覆盖全部 filtered）· 取消 · 已选 N 条 · 批量修改/删除；操作组 margin-left:auto 固定靠右。 */
+  renderBatchBar(container) {
+    const bar = container.createDiv({ cls: "accounting-batch-bar" });
+    const selected = this.selectedTxs();
+    const typeSet = new Set(selected.map((tx) => tx.type));
+    const canBatch = selected.length > 0 && typeSet.size === 1;
+    const allBtn = bar.createEl("button", { text: t("txList.selectAll"), cls: "accounting-batch-sec" });
+    allBtn.onclick = () => {
+      this.selectedIds = new Set(this.filteredTransactions.map((tx) => tx.id));
+      this.render();
+    };
+    const clearBtn = bar.createEl("button", { text: t("common.cancel"), cls: "accounting-batch-sec" });
+    clearBtn.onclick = () => {
+      this.selectedIds.clear();
+      this.render();
+    };
+    bar.createSpan({ text: t("txList.selectedN", { n: selected.length }), cls: "accounting-batch-count" });
+    const batchBtn = bar.createEl("button", {
+      text: t("txList.batchModify"),
+      cls: `accounting-batch-go${canBatch ? "" : " accounting-batch-go-disabled"}`
+    });
+    if (!canBatch) {
+      batchBtn.setAttribute("disabled", "true");
+      batchBtn.setAttribute("title", typeSet.size > 1 ? t("txList.batchModifyOnlySameType") : t("txList.selectFirst"));
+    } else {
+      batchBtn.onclick = () => this.openBatchModify();
+    }
+    const delDisabled = selected.length === 0;
+    const delBtn = bar.createEl("button", {
+      text: t("txList.batchDelete"),
+      cls: delDisabled ? "accounting-batch-go accounting-batch-go-disabled" : "accounting-batch-go accounting-batch-go-danger"
+    });
+    if (delDisabled) {
+      delBtn.setAttribute("disabled", "true");
+      delBtn.setAttribute("title", t("txList.selectFirst"));
+    } else {
+      delBtn.onclick = () => this.openBatchDelete();
+    }
+  }
+  /** 选中集合对应的 Transaction[]（按 filteredTransactions 顺序，保证稳定）。 */
+  selectedTxs() {
+    if (this.selectedIds.size === 0) return [];
+    return this.filteredTransactions.filter((tx) => this.selectedIds.has(tx.id));
+  }
+  openBatchModify() {
+    const selected = this.selectedTxs();
+    if (selected.length === 0) return;
+    new BatchModifyModal(
+      this.app,
+      this.adapter,
+      selected,
+      this.updatedAtById,
+      this.accounts,
+      this.categories,
+      this.accountTypeSettings,
+      () => this.onBatchDone()
+    ).open();
+  }
+  /** 批量修改完成回调：刷新列表、清选择、退出多选。 */
+  async onBatchDone() {
+    this.selectedIds.clear();
+    this.selectMode = false;
+    await this.reloadAndRender();
+  }
+  /** 批量删除选中流水：展开结清对端、二次确认、写前备份 + 全有或全无并发检测 + 追加 delete 事件。 */
+  async openBatchDelete() {
+    if (this.deleting) return;
+    const selected = this.selectedTxs();
+    if (selected.length === 0) return;
+    const { ids, partnerExtra } = planBatchDeleteTargets(selected, this.transactions);
+    const msg = partnerExtra > 0 ? t("txList.batchDeleteConfirmPartner", { selected: selected.length, partner: partnerExtra, total: ids.length }) : t("txList.batchDeleteConfirm", { n: selected.length });
+    if (!confirm(msg)) return;
+    this.deleting = true;
+    try {
+      await this.adapter.backup("pre-batch-delete");
+      const fresh = await this.adapter.loadLog();
+      const latestUpdatedAt = latestUpdatedAtById(fresh);
+      for (const id of ids) {
+        if (hasUpdatedSince(latestUpdatedAt.get(id), this.updatedAtById.get(id) ?? "")) {
+          new import_obsidian18.Notice(t("txList.concurrencyConflict"));
+          await this.reloadAndRender();
+          return;
+        }
+      }
+      const now = nowISO();
+      const events = ids.map((id) => ({ op: "delete", targetId: id, updatedAt: now, source: "manual" }));
+      await this.adapter.appendEvents(events);
+      new import_obsidian18.Notice(t("txList.deletedN", { n: events.length }));
+      await this.onBatchDone();
+    } catch (e) {
+      const m = t("txList.batchDeleteFailed", { msg: formatError(e) });
+      new import_obsidian18.Notice(m);
+    } finally {
+      this.deleting = false;
+    }
+  }
+  /** 排序下拉菜单：浮于 document.body（fixed，不受 .modal-content transform 影响），锚定按钮下方；点选项应用并重渲，点遮罩关闭。 */
+  openSortMenu(anchor) {
+    this.closeSortMenu();
+    const overlay = document.body.createEl("div", { cls: "accounting-sort-overlay" });
+    overlay.onclick = () => this.closeSortMenu();
+    const rect = anchor.getBoundingClientRect();
+    const menu = overlay.createEl("div", { cls: "accounting-sort-menu" });
+    menu.onclick = (e) => e.stopPropagation();
+    const MENU_W = 150;
+    const left = Math.min(rect.left, Math.max(8, window.innerWidth - 8 - MENU_W));
+    menu.style.left = `${left}px`;
+    menu.style.top = `${rect.bottom + 4}px`;
+    for (const opt of SORT_OPTIONS) {
+      const active = opt.value === this.filter.sort;
+      const item = menu.createEl("div", {
+        cls: `accounting-sort-item${active ? " accounting-sort-item-active" : ""}`,
+        text: t(opt.i18nKey)
+      });
+      item.onclick = (e) => {
+        e.stopPropagation();
+        this.filter.sort = opt.value;
+        this.closeSortMenu();
+        this.applyFilter();
+        this.render();
+      };
+    }
+  }
+  closeSortMenu() {
+    document.body.querySelectorAll(".accounting-sort-overlay").forEach((el) => el.detach());
+  }
+  renderList(container) {
+    this.teardownObserver();
+    const listEl = container.createDiv({ cls: "accounting-transaction-list" });
+    this.listEl = listEl;
+    if (this.filteredTransactions.length === 0) {
+      listEl.createEl("div", {
+        text: this.filter.recurringRuleId ? t("txList.emptyRecurring") : t("txList.emptyFiltered"),
+        cls: "accounting-empty"
+      });
+      return;
+    }
+    const isTimeSort = this.filter.sort === "time-desc" || this.filter.sort === "time-asc";
+    if (isTimeSort) {
+      listEl.classList.add("accounting-transaction-list--grouped");
+      this.renderMonthGroups(listEl);
+      return;
+    }
+    this.renderedCount = 0;
+    this.appendChunk();
+    if (this.renderedCount < this.filteredTransactions.length) {
+      this.setupInfiniteScroll();
+    }
+  }
+  /**
+   * 时间序按月分组渲染：每月一个可折叠 `<details>`，标题=月份+笔数+收入/支出（+单账户月末累计余额）。
+   * 原生 `<details>` 单月 toggle 免 JS state；批量「展开/折叠」由 allMonthsExpanded 字段驱动（render 重建按其复位 open，默认仅最新月）。
+   * 懒渲染：折叠的 `<details>` 子节点虽不可见但仍占 DOM，故初始只为 open 的月份建行；折叠月在用户展开时（toggle 事件 / 展开按钮）才补建，
+   * 把「全部」默认场景的 DOM 量从 O(N) 降到 O(最新月)，避免一次同步建数万节点卡顿。
+   */
+  renderMonthGroups(listEl) {
+    const accountId = this.filter.accountId;
+    const singleAccount = !!accountId;
+    const balanceByTxId = singleAccount ? computeRunningBalanceForAccount(this.transactions, this.accounts, accountId) : null;
+    const groups = buildMonthGroups(this.filteredTransactions, {
+      sort: this.filter.sort === "time-desc" ? "time-desc" : "time-asc",
+      base: this.baseCurrency,
+      singleAccount,
+      accountId,
+      balanceByTxId
+    });
+    const latestYm = groups.reduce((m, g) => g.ym > m ? g.ym : m, "");
+    const fmtInt = (n) => {
+      const sign = n < 0 ? "-" : "";
+      return sign + Math.round(Math.abs(n)).toLocaleString("zh-CN", { maximumFractionDigits: 0 });
+    };
+    for (const g of groups) {
+      const details = listEl.createEl("details", { cls: "accounting-month-group" });
+      const shouldOpen = this.allMonthsExpanded === true ? true : this.allMonthsExpanded === false ? false : g.ym === latestYm;
+      details.open = shouldOpen;
+      this.monthTxsByDetails.set(details, g.txs);
+      const head = details.createEl("summary", { cls: "accounting-collapsible-head accounting-month-head" });
+      const label = head.createDiv({ cls: "accounting-month-label" });
+      label.createSpan({ text: formatMonthDisplay(g.ym, getLocale()) });
+      label.createSpan({ text: `(${g.txs.length})`, cls: "accounting-month-count" });
+      const totals = head.createDiv({ cls: "accounting-month-totals" });
+      const inLabel = singleAccount ? t("txList.monthIn") : t("txList.monthIncome");
+      const outLabel = singleAccount ? t("txList.monthOut") : t("txList.monthExpense");
+      totals.createSpan({ text: `${inLabel} ${fmtInt(g.income)}`, cls: "accounting-amount-positive" });
+      totals.createSpan({ text: `${outLabel} ${fmtInt(g.expense)}`, cls: "accounting-amount-negative" });
+      if (g.endBalance != null) {
+        totals.createSpan({
+          text: t("txList.balancePrefix", { amount: fmtInt(g.endBalance) }),
+          cls: g.endBalance < 0 ? "accounting-amount-negative" : "accounting-month-balance",
+          attr: { title: t("txList.monthBalanceTitle", { account: this.accountById.get(accountId)?.name ?? accountId }) }
+        });
+      }
+      if (shouldOpen) {
+        this.renderMonthRows(details);
+      } else {
+        details.addEventListener("toggle", () => {
+          if (details.open) this.ensureMonthRows(details);
+        });
+      }
+    }
+  }
+  /** 立即把某月所有流水行挂到其 <details>（首次渲染）。 */
+  renderMonthRows(details) {
+    const txs = this.monthTxsByDetails.get(details);
+    if (!txs) return;
+    for (const tx of txs) this.renderTransaction(details, tx);
+    details.dataset.rendered = "1";
+  }
+  /** 幂等补建：仅在该月尚未渲染过时建行（折叠→展开的懒入口：toggle 事件 / 展开按钮）。 */
+  ensureMonthRows(details) {
+    if (details.dataset.rendered) return;
+    this.renderMonthRows(details);
+  }
+  /** 追加下一批流水到列表尾部；首批与滚动触达预载区时复用。加载到顶即收尾观察者。 */
+  appendChunk() {
+    const listEl = this.listEl;
+    if (!listEl) return;
+    const total = this.filteredTransactions.length;
+    const end = Math.min(this.renderedCount + PAGE_SIZE, total);
+    for (let i = this.renderedCount; i < end; i++) {
+      const tx = this.filteredTransactions[i];
+      if (!tx) break;
+      this.renderTransaction(listEl, tx);
+    }
+    this.renderedCount = end;
+    if (this.renderedCount >= total) {
+      this.teardownObserver();
+    } else if (this.sentinelEl) {
+      listEl.appendChild(this.sentinelEl);
+    }
+  }
+  /** 列表尾部放哨兵，进入 root 下方 300px 预载区即追加下一批，直到全部加载完。 */
+  setupInfiniteScroll() {
+    const listEl = this.listEl;
+    if (!listEl) return;
+    const sentinel = listEl.createDiv({ cls: "accounting-load-more", text: t("txList.loadMore") });
+    this.sentinelEl = sentinel;
+    this.loadMoreObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) this.appendChunk();
+        }
+      },
+      { root: listEl, rootMargin: "0px 0px 300px 0px" }
+    );
+    this.loadMoreObserver.observe(sentinel);
+  }
+  /** 断开滚动观察者并清空列表引用；filter 重渲、关闭弹窗时调用，避免泄漏与误触发。 */
+  teardownObserver() {
+    if (this.loadMoreObserver) {
+      this.loadMoreObserver.disconnect();
+      this.loadMoreObserver = null;
+    }
+    if (this.sentinelEl) {
+      this.sentinelEl.remove();
+      this.sentinelEl = null;
+    }
+    this.listEl = null;
+  }
+  renderTransaction(container, tx) {
+    const selected = this.selectedIds.has(tx.id);
+    const row = container.createDiv({ cls: `accounting-transaction-row${this.selectMode ? " accounting-tx-select-mode" : ""}${selected ? " accounting-tx-selected" : ""}` });
+    row.onclick = () => {
+      if (this.selectMode) {
+        if (this.selectedIds.has(tx.id)) {
+          this.selectedIds.delete(tx.id);
+        } else {
+          this.selectedIds.add(tx.id);
+        }
+        this.render();
+        return;
+      }
+      new TransactionDetailModal(
+        this.app,
+        this.adapter,
+        tx,
+        this.accounts,
+        this.categories,
+        this.transactions,
+        () => this.reloadAndRender(),
+        this.navCtx
+      ).open();
+    };
+    if (this.selectMode) {
+      const check = row.createDiv({ cls: `accounting-tx-check${selected ? " accounting-tx-check-on" : ""}` });
+      check.createSpan({ text: selected ? "\u2713" : "" });
+    }
+    const left = row.createDiv({ cls: "accounting-tx-left" });
+    left.createEl("span", {
+      text: this.typeLabel(tx.type),
+      cls: `accounting-tx-type accounting-tx-${tx.type}`
+    });
+    if (this.conflictIds.has(tx.id)) {
+      left.createEl("span", {
+        text: "\u26A0\uFE0F",
+        cls: "accounting-tx-conflict-mark",
+        attr: { title: t("tiedConflict.badgeTip"), "aria-label": t("tiedConflict.badgeTip") }
+      });
+    }
+    const middle = row.createDiv({ cls: "accounting-tx-middle" });
+    const detail = middle.createDiv({ cls: "accounting-tx-detail" });
+    if (tx.type === "expense" || tx.type === "income") {
+      const acc = tx.account ? this.accountById.get(tx.account) : void 0;
+      detail.appendText(acc ? acc.name : tx.account ?? "");
+      detail.appendText(" \xB7 ");
+      detail.createEl("span", { text: tx.category || "", cls: "accounting-tx-cat" });
+    } else {
+      detail.appendText(this.formatDetail(tx));
+    }
+    middle.createEl("div", {
+      text: this.formatTime(tx.ts),
+      cls: "accounting-tx-note"
+    });
+    const right = row.createDiv({ cls: "accounting-tx-right" });
+    right.createEl("span", {
+      text: formatMoney(tx.amount, tx.currency),
+      cls: `accounting-tx-amount ${this.amountClass(tx)}`
+    });
+  }
+  /** 是否有任意筛选项生效（决定是否显示统一「清除」按钮；对齐桌面 hasFilter）。 */
+  hasActiveFilter() {
+    const f = this.filter;
+    return f.types.length > 0 || !!f.accountId || !!f.keyword || !!f.recurringRuleId || !!f.category || f.uncategorized || f.quickActive !== "halfYear" || f.start !== monthsAgoDateInput(6) || f.end !== todayDateInput();
+  }
+  /** 重置所有筛选项到默认（近6月 + 全部类型/账户 + 无关键词 + 无周期账；对齐桌面 clearAll）。 */
+  resetFilter() {
+    this.filter = {
+      start: monthsAgoDateInput(6),
+      end: todayDateInput(),
+      types: [],
+      keyword: "",
+      accountId: "",
+      recurringRuleId: "",
+      category: "",
+      uncategorized: false,
+      quickActive: "halfYear",
+      sort: this.filter.sort
+      // 排序非筛选维度，清除时保留（对齐桌面 clearAll 不动 sort）
+    };
+  }
+  applyFilter() {
+    this.filteredTransactions = filterAndSortTransactions(this.transactions, {
+      types: this.filter.types,
+      account: this.filter.accountId,
+      category: this.filter.category,
+      uncategorized: this.filter.uncategorized ? true : void 0,
+      recurringRuleId: this.filter.recurringRuleId,
+      minAmount: null,
+      maxAmount: null,
+      from: this.filter.start,
+      to: this.filter.end,
+      query: this.filter.keyword,
+      sort: this.filter.sort
+    });
+  }
+  /** 应用 freshly-loaded 事件：折叠交易 + 更新 updatedAt 索引 + 检测打平冲突（行角标 + 一次性 Notice）。 */
+  applyEvents(events) {
+    this.updatedAtById = latestUpdatedAtById(events);
+    this.transactions = foldEvents(events);
+    this.tiedConflicts = detectTiedConflicts(events);
+    this.conflictIds = new Set(this.tiedConflicts.map((c) => c.id));
+    const { sig, notify } = nextConflictNotice(this.prevConflictSig, this.tiedConflicts);
+    if (notify) {
+      new import_obsidian18.Notice(t("tiedConflict.notice", { count: this.tiedConflicts.length }), 5e3);
+    }
+    this.prevConflictSig = sig;
+  }
+  async reloadAndRender() {
+    try {
+      const events = await this.adapter.loadLog();
+      this.applyEvents(events);
+      this.accountById = new Map(this.accounts.map((a) => [a.id, a]));
+      this.applyFilter();
+      this.render();
+      this.onDataChanged?.();
+    } catch (err) {
+      console.error("\u91CD\u65B0\u52A0\u8F7D\u6D41\u6C34\u5931\u8D25:", err);
+    }
+  }
+  typeLabel(type) {
+    const labels = {
+      expense: t("tx.type.expense"),
+      income: t("tx.type.income"),
+      transfer: t("tx.type.transfer"),
+      loan: t("tx.type.loan")
+    };
+    return labels[type];
+  }
+  formatTime(iso) {
+    return formatLocalTimestamp(iso, getLocale());
+  }
+  formatDetail(tx) {
+    const accountName = (id) => {
+      if (!id) return "";
+      const acc = this.accountById.get(id);
+      return acc ? acc.name : id;
+    };
+    switch (tx.type) {
+      case "expense":
+      case "income":
+        return `${accountName(tx.account)} \xB7 ${tx.category || ""}`;
+      case "transfer":
+        return `${accountName(tx.fromAccount)} \u2192 ${accountName(tx.toAccount)}`;
+      case "loan": {
+        const dir = tx.direction === "lend" ? t("txList.loanDir.lend") : tx.direction === "borrow" ? t("txList.loanDir.borrow") : tx.direction === "collect" ? t("txList.loanDir.collect") : t("txList.loanDir.repay");
+        return `${dir} \xB7 ${accountName(tx.person)}`;
+      }
+      default:
+        return "";
+    }
+  }
+  /** 金额颜色：borrow/collect = 钱进己方（正向），lend/repay = 钱出己方（负向）。 */
+  amountClass(tx) {
+    if (tx.type === "expense" || tx.type === "transfer") return "accounting-amount-negative";
+    if (tx.type === "income") return "accounting-amount-positive";
+    return loanCashIn(tx.direction) ? "accounting-amount-positive" : "accounting-amount-negative";
+  }
+  /** 走 Obsidian 原生关闭：pop 全局 keymap scope（Modal.open 时 push 的 Escape/Tab 捕获）并恢复焦点，
+   *  再由基类回调 onClose。默认关闭动画已被 inline animation/transition:none 中和，仍是即时摘除——
+   *  若绕过 super.close() 只 detach 容器，scope 不弹、焦点不恢复，会导致关闭后 Obsidian 笔记无法正常编辑。 */
+  close() {
+    if (this.closing) return;
+    this.closing = true;
+    super.close();
+  }
+  onClose() {
+    this.closeSortMenu();
+    this.teardownObserver();
+    this.contentEl.empty();
+  }
+};
+
 // src/navActions.ts
 function openList(app, adapter, navCtx, presetAccountId, slide, presetRecurringRuleId, drillDown, drill, onDataChanged, onSwitchLedger, onOpened) {
   new TransactionListModal(app, adapter, presetAccountId, navCtx, slide, presetRecurringRuleId, drillDown, drill, onDataChanged, onSwitchLedger, onOpened).open();
@@ -9705,228 +10268,373 @@ async function openEntryRecurring(app, adapter, mode, onDone) {
   ).open();
 }
 
-// src/diagLogModal.ts
-var import_obsidian17 = require("obsidian");
-var LEVELS = ["ALL", "ERROR", "WARN", "INFO", "DEBUG"];
-var TONE = {
-  ERROR: "var(--color-red)",
-  WARN: "var(--color-orange)",
-  INFO: "var(--color-blue)",
-  DEBUG: "var(--text-faint)"
-};
-function lineLevel(line) {
-  return line.split(/\s+/)[1] ?? null;
-}
-var DiagLogModal = class extends import_obsidian17.Modal {
-  level = "ALL";
-  keyword = "";
-  listEl;
-  constructor(app) {
-    super(app);
+// src/onboardingModal.ts
+var import_obsidian19 = require("obsidian");
+
+// src/currencyPicker.ts
+function createCurrencyPicker(parent, opts) {
+  const wrap = parent.createDiv({ cls: "accounting-currency-picker" });
+  const input = wrap.createEl("input", { cls: "accounting-ledger-input accounting-currency-picker-input" });
+  input.type = "text";
+  input.placeholder = opts.placeholder ?? t("settings.currency.searchPlaceholder");
+  input.value = opts.value ? `${currencyDisplayName(opts.value, getLocale())} ${opts.value}` : "";
+  input.setAttribute("autocomplete", "off");
+  const dropdown = createDiv({ cls: "accounting-currency-picker-dropdown" });
+  document.body.appendChild(dropdown);
+  dropdown.style.display = "none";
+  const excludeSet = new Set((opts.exclude ?? []).map((c) => c.toUpperCase()));
+  const currentUpper = (opts.value ?? "").toUpperCase();
+  let open = false;
+  let flat = [];
+  let hi = 0;
+  function sections(text) {
+    const term = text.trim();
+    if (term) {
+      const items = filterCurrencies(term, getLocale()).filter((c) => !excludeSet.has(c.code));
+      return [{ label: t("settings.currency.searchResults", { n: items.length }), items }];
+    }
+    return orderedCurrencyCatalog(getLocale()).map((g) => ({ label: t(g.labelKey, { count: g.count }), items: g.items.filter((c) => !excludeSet.has(c.code)) })).filter((g) => g.items.length > 0);
   }
+  function paint() {
+    dropdown.querySelectorAll("[data-idx]").forEach((el) => {
+      const he = el;
+      he.classList.toggle("is-active", Number(he.dataset.idx) === hi);
+    });
+    const active = dropdown.querySelector(`[data-idx="${hi}"]`);
+    active?.scrollIntoView({ block: "nearest" });
+  }
+  function render() {
+    dropdown.empty();
+    const gs = sections(input.value);
+    flat = gs.flatMap((g) => g.items);
+    if (flat.length === 0) {
+      dropdown.createEl("div", { text: t("settings.currency.noMatch"), cls: "accounting-currency-picker-empty" });
+      return;
+    }
+    for (const g of gs) {
+      dropdown.createEl("div", { text: g.label, cls: "accounting-currency-picker-group" });
+      for (const c of g.items) {
+        const idx = flat.indexOf(c);
+        const item = dropdown.createDiv({ cls: "accounting-currency-picker-item" });
+        item.dataset.idx = String(idx);
+        item.createEl("span", { text: c.name, cls: "accounting-currency-picker-cn" });
+        item.createEl("span", { text: c.code, cls: "accounting-currency-picker-code" });
+        if (c.code === currentUpper) item.createEl("span", { text: "\u2713", cls: "accounting-currency-picker-check" });
+        item.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          pick(c.code);
+        });
+        item.addEventListener("mouseenter", () => {
+          hi = idx;
+          paint();
+        });
+      }
+    }
+    paint();
+  }
+  function position() {
+    const r = input.getBoundingClientRect();
+    dropdown.style.left = `${r.left}px`;
+    dropdown.style.top = `${r.bottom + 4}px`;
+    dropdown.style.width = `${r.width}px`;
+  }
+  const displayValue = () => opts.value ? `${currencyDisplayName(opts.value, getLocale())} ${opts.value}` : "";
+  function openPanel() {
+    if (open) return;
+    open = true;
+    hi = 0;
+    input.value = "";
+    render();
+    position();
+    dropdown.style.display = "block";
+  }
+  function close() {
+    if (!open) return;
+    open = false;
+    dropdown.style.display = "none";
+    input.value = displayValue();
+  }
+  function pick(code) {
+    input.value = `${currencyDisplayName(code, getLocale())} ${code}`;
+    close();
+    opts.onPick(code);
+  }
+  input.addEventListener("focus", openPanel);
+  input.addEventListener("input", () => {
+    if (!open) openPanel();
+    else {
+      render();
+      position();
+    }
+    hi = 0;
+    paint();
+  });
+  input.addEventListener("keydown", (e) => {
+    if (!open) {
+      if (e.key === "ArrowDown" || e.key === "Enter") {
+        e.preventDefault();
+        openPanel();
+      }
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      hi = Math.min(hi + 1, flat.length - 1);
+      paint();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      hi = Math.max(hi - 1, 0);
+      paint();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const c = flat[hi];
+      if (c) pick(c.code);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+      opts.onDismiss?.();
+    }
+  });
+  const onFollow = () => {
+    if (!input.isConnected) {
+      destroy();
+      return;
+    }
+    if (open) position();
+  };
+  const onDoc = (e) => {
+    if (!input.isConnected) {
+      destroy();
+      return;
+    }
+    const node = e.target;
+    if (!wrap.contains(node) && !dropdown.contains(node)) {
+      close();
+      opts.onDismiss?.();
+    }
+  };
+  document.addEventListener("mousedown", onDoc);
+  window.addEventListener("scroll", onFollow, true);
+  window.addEventListener("resize", onFollow);
+  function destroy() {
+    document.removeEventListener("mousedown", onDoc);
+    window.removeEventListener("scroll", onFollow, true);
+    window.removeEventListener("resize", onFollow);
+    dropdown.remove();
+    wrap.remove();
+  }
+  return { input, destroy };
+}
+
+// src/createLedgerForm.ts
+function renderCreateLedgerForm(container, existing, handlers, opts = {}) {
+  container.empty();
+  container.createEl("h2", { text: opts.title ?? t("ledger.create.title") });
+  const nameInput = container.createEl("input", { type: "text", cls: "accounting-ledger-input" });
+  nameInput.placeholder = t("ledger.create.namePlaceholder");
+  nameInput.autofocus = true;
+  const aliasInput = container.createEl("input", { type: "text", cls: "accounting-ledger-input" });
+  aliasInput.placeholder = t("ledger.create.aliasPlaceholder");
+  container.createEl("div", { text: t("settings.currency.baseLabel"), cls: "accounting-ledger-card-title" });
+  const baseHolder = container.createDiv();
+  const defaultBase = getLocale().toLowerCase().startsWith("zh") ? "CNY" : "USD";
+  let baseCurrency = defaultBase;
+  const basePicker = createCurrencyPicker(baseHolder, {
+    value: defaultBase,
+    onPick: (code) => {
+      baseCurrency = code;
+    }
+  });
+  const errorEl = container.createEl("div", { cls: "accounting-ledger-error" });
+  const actions = container.createDiv("accounting-modal-actions");
+  const cancelBtn = actions.createEl("button", { text: opts.cancelText ?? t("common.cancel"), cls: "accounting-btn-secondary" });
+  cancelBtn.onclick = () => {
+    basePicker.destroy();
+    handlers.onCancel();
+  };
+  const submitBtn = actions.createEl("button", { text: opts.submitText ?? t("ledger.create.submitBtn"), cls: "accounting-btn-primary" });
+  submitBtn.disabled = true;
+  const update = () => {
+    const err = validateLedgerName(nameInput.value, existing);
+    errorEl.setText(err ? t(err) : "");
+    submitBtn.disabled = err !== null || !nameInput.value.trim();
+  };
+  nameInput.oninput = update;
+  submitBtn.onclick = async () => {
+    const name = nameInput.value.trim();
+    const alias = aliasInput.value.trim();
+    const ok2 = await handlers.onSubmit(name, alias, baseCurrency);
+    if (ok2) {
+      basePicker.destroy();
+    } else {
+      update();
+    }
+  };
+  update();
+  setTimeout(() => nameInput.focus(), 0);
+}
+
+// src/onboardingModal.ts
+function defaultBaseCurrency() {
+  return getLocale().toLowerCase().startsWith("zh") ? "CNY" : "USD";
+}
+var OnboardingModal = class extends import_obsidian19.Modal {
+  constructor(app, adapter, onComplete, onLocaleChange) {
+    super(app);
+    this.adapter = adapter;
+    this.onComplete = onComplete;
+    this.onLocaleChange = onLocaleChange;
+  }
+  currentStep = "main";
+  /** 用户在关闭前的选择；null 表示未做选择（直接关闭→跳过）。onClose 据此单点回调，避免重复触发。 */
+  result = null;
+  /** 步骤内容容器；render 方法只清空/填充此容器，保留顶部语言下拉。 */
+  bodyEl;
   async onOpen() {
-    this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian17.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: t("diaglog.title") }).addClass("accounting-modal-title");
-    const toolbar = contentEl.createDiv({ cls: "accounting-diaglog-toolbar" });
-    const seg = toolbar.createDiv({ cls: "accounting-diaglog-seg" });
-    for (const l of LEVELS) {
-      const b = seg.createEl("button", { text: l === "ALL" ? t("diaglog.all") : l, cls: "accounting-diaglog-seg-btn" });
-      b.onclick = () => {
-        this.level = l;
-        this.updateSegActive(seg);
-        void this.render();
+    this.modalEl.addClass("accounting-sub-modal");
+    contentEl.addClass("accounting-modal");
+    if (!import_obsidian19.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    this.renderLangSelect(contentEl);
+    this.bodyEl = contentEl.createDiv("accounting-onboarding-body");
+    await this.renderMainStep();
+    const closeWrap = contentEl.createDiv("accounting-modal-close");
+    closeWrap.createEl("button", { text: t("common.close"), cls: "accounting-btn-secondary" }).onclick = () => this.close();
+  }
+  /** 语言下拉：setLocale + onLocaleChange 持久化 + 用新 locale 重渲染当前步骤与下拉文案。 */
+  renderLangSelect(el) {
+    const wrap = el.createDiv("accounting-onboarding-lang");
+    const select = wrap.createEl("select", { cls: "accounting-input" });
+    const fillOptions = () => {
+      select.empty();
+      select.appendChild(new Option(t("settings.language.zh"), "zh"));
+      select.appendChild(new Option(t("settings.language.en"), "en"));
+      select.value = getLocale();
+    };
+    fillOptions();
+    select.onchange = async () => {
+      const next = select.value;
+      setLocale(next);
+      try {
+        await this.onLocaleChange(next);
+      } catch {
+      }
+      this.bodyEl.empty();
+      if (this.currentStep === "create") {
+        await this.renderCreateForm();
+      } else {
+        await this.renderMainStep();
+      }
+      fillOptions();
+    };
+  }
+  /** 渲染主步骤：根据是否有现有账本显示不同界面 */
+  async renderMainStep() {
+    this.bodyEl.empty();
+    this.currentStep = "main";
+    const existing = await this.adapter.listLedgers();
+    if (existing.length === 0) {
+      this.renderEmptyState();
+    } else {
+      await this.renderLedgerSelection(existing);
+    }
+  }
+  /** 创建示例账本并关闭：空状态与有账本列表共用，避免逻辑重复 */
+  async createSampleAndClose() {
+    try {
+      const folder = await this.adapter.createSampleLedger(SAMPLE_LEDGER_NAME, t("seed.sampleAlias"), defaultBaseCurrency());
+      this.result = { action: "selected", ledger: folder };
+      this.close();
+    } catch (e) {
+      new import_obsidian19.Notice(t("onboarding.createSampleFailed", { msg: formatError(e) }));
+    }
+  }
+  /** 无账本时：提供示例账本创建和手动创建两个选项 */
+  renderEmptyState() {
+    this.bodyEl.empty();
+    this.currentStep = "main";
+    const titleEl = this.bodyEl.createEl("h2", { text: t("onboarding.welcome") });
+    titleEl.addClass("accounting-modal-title");
+    this.bodyEl.createEl("p", {
+      text: t("onboarding.emptyDesc"),
+      cls: "accounting-onboarding-desc"
+    });
+    const sampleBtn = this.bodyEl.createEl("button", {
+      text: t("onboarding.createSample"),
+      cls: "accounting-btn accounting-btn-primary accounting-btn-block"
+    });
+    sampleBtn.onclick = () => this.createSampleAndClose();
+    this.bodyEl.createEl("p", { text: t("onboarding.or"), cls: "accounting-onboarding-sep" });
+    const createBtn = this.bodyEl.createEl("button", {
+      text: t("onboarding.createNew"),
+      cls: "accounting-btn accounting-btn-secondary accounting-btn-block"
+    });
+    createBtn.onclick = () => this.renderCreateForm();
+  }
+  /** 渲染现有账本选择列表 */
+  async renderLedgerSelection(existing) {
+    this.bodyEl.empty();
+    this.currentStep = "main";
+    const titleEl = this.bodyEl.createEl("h2", { text: t("onboarding.selectLedger") });
+    titleEl.addClass("accounting-modal-title");
+    const listEl = this.bodyEl.createDiv("accounting-onboarding-folder-list");
+    for (const folder of existing.sort()) {
+      const label = await this.adapter.readLedgerAlias(folder);
+      const itemEl = listEl.createEl("button", {
+        text: label,
+        cls: "accounting-btn accounting-btn-secondary accounting-btn-block"
+      });
+      itemEl.onclick = () => {
+        this.result = { action: "selected", ledger: folder };
+        this.close();
       };
     }
-    this.updateSegActive(seg);
-    const search = toolbar.createEl("input", { cls: "accounting-search-input accounting-diaglog-search" });
-    search.placeholder = t("diaglog.search");
-    search.oninput = () => {
-      this.keyword = search.value;
-      void this.render();
-    };
-    const refresh = toolbar.createEl("button", { text: t("diaglog.refresh"), cls: "accounting-btn accounting-btn-secondary" });
-    refresh.onclick = () => void this.render();
-    const exportBtn = toolbar.createEl("button", { text: t("diaglog.export"), cls: "accounting-btn accounting-btn-secondary" });
-    exportBtn.onclick = async () => {
-      try {
-        const path = await exportPluginLog();
-        new import_obsidian17.Notice(`${t("diaglog.exportDone")}: ${path}`);
-      } catch {
-        new import_obsidian17.Notice(t("diaglog.exportFail"));
-      }
-    };
-    this.listEl = contentEl.createDiv({ cls: "accounting-diaglog-list" });
-    await this.render();
-    const closeWrap = contentEl.createDiv({ cls: "accounting-modal-close" });
-    const closeBtn = closeWrap.createEl("button", { text: t("common.close"), cls: "accounting-btn-secondary" });
-    closeBtn.onclick = () => this.close();
+    const createBtn = this.bodyEl.createEl("button", {
+      text: "+ " + t("onboarding.createNew"),
+      cls: "accounting-btn accounting-btn-primary accounting-btn-block"
+    });
+    createBtn.onclick = () => this.renderCreateForm();
+    const sampleBtn = this.bodyEl.createEl("button", {
+      text: t("onboarding.createSample"),
+      cls: "accounting-btn accounting-btn-secondary accounting-btn-block"
+    });
+    sampleBtn.onclick = () => this.createSampleAndClose();
+  }
+  /** 渲染创建新账本表单：复用 renderCreateLedgerForm（与设置页一致：名称 + 别名 + 即时校验） */
+  async renderCreateForm() {
+    this.currentStep = "create";
+    const existing = await this.adapter.listLedgers();
+    renderCreateLedgerForm(
+      this.bodyEl,
+      existing,
+      {
+        onSubmit: async (name, alias, baseCurrency) => {
+          try {
+            const folder = await this.adapter.createLedger(name, alias || void 0, baseCurrency);
+            new import_obsidian19.Notice(t("onboarding.createdNotif", { name: alias || ObsidianDataAdapter.formatLedgerName(folder) }));
+            this.result = { action: "created", ledger: folder };
+            this.close();
+            return true;
+          } catch (e) {
+            new import_obsidian19.Notice(t("onboarding.createFailed", { msg: formatError(e) }));
+            return false;
+          }
+        },
+        onCancel: () => void this.renderMainStep()
+      },
+      { title: t("onboarding.createNew"), cancelText: t("onboarding.back"), submitText: t("onboarding.createSubmit") }
+    );
   }
   onClose() {
-    this.contentEl.empty();
-  }
-  updateSegActive(seg) {
-    seg.querySelectorAll("button").forEach((b, i) => {
-      b.classList.toggle("is-active", LEVELS[i] === this.level);
-    });
-  }
-  async render() {
-    const text = await readPluginLogText();
-    const kw = this.keyword.trim().toLowerCase();
-    const lines = text.split("\n").filter((l) => {
-      if (!l.trim()) return false;
-      if (this.level !== "ALL" && lineLevel(l) !== this.level) return false;
-      if (kw && !l.toLowerCase().includes(kw)) return false;
-      return true;
-    });
-    this.listEl.empty();
-    if (lines.length === 0) {
-      this.listEl.createEl("div", { text: t("diaglog.empty"), cls: "accounting-diaglog-empty" });
-      return;
-    }
-    for (const ln of lines) {
-      const lv = lineLevel(ln);
-      const color = lv && TONE[lv] || "inherit";
-      const div = this.listEl.createDiv({ text: ln, cls: "accounting-diaglog-line" });
-      div.style.color = color;
-    }
-  }
-};
-
-// src/ledgerPasswordModal.ts
-var import_obsidian18 = require("obsidian");
-var LedgerPasswordModal = class extends import_obsidian18.Modal {
-  constructor(app, props, onSubmit, onCancel) {
-    super(app);
-    this.props = props;
-    this.onSubmit = onSubmit;
-    this.onCancel = onCancel;
-  }
-  errorEl;
-  bodyEl;
-  onOpen() {
     const { contentEl } = this;
     contentEl.empty();
-    this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian18.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
-    const title = this.props.mode === "unlock" ? t("settings.password.unlockTitle", { name: this.props.alias }) : this.props.mode === "set" ? t("settings.password.setTitle") : this.props.mode === "change" ? t("settings.password.changeTitle") : t("settings.password.removeTitle");
-    contentEl.createEl("h2", { text: title });
-    if (this.props.mode === "unlock") {
-      contentEl.createEl("p", { text: t("settings.password.unlockHint"), cls: "accounting-ledger-empty" });
-    } else if (this.props.mode === "set") {
-      contentEl.createEl("p", { text: t("settings.password.setHint"), cls: "accounting-ledger-empty" });
-    } else if (this.props.mode === "change") {
-      contentEl.createEl("p", { text: t("settings.password.changeHint", { name: this.props.alias }), cls: "accounting-ledger-empty" });
-    } else {
-      contentEl.createEl("p", { text: t("settings.password.removeHint", { name: this.props.alias }), cls: "accounting-ledger-empty" });
-    }
-    this.bodyEl = contentEl.createDiv();
-    this.renderBody();
-    this.errorEl = contentEl.createDiv({ cls: "accounting-ledger-empty" });
-    this.errorEl.style.color = "var(--text-error)";
-    this.errorEl.style.display = "none";
-    const actions = contentEl.createDiv("accounting-modal-actions");
-    const cancelBtn = actions.createEl("button", { text: t("common.cancel"), cls: "accounting-btn-secondary" });
-    cancelBtn.onclick = () => {
-      this.onCancel();
-      this.close();
-    };
-    const isRemove = this.props.mode === "remove";
-    const submitText = this.props.mode === "unlock" ? t("settings.password.unlock") : isRemove ? t("settings.password.removeBtn") : t("common.confirm");
-    const submitBtn = actions.createEl("button", {
-      text: submitText,
-      cls: isRemove ? "accounting-btn-danger" : "accounting-btn-primary"
-    });
-    submitBtn.onclick = async () => {
-      await this.handleSubmit(submitBtn);
-    };
-    setTimeout(() => this.firstInput()?.focus(), 0);
-  }
-  firstInput() {
-    return this.bodyEl.querySelector("input");
-  }
-  renderBody() {
-    this.bodyEl.empty();
-    if (this.props.mode === "change" || this.props.mode === "remove") {
-      this.makeInput("old", t("settings.password.oldPlaceholder"), "password");
-    }
-    if (this.props.mode !== "remove") {
-      this.makeInput("new", t("settings.password.newPlaceholder"), "password");
-    }
-    if (this.props.mode === "set" || this.props.mode === "change") {
-      this.makeInput("confirm", t("settings.password.confirmPlaceholder"), "password");
-    }
-  }
-  makeInput(key, placeholder, type) {
-    const input = this.bodyEl.createEl("input", { type, cls: "accounting-ledger-input" });
-    input.placeholder = placeholder;
-    input.dataset["field"] = key;
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        const submit = this.contentEl.querySelector(".accounting-btn-primary, .accounting-btn-danger");
-        submit?.click();
-      }
-    });
-    return input;
-  }
-  readField(key) {
-    const el = this.bodyEl.querySelector(`input[data-field="${key}"]`);
-    return el ? el.value : "";
-  }
-  showError(msg) {
-    this.errorEl.textContent = msg;
-    this.errorEl.style.display = "block";
-  }
-  async handleSubmit(submitBtn) {
-    const mode = this.props.mode;
-    const newPwd = this.readField("new");
-    if (mode === "set") {
-      if (newPwd.trim().length === 0) {
-        this.showError(t("settings.password.empty"));
-        return;
-      }
-      const confirm2 = this.readField("confirm");
-      if (newPwd !== confirm2) {
-        this.showError(t("settings.password.mismatch"));
-        return;
-      }
-    } else if (mode === "change") {
-      const confirm2 = this.readField("confirm");
-      if (newPwd !== confirm2) {
-        this.showError(t("settings.password.mismatch"));
-        return;
-      }
-    } else if (mode === "unlock" && newPwd.length === 0) {
-      this.showError(t("settings.password.empty"));
-      return;
-    } else if (mode === "remove" && this.readField("old").length === 0) {
-      this.showError(t("settings.password.empty"));
-      return;
-    }
-    const old = this.readField("old");
-    submitBtn.disabled = true;
-    const prevText = submitBtn.textContent;
-    submitBtn.textContent = t("settings.password.verifying");
-    try {
-      const err = await this.onSubmit({ old: old || void 0, new: newPwd });
-      if (err) {
-        this.showError(err);
-      } else {
-        this.close();
-      }
-    } finally {
-      submitBtn.disabled = false;
-      submitBtn.textContent = prevText;
-    }
-  }
-  onClose() {
-    this.contentEl.empty();
+    this.onComplete(this.result ?? { action: "skipped" });
   }
 };
 
 // src/settings.ts
+var import_obsidian20 = require("obsidian");
 var FEEDBACK_EMAIL = "honeyledger@163.com";
 function kindOfLabel(type) {
   return type === "credit" || type === "loan" ? t("accountKind.liability") : t("accountKind.asset");
@@ -9997,6 +10705,7 @@ var AccountingSettings = class {
     this.renderRecurringListView(this.createPanel(panelsEl, "recurring"));
     const categoryPanel = this.createPanel(panelsEl, "category");
     this.renderCategoryListView(categoryPanel);
+    this.renderAccountTagView(categoryPanel);
     this.renderAccountTypeView(categoryPanel);
     this.renderCurrencyPanel(this.createPanel(panelsEl, "currency"));
     this.renderAboutPanel(this.createPanel(panelsEl, "about"));
@@ -10060,7 +10769,7 @@ var AccountingSettings = class {
       try {
         await this.plugin.saveSettings();
       } catch (e) {
-        new import_obsidian19.Notice(t("entry.saveFailed", { msg: formatError(e) }));
+        new import_obsidian20.Notice(t("entry.saveFailed", { msg: formatError(e) }));
       }
       this.plugin.navCtx(this.currentAdapter()).openSettings();
     };
@@ -10072,9 +10781,9 @@ var AccountingSettings = class {
       this.plugin.settings.autoOpenOnStartup = cb.checked;
       try {
         await this.plugin.saveSettings();
-        new import_obsidian19.Notice(cb.checked ? t("settings.startup.on") : t("settings.startup.off"));
+        new import_obsidian20.Notice(cb.checked ? t("settings.startup.on") : t("settings.startup.off"));
       } catch (e) {
-        new import_obsidian19.Notice(t("entry.saveFailed", { msg: formatError(e) }));
+        new import_obsidian20.Notice(t("entry.saveFailed", { msg: formatError(e) }));
       }
     };
     row.createEl("span", { text: t("settings.startup.toggleLabel"), cls: "accounting-currency-online-label accounting-startup-toggle-label" });
@@ -10122,9 +10831,9 @@ var AccountingSettings = class {
     diagExportBtn.onclick = async () => {
       try {
         const path = await exportPluginLog();
-        new import_obsidian19.Notice(`${t("diaglog.exportDone")}: ${path}`);
+        new import_obsidian20.Notice(`${t("diaglog.exportDone")}: ${path}`);
       } catch {
-        new import_obsidian19.Notice(t("diaglog.exportFail"));
+        new import_obsidian20.Notice(t("diaglog.exportFail"));
       }
     };
   }
@@ -10175,11 +10884,11 @@ var AccountingSettings = class {
                 } else {
                   this.plugin.settings.dataSubdir = name;
                   await this.plugin.saveSettings();
-                  new import_obsidian19.Notice(t("settings.ledger.switchedNotice", { alias }));
+                  new import_obsidian20.Notice(t("settings.ledger.switchedNotice", { alias }));
                   void refreshLedgerList();
                 }
               } catch (error) {
-                new import_obsidian19.Notice(t("settings.ledger.switchFailed", { msg: formatError(error) }));
+                new import_obsidian20.Notice(t("settings.ledger.switchFailed", { msg: formatError(error) }));
               }
             };
           }
@@ -10216,14 +10925,14 @@ var AccountingSettings = class {
         } else {
           this.plugin.settings.dataSubdir = name;
           await this.plugin.saveSettings();
-          new import_obsidian19.Notice(t("settings.ledger.createdSwitchedNotice", { alias: alias || ObsidianDataAdapter.formatLedgerName(name) }));
+          new import_obsidian20.Notice(t("settings.ledger.createdSwitchedNotice", { alias: alias || ObsidianDataAdapter.formatLedgerName(name) }));
           await refreshLedgerList();
         }
       });
     };
     refreshLedgerBtn.onclick = async () => {
       await refreshLedgerList();
-      new import_obsidian19.Notice(t("settings.ledger.refreshedNotice"));
+      new import_obsidian20.Notice(t("settings.ledger.refreshedNotice"));
     };
     this.refreshers.push(refreshLedgerList);
     void refreshLedgerList();
@@ -10243,9 +10952,9 @@ var AccountingSettings = class {
     createBackupBtn.onclick = async () => {
       try {
         const backupPath = await this.currentAdapter().backup("manual");
-        new import_obsidian19.Notice(t("settings.backup.createdNotice", { path: backupPath }));
+        new import_obsidian20.Notice(t("settings.backup.createdNotice", { path: backupPath }));
       } catch (error) {
-        new import_obsidian19.Notice(t("settings.backup.createFailed", { msg: formatError(error) }));
+        new import_obsidian20.Notice(t("settings.backup.createFailed", { msg: formatError(error) }));
       }
     };
     listBackupBtn.onclick = () => {
@@ -10286,9 +10995,9 @@ var AccountingSettings = class {
       const persist = async (next) => {
         try {
           await adapter.writeBackupConfig(next);
-          new import_obsidian19.Notice(t("settings.backup.configSaved"));
+          new import_obsidian20.Notice(t("settings.backup.configSaved"));
         } catch (e) {
-          new import_obsidian19.Notice(t("settings.backup.configSaveFailed", { msg: formatError(e) }));
+          new import_obsidian20.Notice(t("settings.backup.configSaveFailed", { msg: formatError(e) }));
         }
       };
       enableCb.onchange = () => void persist({ ...cfg, backupEnabled: enableCb.checked });
@@ -10338,24 +11047,24 @@ var AccountingSettings = class {
           const immediate = rebaseRateTable(rates, oldBase, cur, {}, nowISO());
           await adapter.writeBaseCurrency(cur);
           await adapter.writeRates(immediate);
-          new import_obsidian19.Notice(t("settings.currency.baseSetRefreshing", { cur }));
+          new import_obsidian20.Notice(t("settings.currency.baseSetRefreshing", { cur }));
           await refresh();
           void (async () => {
             try {
               const url = `https://api.frankfurter.app/latest?from=${cur.toUpperCase()}`;
-              const resp = await (0, import_obsidian19.requestUrl)({ url, method: "GET" });
+              const resp = await (0, import_obsidian20.requestUrl)({ url, method: "GET" });
               const fetched = parseRateResponse(resp.json, cur, nowISO());
               if (!fetched) return;
               await adapter.writeRates(rebaseRateTable(rates, oldBase, cur, fetched, nowISO()));
               const cfg = await adapter.readRateConfig().catch(() => ({}));
               await adapter.writeRateConfig({ ...cfg, lastSuccess: nowISO() });
-              new import_obsidian19.Notice(t("settings.currency.baseRefreshed", { cur }));
+              new import_obsidian20.Notice(t("settings.currency.baseRefreshed", { cur }));
               await refresh();
             } catch {
             }
           })();
         } catch (error) {
-          new import_obsidian19.Notice(t("settings.currency.setFailed", { msg: formatError(error) }));
+          new import_obsidian20.Notice(t("settings.currency.setFailed", { msg: formatError(error) }));
         }
       }
     });
@@ -10450,32 +11159,32 @@ var AccountingSettings = class {
     saveBtn.onclick = async () => {
       const { invalid, duplicates, missingRate, emptyRows, baseRows } = validateRateRows(rows, baseCurrency);
       if (emptyRows > 0) {
-        new import_obsidian19.Notice(t("settings.currency.errEmptyRows", { n: emptyRows }), 5e3);
+        new import_obsidian20.Notice(t("settings.currency.errEmptyRows", { n: emptyRows }), 5e3);
         return;
       }
       if (invalid.length > 0) {
-        new import_obsidian19.Notice(t("settings.currency.errInvalid", { list: invalid.join(", ") }), 5e3);
+        new import_obsidian20.Notice(t("settings.currency.errInvalid", { list: invalid.join(", ") }), 5e3);
         return;
       }
       if (baseRows.length > 0) {
-        new import_obsidian19.Notice(t("settings.currency.errBaseRow", { base: baseCurrency }), 5e3);
+        new import_obsidian20.Notice(t("settings.currency.errBaseRow", { base: baseCurrency }), 5e3);
         return;
       }
       if (missingRate.length > 0) {
-        new import_obsidian19.Notice(t("settings.currency.errMissingRate", { list: missingRate.join(", ") }), 5e3);
+        new import_obsidian20.Notice(t("settings.currency.errMissingRate", { list: missingRate.join(", ") }), 5e3);
         return;
       }
       if (duplicates.length > 0) {
-        new import_obsidian19.Notice(t("settings.currency.errDuplicates", { list: duplicates.join(", ") }), 5e3);
+        new import_obsidian20.Notice(t("settings.currency.errDuplicates", { list: duplicates.join(", ") }), 5e3);
         return;
       }
       try {
         await adapter.writeRates(rateRowsToTable(rows, baseCurrency));
-        new import_obsidian19.Notice(t("settings.currency.savedNotice"));
+        new import_obsidian20.Notice(t("settings.currency.savedNotice"));
         setDirty(false);
         await refresh();
       } catch (error) {
-        new import_obsidian19.Notice(t("entry.saveFailed", { msg: formatError(error) }), 5e3);
+        new import_obsidian20.Notice(t("entry.saveFailed", { msg: formatError(error) }), 5e3);
       }
     };
     const onlineEl = bodyEl.createDiv({ cls: "accounting-currency-online" });
@@ -10490,7 +11199,7 @@ var AccountingSettings = class {
         try {
           await adapter.writeRateConfig(next);
         } catch (e) {
-          new import_obsidian19.Notice(t("entry.saveFailed", { msg: formatError(e) }));
+          new import_obsidian20.Notice(t("entry.saveFailed", { msg: formatError(e) }));
         }
       };
       btnRow.createEl("span", { text: t("settings.currency.autoRefreshLabel"), cls: "accounting-currency-online-label" });
@@ -10500,25 +11209,25 @@ var AccountingSettings = class {
         btn.setText(t("settings.currency.refreshing"));
         try {
           const url = `https://api.frankfurter.app/latest?from=${baseCurrency.toUpperCase()}`;
-          const resp = await (0, import_obsidian19.requestUrl)({ url, method: "GET" });
+          const resp = await (0, import_obsidian20.requestUrl)({ url, method: "GET" });
           const fetched = parseRateResponse(resp.json, baseCurrency, nowISO());
           if (!fetched) {
-            new import_obsidian19.Notice(t("settings.currency.parseFailed"));
+            new import_obsidian20.Notice(t("settings.currency.parseFailed"));
             return;
           }
           const currentVisible = rows.map((r) => r.currency.trim().toUpperCase()).filter((c) => c && c !== baseCurrency);
           const { merged, updated } = mergeRatesByVisible(rates, fetched, currentVisible);
           if (updated === 0) {
-            new import_obsidian19.Notice(t("settings.currency.noCaredCurrency"));
+            new import_obsidian20.Notice(t("settings.currency.noCaredCurrency"));
             return;
           }
           await adapter.writeRates(merged);
           const next = { ...cfg, lastSuccess: nowISO() };
           await adapter.writeRateConfig(next);
-          new import_obsidian19.Notice(t("settings.currency.refreshedN", { n: updated }));
+          new import_obsidian20.Notice(t("settings.currency.refreshedN", { n: updated }));
           await refresh();
         } catch (e) {
-          new import_obsidian19.Notice(t("settings.currency.refreshFailed", { msg: formatError(e) }));
+          new import_obsidian20.Notice(t("settings.currency.refreshFailed", { msg: formatError(e) }));
         } finally {
           btn.disabled = false;
           btn.setText(t("settings.currency.refreshBtn"));
@@ -10541,7 +11250,7 @@ var AccountingSettings = class {
         const folder = await adapter.createLedger(name, alias || void 0, baseCurrency);
         await onDone(folder, alias);
       } catch (error) {
-        new import_obsidian19.Notice(t("settings.ledger.createFailed", { msg: formatError(error) }));
+        new import_obsidian20.Notice(t("settings.ledger.createFailed", { msg: formatError(error) }));
       }
     });
     modal.open();
@@ -10552,10 +11261,10 @@ var AccountingSettings = class {
     const modal = new RenameLedgerAliasModal(this.app, folder, currentAlias, async (alias) => {
       try {
         await adapter.writeLedgerAlias(folder, alias);
-        new import_obsidian19.Notice(t("settings.ledger.aliasUpdated", { alias: alias || ObsidianDataAdapter.formatLedgerName(folder) }));
+        new import_obsidian20.Notice(t("settings.ledger.aliasUpdated", { alias: alias || ObsidianDataAdapter.formatLedgerName(folder) }));
         await onDone();
       } catch (error) {
-        new import_obsidian19.Notice(t("settings.ledger.renameFailed", { msg: formatError(error) }));
+        new import_obsidian20.Notice(t("settings.ledger.renameFailed", { msg: formatError(error) }));
       }
     });
     modal.open();
@@ -10570,7 +11279,7 @@ var AccountingSettings = class {
         try {
           if (mode === "set") {
             await adapter.writeLedgerPasswordMetaAt(folder, await buildLedgerPasswordMeta(values.new));
-            new import_obsidian19.Notice(t("settings.password.toastSet"));
+            new import_obsidian20.Notice(t("settings.password.toastSet"));
           } else {
             const meta = await adapter.readLedgerPasswordMetaAt(folder);
             if (!meta) return t("settings.password.toastFailed", { msg: "" });
@@ -10579,10 +11288,10 @@ var AccountingSettings = class {
             }
             if (values.new.trim().length === 0) {
               await adapter.writeLedgerPasswordMetaAt(folder, null);
-              new import_obsidian19.Notice(t("settings.password.toastRemoved"));
+              new import_obsidian20.Notice(t("settings.password.toastRemoved"));
             } else {
               await adapter.writeLedgerPasswordMetaAt(folder, await buildLedgerPasswordMeta(values.new));
-              new import_obsidian19.Notice(t("settings.password.toastChanged"));
+              new import_obsidian20.Notice(t("settings.password.toastChanged"));
             }
           }
           await onDone();
@@ -10601,9 +11310,9 @@ var AccountingSettings = class {
     try {
       this.plugin.settings.onboardingCompleted = false;
       await this.plugin.saveSettings();
-      new import_obsidian19.Notice(t("settings.onboarding.resetDone"));
+      new import_obsidian20.Notice(t("settings.onboarding.resetDone"));
     } catch (error) {
-      new import_obsidian19.Notice(t("settings.onboarding.resetFailed", { msg: formatError(error) }));
+      new import_obsidian20.Notice(t("settings.onboarding.resetFailed", { msg: formatError(error) }));
     }
   }
   /** 删除账本：两步 confirm，递归删整目录 */
@@ -10613,10 +11322,10 @@ var AccountingSettings = class {
     const adapter = this.currentAdapter();
     try {
       await adapter.deleteLedger(folder);
-      new import_obsidian19.Notice(t("settings.ledger.deletedNotice", { alias }));
+      new import_obsidian20.Notice(t("settings.ledger.deletedNotice", { alias }));
       await onDone();
     } catch (error) {
-      new import_obsidian19.Notice(t("settings.ledger.deleteFailed", { msg: formatError(error) }));
+      new import_obsidian20.Notice(t("settings.ledger.deleteFailed", { msg: formatError(error) }));
     }
   }
   /** 显示备份列表弹窗 */
@@ -10635,7 +11344,7 @@ var AccountingSettings = class {
       });
       modal.open();
     } catch (error) {
-      new import_obsidian19.Notice(t("settings.backup.loadListFailed", { msg: formatError(error) }));
+      new import_obsidian20.Notice(t("settings.backup.loadListFailed", { msg: formatError(error) }));
     }
   }
   /** 处理恢复备份（两步确认；adapter.restoreBackup 内部自动创建 pre-restore 兜底） */
@@ -10644,9 +11353,9 @@ var AccountingSettings = class {
     if (!confirm(t("settings.backup.restoreConfirm2", { name: backupName }))) return;
     try {
       await adapter.restoreBackup(backupName);
-      new import_obsidian19.Notice(t("settings.backup.restoredNotice", { name: backupName }));
+      new import_obsidian20.Notice(t("settings.backup.restoredNotice", { name: backupName }));
     } catch (error) {
-      new import_obsidian19.Notice(t("settings.backup.restoreFailed", { msg: formatError(error) }));
+      new import_obsidian20.Notice(t("settings.backup.restoreFailed", { msg: formatError(error) }));
     }
   }
   /** 处理删除备份（单步确认） */
@@ -10654,10 +11363,10 @@ var AccountingSettings = class {
     if (!confirm(t("settings.backup.deleteConfirm", { name: backupName }))) return false;
     try {
       await adapter.deleteBackup(backupName);
-      new import_obsidian19.Notice(t("settings.backup.deletedNotice", { name: backupName }));
+      new import_obsidian20.Notice(t("settings.backup.deletedNotice", { name: backupName }));
       return true;
     } catch (error) {
-      new import_obsidian19.Notice(t("settings.backup.deleteFailed", { msg: formatError(error) }));
+      new import_obsidian20.Notice(t("settings.backup.deleteFailed", { msg: formatError(error) }));
       return false;
     }
   }
@@ -10714,7 +11423,7 @@ var AccountingSettings = class {
     };
     refreshBtn.onclick = async () => {
       await refreshRules();
-      new import_obsidian19.Notice(t("settings.recurring.refreshedNotice"));
+      new import_obsidian20.Notice(t("settings.recurring.refreshedNotice"));
     };
     this.refreshers.push(refreshRules);
     void refreshRules();
@@ -10751,7 +11460,7 @@ var AccountingSettings = class {
     const viewBtn = actionsEl.createEl("button", {
       cls: "accounting-ledger-switch"
     });
-    (0, import_obsidian19.setIcon)(viewBtn, "eye");
+    (0, import_obsidian20.setIcon)(viewBtn, "eye");
     viewBtn.setAttribute("aria-label", t("settings.recurring.viewTxAria"));
     viewBtn.onclick = () => {
       openList(this.app, adapter, this.plugin.navCtx(adapter), void 0, void 0, rule.id, true);
@@ -10759,22 +11468,22 @@ var AccountingSettings = class {
     const toggleBtn = actionsEl.createEl("button", {
       cls: "accounting-ledger-switch"
     });
-    (0, import_obsidian19.setIcon)(toggleBtn, rule.active ? "pause" : "play");
+    (0, import_obsidian20.setIcon)(toggleBtn, rule.active ? "pause" : "play");
     toggleBtn.onclick = async () => {
       try {
         const rules = await adapter.readRecurringRules();
         const updated = rules.map((r) => r.id === rule.id ? { ...r, active: !r.active } : r);
         await adapter.writeRecurringRules(updated);
-        new import_obsidian19.Notice(rule.active ? t("settings.recurring.paused") : t("settings.recurring.enabledNotice"));
+        new import_obsidian20.Notice(rule.active ? t("settings.recurring.paused") : t("settings.recurring.enabledNotice"));
         void refreshRules();
       } catch (error) {
-        new import_obsidian19.Notice(t("settings.recurring.toggleFailed", { msg: formatError(error) }));
+        new import_obsidian20.Notice(t("settings.recurring.toggleFailed", { msg: formatError(error) }));
       }
     };
     const editBtn = actionsEl.createEl("button", {
       cls: "accounting-ledger-rename"
     });
-    (0, import_obsidian19.setIcon)(editBtn, "pencil");
+    (0, import_obsidian20.setIcon)(editBtn, "pencil");
     editBtn.onclick = () => {
       void openEntryRecurring(this.app, this.currentAdapter(), { editing: rule }, () => {
         this.showRecurring();
@@ -10783,16 +11492,16 @@ var AccountingSettings = class {
     const deleteBtn = actionsEl.createEl("button", {
       cls: "accounting-ledger-delete"
     });
-    (0, import_obsidian19.setIcon)(deleteBtn, "trash-2");
+    (0, import_obsidian20.setIcon)(deleteBtn, "trash-2");
     deleteBtn.onclick = async () => {
       if (!confirm(t("settings.recurring.deleteConfirm", { name: rule.name }))) return;
       try {
         const rules = await adapter.readRecurringRules();
         await adapter.writeRecurringRules(rules.filter((r) => r.id !== rule.id));
-        new import_obsidian19.Notice(t("settings.recurring.deletedNotice"));
+        new import_obsidian20.Notice(t("settings.recurring.deletedNotice"));
         void refreshRules();
       } catch (error) {
-        new import_obsidian19.Notice(t("settings.recurring.deleteFailed", { msg: formatError(error) }));
+        new import_obsidian20.Notice(t("settings.recurring.deleteFailed", { msg: formatError(error) }));
       }
     };
   }
@@ -10847,7 +11556,7 @@ var AccountingSettings = class {
   /** 渲染分类管理列表视图：支出/收入各自独立成块（每块自己的新增入口、可见列表、已隐藏折叠区）。复用 core planRename/planMerge 规划。 */
   renderCategoryListView(containerEl) {
     const rootEl = containerEl.createDiv("accounting-cat-page");
-    const collapsed = { expense: true, income: true };
+    const collapsed = { expense: true, income: true, accountTag: true };
     const byName2 = (a, b) => a.name.localeCompare(b.name, "zh");
     const refreshCategories = async () => {
       const adapter = this.currentAdapter();
@@ -10893,6 +11602,162 @@ var AccountingSettings = class {
     this.refreshers.push(refreshCategories);
     void refreshCategories();
   }
+  /**
+   * 渲染账户标签管理卡片（「分类」tab，与桌面端 AccountTags 同口径）：
+   * 列表 = 托管条目（flow='accountTag'）∪ 账户在用标签（core accountTagList 派生，不写迁移）；
+   * 改名/合并复用 core planRenameAccountTag/planMergeAccountTag（仅改写 accounts 元数据，无事件无备份）。
+   */
+  renderAccountTagView(containerEl) {
+    const rootEl = containerEl.createDiv();
+    let collapsed = true;
+    const refreshTags = async () => {
+      const adapter = this.currentAdapter();
+      try {
+        const { accounts, categories } = await adapter.readMeta();
+        const rows = accountTagList(categories, accounts);
+        const visible = rows.filter((r) => !r.hidden);
+        const hidden = rows.filter((r) => r.hidden);
+        rootEl.empty();
+        const cardEl = rootEl.createDiv(`accounting-ledger-card accounting-cat-flow-card accounting-cat-flow-tag${collapsed ? " accounting-cat-collapsed" : ""}`);
+        const headEl = cardEl.createDiv("accounting-ledger-card-head");
+        headEl.createEl("span", { cls: "accounting-cat-toggle" });
+        headEl.createEl("span", { text: t("settings.accountTag.title"), cls: "accounting-ledger-card-title" });
+        headEl.createEl("span", { text: String(visible.length), cls: "accounting-ledger-badge accounting-ledger-badge-muted" });
+        const headActions = headEl.createDiv("accounting-ledger-head-actions");
+        const createBtn = headActions.createEl("button", { text: t("settings.accountTag.add"), cls: "accounting-ledger-create" });
+        const refreshBtn = headActions.createEl("button", { text: t("settings.refreshBtn"), cls: "accounting-ledger-refresh" });
+        headEl.addEventListener("click", (e) => {
+          if (e.target.closest("button")) return;
+          const next = !cardEl.classList.contains("accounting-cat-collapsed");
+          cardEl.classList.toggle("accounting-cat-collapsed", next);
+          collapsed = next;
+        });
+        const listEl = cardEl.createDiv("accounting-ledger-list");
+        if (visible.length === 0) {
+          listEl.createEl("div", { text: t("settings.category.emptyTitle", { title: t("settings.accountTag.title") }), cls: "accounting-cat-group-empty" });
+        }
+        for (const row of visible) this.renderAccountTagItem(listEl, row, rows, refreshTags);
+        if (hidden.length > 0) {
+          const details = cardEl.createEl("details", { cls: "accounting-cat-hidden-section" });
+          const summary = details.createEl("summary", { cls: "accounting-cat-hidden-head accounting-collapsible-head" });
+          summary.createEl("span", { text: t("settings.category.hiddenLabel") });
+          summary.createEl("span", { text: String(hidden.length), cls: "accounting-ledger-badge accounting-ledger-badge-muted" });
+          summary.createEl("span", { text: t("settings.accountTag.hiddenNote"), cls: "accounting-cat-hidden-note" });
+          for (const row of hidden) this.renderHiddenAccountTagItem(details, row, refreshTags);
+        }
+        createBtn.onclick = () => {
+          new CreateCategoryModal(this.app, "accountTag", t("settings.accountTag.title"), t("settings.accountTag.placeholder"), async (name) => {
+            try {
+              await this.handleAddAccountTag(name);
+              new import_obsidian20.Notice(t("settings.accountTag.addedNotice", { name }));
+              await refreshTags();
+            } catch (error) {
+              new import_obsidian20.Notice(t("settings.category.addFailed", { msg: formatError(error) }));
+            }
+          }).open();
+        };
+        refreshBtn.onclick = async () => {
+          await refreshTags();
+          new import_obsidian20.Notice(t("settings.category.refreshedNotice", { title: t("settings.accountTag.title") }));
+        };
+      } catch (error) {
+        rootEl.empty();
+        rootEl.createEl("p", { text: t("settings.category.loadFailed", { msg: formatError(error) }), cls: "accounting-ledger-empty" });
+      }
+    };
+    this.refreshers.push(refreshTags);
+    void refreshTags();
+  }
+  /** 可见标签行：重命名 / 合并 / 删除（删除双态：被引用→隐藏，未引用→物理删；与分类行同口径）。 */
+  renderAccountTagItem(containerEl, row, allRows, refresh) {
+    const itemEl = containerEl.createDiv("accounting-ledger-item");
+    const infoEl = itemEl.createDiv("accounting-ledger-info");
+    const nameEl = infoEl.createEl("div", { cls: "accounting-ledger-name" });
+    nameEl.createEl("span", { text: row.name });
+    nameEl.createEl("span", { text: t("settings.accountTag.usage", { n: row.usage }), cls: "accounting-cat-tag-usage" });
+    const actionsEl = itemEl.createDiv("accounting-ledger-actions accounting-cat-actions");
+    const renameBtn = actionsEl.createEl("button", { text: "\u270E", cls: "accounting-ledger-rename" });
+    renameBtn.setAttribute("aria-label", t("settings.category.renameAria"));
+    renameBtn.onclick = () => {
+      const pseudo = { id: row.id ?? "", name: row.name, flow: "accountTag" };
+      new RenameCategoryModal(this.app, pseudo, async (newName) => {
+        try {
+          const { retagged } = await this.handleRenameAccountTag(row.name, newName);
+          new import_obsidian20.Notice(retagged > 0 ? t("settings.accountTag.renamedNotice", { n: retagged }) : t("settings.category.renamedShort"));
+          await refresh();
+        } catch (error) {
+          new import_obsidian20.Notice(t("settings.category.renameFailed", { msg: formatError(error) }));
+        }
+      }, t("settings.accountTag.renameTitle")).open();
+    };
+    const targets = allRows.filter((r) => r.name !== row.name);
+    const mergeBtn = actionsEl.createEl("button", { text: "\u2934", cls: "accounting-ledger-merge" });
+    mergeBtn.setAttribute("aria-label", t("settings.accountTag.mergeAria"));
+    mergeBtn.onclick = () => {
+      if (targets.length === 0) {
+        new import_obsidian20.Notice(t("settings.accountTag.mergeNoTargets"));
+        return;
+      }
+      const pseudoTargets = targets.map((r) => ({ id: r.name, name: r.name, flow: "accountTag", ...r.hidden ? { active: false } : {} }));
+      const pseudo = { id: row.id ?? "", name: row.name, flow: "accountTag" };
+      new MergeCategoryModal(this.app, pseudo, pseudoTargets, row.usage, async (toName) => {
+        try {
+          const { retagged } = await this.handleMergeAccountTag(row.name, toName);
+          new import_obsidian20.Notice(retagged > 0 ? t("settings.accountTag.mergedNotice", { n: retagged }) : t("settings.category.mergedShort"));
+          await refresh();
+        } catch (error) {
+          new import_obsidian20.Notice(t("settings.category.mergeFailed", { msg: formatError(error) }));
+        }
+      }, {
+        title: t("settings.accountTag.mergeTitle"),
+        intro: t("settings.accountTag.mergeIntro", { name: row.name }),
+        errNoTarget: t("settings.accountTag.mergeErrNoTarget"),
+        confirmNoteUsed: (n, target) => t("settings.accountTag.mergeConfirmUsed", { n, target, from: row.name }),
+        confirmNoteEmpty: () => t("settings.accountTag.mergeConfirmEmpty", { from: row.name })
+      }).open();
+    };
+    const deleteBtn = actionsEl.createEl("button", { text: "\u{1F5D1}", cls: "accounting-ledger-delete" });
+    deleteBtn.setAttribute("aria-label", t("settings.accountTag.deleteAria"));
+    deleteBtn.onclick = async () => {
+      try {
+        await this.handleDeleteAccountTag(row);
+        await refresh();
+      } catch (error) {
+        new import_obsidian20.Notice(t("settings.category.deleteFailed", { msg: formatError(error) }));
+      }
+    };
+  }
+  /** 已隐藏标签行：恢复；未被引用时允许彻底删除。 */
+  renderHiddenAccountTagItem(containerEl, row, refresh) {
+    const itemEl = containerEl.createDiv("accounting-ledger-item");
+    const infoEl = itemEl.createDiv("accounting-ledger-info");
+    const nameEl = infoEl.createDiv("accounting-ledger-folder accounting-cat-tag-name-row");
+    nameEl.createEl("span", { text: row.name });
+    nameEl.createEl("span", { text: t("settings.accountTag.usage", { n: row.usage }), cls: "accounting-cat-tag-usage" });
+    const actionsEl = itemEl.createDiv("accounting-ledger-actions accounting-cat-actions");
+    const restoreBtn = actionsEl.createEl("button", { text: t("settings.category.restoreBtn"), cls: "accounting-ledger-restore" });
+    restoreBtn.onclick = async () => {
+      try {
+        await this.handleRestoreAccountTag(row);
+        new import_obsidian20.Notice(t("settings.category.restoredNotice", { name: row.name }));
+        await refresh();
+      } catch (error) {
+        new import_obsidian20.Notice(t("settings.category.restoreFailed", { msg: formatError(error) }));
+      }
+    };
+    if (row.usage === 0 && row.id) {
+      const delBtn = actionsEl.createEl("button", { text: "\u{1F5D1}", cls: "accounting-ledger-delete" });
+      delBtn.setAttribute("aria-label", t("settings.accountTag.purgeAria"));
+      delBtn.onclick = async () => {
+        try {
+          await this.handleDeleteAccountTag(row);
+          await refresh();
+        } catch (error) {
+          new import_obsidian20.Notice(t("settings.category.deleteFailed", { msg: formatError(error) }));
+        }
+      };
+    }
+  }
   /** 单个 flow 分类区块：新增入口 + 可见列表 + 该 flow 的已隐藏折叠区。 */
   renderCategoryFlowBlock(rootEl, opts) {
     const { flow, title, placeholder, addLabel, categories, refCountOf, byName: byName2, refreshCategories, collapsed, onToggleCollapse } = opts;
@@ -10933,16 +11798,16 @@ var AccountingSettings = class {
       new CreateCategoryModal(this.app, flow, title, placeholder, async (name) => {
         try {
           await this.handleAddCategory(name, flow);
-          new import_obsidian19.Notice(t("settings.category.addedNotice", { name }));
+          new import_obsidian20.Notice(t("settings.category.addedNotice", { name }));
           await refreshCategories();
         } catch (error) {
-          new import_obsidian19.Notice(t("settings.category.addFailed", { msg: formatError(error) }));
+          new import_obsidian20.Notice(t("settings.category.addFailed", { msg: formatError(error) }));
         }
       }).open();
     };
     refreshBtn.onclick = async () => {
       await refreshCategories();
-      new import_obsidian19.Notice(t("settings.category.refreshedNotice", { title }));
+      new import_obsidian20.Notice(t("settings.category.refreshedNotice", { title }));
     };
   }
   /** 可见分类行：重命名 / 合并 / 删除（删除双态：被引用→隐藏，未引用→物理删） */
@@ -10957,10 +11822,10 @@ var AccountingSettings = class {
       new RenameCategoryModal(this.app, cat, async (newName) => {
         try {
           const { rewritten } = await this.handleRenameCategory(cat.id, newName);
-          new import_obsidian19.Notice(rewritten > 0 ? t("settings.category.renamedNotice", { n: rewritten }) : t("settings.category.renamedShort"));
+          new import_obsidian20.Notice(rewritten > 0 ? t("settings.category.renamedNotice", { n: rewritten }) : t("settings.category.renamedShort"));
           await refresh();
         } catch (error) {
-          new import_obsidian19.Notice(t("settings.category.renameFailed", { msg: formatError(error) }));
+          new import_obsidian20.Notice(t("settings.category.renameFailed", { msg: formatError(error) }));
         }
       }).open();
     };
@@ -10969,16 +11834,16 @@ var AccountingSettings = class {
     mergeBtn.setAttribute("aria-label", t("settings.category.mergeAria"));
     mergeBtn.onclick = () => {
       if (targets.length === 0) {
-        new import_obsidian19.Notice(t("settings.category.mergeNoTargets"));
+        new import_obsidian20.Notice(t("settings.category.mergeNoTargets"));
         return;
       }
       new MergeCategoryModal(this.app, cat, targets, refCount, async (toId) => {
         try {
           const { rewritten } = await this.handleMergeCategory(cat.id, toId);
-          new import_obsidian19.Notice(rewritten > 0 ? t("settings.category.mergedNotice", { n: rewritten }) : t("settings.category.mergedShort"));
+          new import_obsidian20.Notice(rewritten > 0 ? t("settings.category.mergedNotice", { n: rewritten }) : t("settings.category.mergedShort"));
           await refresh();
         } catch (error) {
-          new import_obsidian19.Notice(t("settings.category.mergeFailed", { msg: formatError(error) }));
+          new import_obsidian20.Notice(t("settings.category.mergeFailed", { msg: formatError(error) }));
         }
       }).open();
     };
@@ -10989,7 +11854,7 @@ var AccountingSettings = class {
         await this.handleDeleteCategory(cat, refCount);
         await refresh();
       } catch (error) {
-        new import_obsidian19.Notice(t("settings.category.deleteFailed", { msg: formatError(error) }));
+        new import_obsidian20.Notice(t("settings.category.deleteFailed", { msg: formatError(error) }));
       }
     };
   }
@@ -11003,10 +11868,10 @@ var AccountingSettings = class {
     restoreBtn.onclick = async () => {
       try {
         await this.handleRestoreCategory(cat);
-        new import_obsidian19.Notice(t("settings.category.restoredNotice", { name: cat.name }));
+        new import_obsidian20.Notice(t("settings.category.restoredNotice", { name: cat.name }));
         await refresh();
       } catch (error) {
-        new import_obsidian19.Notice(t("settings.category.restoreFailed", { msg: formatError(error) }));
+        new import_obsidian20.Notice(t("settings.category.restoreFailed", { msg: formatError(error) }));
       }
     };
     if (refCount === 0) {
@@ -11017,7 +11882,7 @@ var AccountingSettings = class {
           await this.handleDeleteCategory(cat, 0);
           await refresh();
         } catch (error) {
-          new import_obsidian19.Notice(t("settings.category.deleteFailed", { msg: formatError(error) }));
+          new import_obsidian20.Notice(t("settings.category.deleteFailed", { msg: formatError(error) }));
         }
       };
     }
@@ -11061,12 +11926,12 @@ var AccountingSettings = class {
       if (!confirm(t("settings.category.deleteConfirmUsed", { name: cat.name, n: refCount }))) return;
       const next = categories.map((c) => c.id === cat.id ? { ...c, active: false } : c);
       await adapter.writeMeta({ accounts, categories: next });
-      new import_obsidian19.Notice(t("settings.category.hiddenNotice", { name: cat.name }));
+      new import_obsidian20.Notice(t("settings.category.hiddenNotice", { name: cat.name }));
     } else {
       if (!confirm(t("settings.category.purgeConfirm", { name: cat.name }))) return;
       const next = categories.filter((c) => c.id !== cat.id);
       await adapter.writeMeta({ accounts, categories: next });
-      new import_obsidian19.Notice(t("settings.category.deletedNotice", { name: cat.name }));
+      new import_obsidian20.Notice(t("settings.category.deletedNotice", { name: cat.name }));
     }
   }
   /** 恢复隐藏分类：active 置为可见。 */
@@ -11074,6 +11939,55 @@ var AccountingSettings = class {
     const adapter = this.currentAdapter();
     const { accounts, categories } = await adapter.readMeta();
     const next = categories.map((c) => c.id === cat.id ? { ...c, active: true } : c);
+    await adapter.writeMeta({ accounts, categories: next });
+  }
+  // ===== 账户标签管理（「分类」tab，与桌面端 AccountTags 同口径；托管条目 ∪ 在用标签）=====
+  /** 新建托管标签：core newAccountTagCategory 校验重名（托管 ∪ 在用），仅写元数据。 */
+  async handleAddAccountTag(name) {
+    const adapter = this.currentAdapter();
+    const { accounts, categories } = await adapter.readMeta();
+    const entry = newAccountTagCategory(categories, accounts, name);
+    await adapter.writeMeta({ accounts, categories: [...categories, entry] });
+  }
+  /** 重命名标签：core planRenameAccountTag（retag + 托管条目改名），一次 writeMeta，无事件无备份。 */
+  async handleRenameAccountTag(from, to) {
+    const adapter = this.currentAdapter();
+    const { accounts, categories } = await adapter.readMeta();
+    const plan = planRenameAccountTag({ accounts, categories, from, to, now: nowISO() });
+    await adapter.writeMeta({ accounts: plan.accounts, categories: plan.categories });
+    return { retagged: plan.retagged };
+  }
+  /** 合并标签：core planMergeAccountTag（retag 并入目标 + 删源条目），一次 writeMeta。 */
+  async handleMergeAccountTag(from, to) {
+    const adapter = this.currentAdapter();
+    const { accounts, categories } = await adapter.readMeta();
+    const plan = planMergeAccountTag({ accounts, categories, from, to, now: nowISO() });
+    await adapter.writeMeta({ accounts: plan.accounts, categories: plan.categories });
+    return { retagged: plan.retagged };
+  }
+  /** 删除标签双态：被引用→隐藏（派生行补建 active:false 条目）；未被引用→物理删条目。单步 confirm（与分类删除同口径）。 */
+  async handleDeleteAccountTag(row) {
+    const adapter = this.currentAdapter();
+    const { accounts, categories } = await adapter.readMeta();
+    if (row.usage > 0) {
+      if (!confirm(t("settings.accountTag.deleteConfirmUsed", { name: row.name, n: row.usage }))) return;
+      const next = row.id ? categories.map((c) => c.id === row.id ? { ...c, active: false } : c) : [...categories, { id: newCategoryId(), name: row.name, flow: "accountTag", active: false }];
+      await adapter.writeMeta({ accounts, categories: next });
+      new import_obsidian20.Notice(t("settings.category.hiddenNotice", { name: row.name }));
+    } else {
+      if (!confirm(t("settings.accountTag.purgeConfirm", { name: row.name }))) return;
+      if (!row.id) return;
+      const next = categories.filter((c) => c.id !== row.id);
+      await adapter.writeMeta({ accounts, categories: next });
+      new import_obsidian20.Notice(t("settings.category.deletedNotice", { name: row.name }));
+    }
+  }
+  /** 恢复隐藏标签：active 置为可见（隐藏行必有托管条目）。 */
+  async handleRestoreAccountTag(row) {
+    const adapter = this.currentAdapter();
+    const { accounts, categories } = await adapter.readMeta();
+    if (!row.id) return;
+    const next = categories.map((c) => c.id === row.id ? { ...c, active: true } : c);
     await adapter.writeMeta({ accounts, categories: next });
   }
   // ===== 账户类型管理（「分类」tab 第二段，与桌面端同 tab 对齐）=====
@@ -11141,7 +12055,7 @@ var AccountingSettings = class {
         if (withBackup) await this.saveAccountTypeDraft(next);
         else await this.currentAdapter().writeAccountTypeSettings(next);
       } catch (error) {
-        new import_obsidian19.Notice(t("entry.saveFailed", { msg: formatError(error) }));
+        new import_obsidian20.Notice(t("entry.saveFailed", { msg: formatError(error) }));
       }
     };
     const renderTypesBody = () => {
@@ -11149,6 +12063,25 @@ var AccountingSettings = class {
       typesBadgeEl.setText(String(draft.types.length));
       const renderRow = (at, inactive2, parent = typesBodyEl) => {
         const row = parent.createDiv("accounting-at-type");
+        const moveActions = row.createDiv("accounting-ledger-actions");
+        const tUp = moveActions.createEl("button", { text: "\u2191" });
+        tUp.disabled = moveTypeInList(draft, at.type, -1) === draft;
+        tUp.setAttribute("aria-label", t("settings.accountType.moveUpTypeAria"));
+        tUp.onclick = () => {
+          draft = moveTypeInList(draft, at.type, -1);
+          void persist(draft);
+          renderTypesBody();
+          renderGroupsBody();
+        };
+        const tDown = moveActions.createEl("button", { text: "\u2193" });
+        tDown.disabled = moveTypeInList(draft, at.type, 1) === draft;
+        tDown.setAttribute("aria-label", t("settings.accountType.moveDownTypeAria"));
+        tDown.onclick = () => {
+          draft = moveTypeInList(draft, at.type, 1);
+          void persist(draft);
+          renderTypesBody();
+          renderGroupsBody();
+        };
         const info = row.createDiv("accounting-at-type-info");
         const isSys = isSystemAccountType(at.type);
         const labelRow = info.createDiv("accounting-at-type-label-row");
@@ -11361,7 +12294,7 @@ var AccountingSettings = class {
     });
   }
 };
-var CreateLedgerModal = class extends import_obsidian19.Modal {
+var CreateLedgerModal = class extends import_obsidian20.Modal {
   constructor(app, existing, onSubmit) {
     super(app);
     this.existing = existing;
@@ -11369,7 +12302,7 @@ var CreateLedgerModal = class extends import_obsidian19.Modal {
   }
   onOpen() {
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian19.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     renderCreateLedgerForm(this.contentEl, this.existing, {
       onSubmit: async (name, alias, baseCurrency) => {
         try {
@@ -11386,7 +12319,7 @@ var CreateLedgerModal = class extends import_obsidian19.Modal {
     this.contentEl.empty();
   }
 };
-var RenameLedgerAliasModal = class extends import_obsidian19.Modal {
+var RenameLedgerAliasModal = class extends import_obsidian20.Modal {
   constructor(app, folder, currentAlias, onSubmit) {
     super(app);
     this.folder = folder;
@@ -11398,7 +12331,7 @@ var RenameLedgerAliasModal = class extends import_obsidian19.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian19.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.createEl("h2", { text: t("settings.ledger.renameAliasTitle") });
     this.input = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
     this.input.value = this.currentAlias;
@@ -11418,7 +12351,7 @@ var RenameLedgerAliasModal = class extends import_obsidian19.Modal {
     this.contentEl.empty();
   }
 };
-var BackupModal = class extends import_obsidian19.Modal {
+var BackupModal = class extends import_obsidian20.Modal {
   constructor(app, backups, onAction) {
     super(app);
     this.backups = backups;
@@ -11426,7 +12359,7 @@ var BackupModal = class extends import_obsidian19.Modal {
   }
   onOpen() {
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian19.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     this.render();
   }
   onClose() {
@@ -11471,7 +12404,7 @@ var BackupModal = class extends import_obsidian19.Modal {
     closeBtn.onclick = () => this.close();
   }
 };
-var CreateCategoryModal = class extends import_obsidian19.Modal {
+var CreateCategoryModal = class extends import_obsidian20.Modal {
   constructor(app, flow, flowTitle, placeholder, onSubmit) {
     super(app);
     this.flow = flow;
@@ -11485,7 +12418,7 @@ var CreateCategoryModal = class extends import_obsidian19.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian19.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.createEl("h2", { text: t("settings.category.createTitle", { title: this.flowTitle }) });
     this.nameInput = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
     this.nameInput.placeholder = this.placeholder;
@@ -11509,19 +12442,20 @@ var CreateCategoryModal = class extends import_obsidian19.Modal {
     this.contentEl.empty();
   }
 };
-var RenameCategoryModal = class extends import_obsidian19.Modal {
-  constructor(app, cat, onSubmit) {
+var RenameCategoryModal = class extends import_obsidian20.Modal {
+  constructor(app, cat, onSubmit, title) {
     super(app);
     this.cat = cat;
     this.onSubmit = onSubmit;
+    this.title = title;
   }
   input;
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian19.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
-    contentEl.createEl("h2", { text: t("settings.category.renameTitle") });
+    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    contentEl.createEl("h2", { text: this.title ?? t("settings.category.renameTitle") });
     this.input = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
     this.input.value = this.cat.name;
     const actions = contentEl.createDiv("accounting-modal-actions");
@@ -11546,13 +12480,14 @@ var RenameCategoryModal = class extends import_obsidian19.Modal {
     this.contentEl.empty();
   }
 };
-var MergeCategoryModal = class extends import_obsidian19.Modal {
-  constructor(app, from, targets, refCount, onSubmit) {
+var MergeCategoryModal = class extends import_obsidian20.Modal {
+  constructor(app, from, targets, refCount, onSubmit, opts) {
     super(app);
     this.from = from;
     this.targets = targets;
     this.refCount = refCount;
     this.onSubmit = onSubmit;
+    this.opts = opts;
   }
   targetSelect;
   errorEl;
@@ -11560,10 +12495,10 @@ var MergeCategoryModal = class extends import_obsidian19.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian19.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
-    contentEl.createEl("h2", { text: t("settings.category.mergeTitle") });
+    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    contentEl.createEl("h2", { text: this.opts?.title ?? t("settings.category.mergeTitle") });
     contentEl.createEl("div", {
-      text: t("settings.category.mergeIntro", { name: this.from.name }),
+      text: this.opts?.intro ?? t("settings.category.mergeIntro", { name: this.from.name }),
       cls: "accounting-ledger-folder"
     });
     this.targetSelect = contentEl.createEl("select", { cls: "accounting-ledger-input" });
@@ -11582,11 +12517,11 @@ var MergeCategoryModal = class extends import_obsidian19.Modal {
     submitBtn.onclick = async () => {
       const toId = this.targetSelect.value;
       if (!toId) {
-        this.errorEl.setText(t("settings.category.mergeErrNoTarget"));
+        this.errorEl.setText(this.opts?.errNoTarget ?? t("settings.category.mergeErrNoTarget"));
         return;
       }
       const target = this.targets.find((tg) => tg.id === toId);
-      const note = this.refCount > 0 ? t("settings.category.mergeConfirmUsed", { n: this.refCount, target: target?.name ?? "", from: this.from.name }) : t("settings.category.mergeConfirmEmpty", { from: this.from.name });
+      const note = this.refCount > 0 ? this.opts?.confirmNoteUsed?.(this.refCount, target?.name ?? "") ?? t("settings.category.mergeConfirmUsed", { n: this.refCount, target: target?.name ?? "", from: this.from.name }) : this.opts?.confirmNoteEmpty?.() ?? t("settings.category.mergeConfirmEmpty", { from: this.from.name });
       if (!confirm(note)) return;
       this.close();
       await this.onSubmit(toId);
@@ -11597,7 +12532,7 @@ var MergeCategoryModal = class extends import_obsidian19.Modal {
     this.contentEl.empty();
   }
 };
-var RegroupTypeModal = class extends import_obsidian19.Modal {
+var RegroupTypeModal = class extends import_obsidian20.Modal {
   constructor(app, typeLabel, currentGroupId, groups, onSubmit) {
     super(app);
     this.typeLabel = typeLabel;
@@ -11609,7 +12544,7 @@ var RegroupTypeModal = class extends import_obsidian19.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian19.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.createEl("h2", { text: t("settings.accountType.regroupTitle") });
     contentEl.createEl("div", { text: t("settings.accountType.regroupIntro", { label: this.typeLabel }), cls: "accounting-ledger-folder" });
     const list = contentEl.createDiv("accounting-backup-list");
@@ -11636,7 +12571,7 @@ var RegroupTypeModal = class extends import_obsidian19.Modal {
     this.contentEl.empty();
   }
 };
-var CreateAccountTypeModal = class extends import_obsidian19.Modal {
+var CreateAccountTypeModal = class extends import_obsidian20.Modal {
   constructor(app, groups, onSubmit) {
     super(app);
     this.groups = groups;
@@ -11650,7 +12585,7 @@ var CreateAccountTypeModal = class extends import_obsidian19.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian19.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.createEl("h2", { text: t("settings.accountTypes.createTitle") });
     this.labelInput = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
     this.labelInput.placeholder = t("settings.accountTypes.newPlaceholder");
@@ -11680,7 +12615,7 @@ var CreateAccountTypeModal = class extends import_obsidian19.Modal {
     this.contentEl.empty();
   }
 };
-var CreateAccountTypeGroupModal = class extends import_obsidian19.Modal {
+var CreateAccountTypeGroupModal = class extends import_obsidian20.Modal {
   constructor(app, onSubmit) {
     super(app);
     this.onSubmit = onSubmit;
@@ -11691,7 +12626,7 @@ var CreateAccountTypeGroupModal = class extends import_obsidian19.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian19.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.createEl("h2", { text: t("settings.accountType.createTitle") });
     this.nameInput = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
     this.nameInput.placeholder = t("settings.accountType.newGroupPlaceholder");
@@ -11716,168 +12651,14 @@ var CreateAccountTypeGroupModal = class extends import_obsidian19.Modal {
   }
 };
 
-// src/onboardingModal.ts
-var import_obsidian20 = require("obsidian");
-function defaultBaseCurrency() {
-  return getLocale().toLowerCase().startsWith("zh") ? "CNY" : "USD";
-}
-var OnboardingModal = class extends import_obsidian20.Modal {
-  constructor(app, adapter, onComplete, onLocaleChange) {
-    super(app);
-    this.adapter = adapter;
-    this.onComplete = onComplete;
-    this.onLocaleChange = onLocaleChange;
-  }
-  currentStep = "main";
-  /** 用户在关闭前的选择；null 表示未做选择（直接关闭→跳过）。onClose 据此单点回调，避免重复触发。 */
-  result = null;
-  /** 步骤内容容器；render 方法只清空/填充此容器，保留顶部语言下拉。 */
-  bodyEl;
-  async onOpen() {
-    const { contentEl } = this;
-    contentEl.empty();
-    this.modalEl.addClass("accounting-sub-modal");
-    contentEl.addClass("accounting-modal");
-    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
-    this.renderLangSelect(contentEl);
-    this.bodyEl = contentEl.createDiv("accounting-onboarding-body");
-    await this.renderMainStep();
-    const closeWrap = contentEl.createDiv("accounting-modal-close");
-    closeWrap.createEl("button", { text: t("common.close"), cls: "accounting-btn-secondary" }).onclick = () => this.close();
-  }
-  /** 语言下拉：setLocale + onLocaleChange 持久化 + 用新 locale 重渲染当前步骤与下拉文案。 */
-  renderLangSelect(el) {
-    const wrap = el.createDiv("accounting-onboarding-lang");
-    const select = wrap.createEl("select", { cls: "accounting-input" });
-    const fillOptions = () => {
-      select.empty();
-      select.appendChild(new Option(t("settings.language.zh"), "zh"));
-      select.appendChild(new Option(t("settings.language.en"), "en"));
-      select.value = getLocale();
-    };
-    fillOptions();
-    select.onchange = async () => {
-      const next = select.value;
-      setLocale(next);
-      try {
-        await this.onLocaleChange(next);
-      } catch {
-      }
-      this.bodyEl.empty();
-      if (this.currentStep === "create") {
-        await this.renderCreateForm();
-      } else {
-        await this.renderMainStep();
-      }
-      fillOptions();
-    };
-  }
-  /** 渲染主步骤：根据是否有现有账本显示不同界面 */
-  async renderMainStep() {
-    this.bodyEl.empty();
-    this.currentStep = "main";
-    const existing = await this.adapter.listLedgers();
-    if (existing.length === 0) {
-      this.renderEmptyState();
-    } else {
-      await this.renderLedgerSelection(existing);
-    }
-  }
-  /** 创建示例账本并关闭：空状态与有账本列表共用，避免逻辑重复 */
-  async createSampleAndClose() {
-    try {
-      const folder = await this.adapter.createSampleLedger(SAMPLE_LEDGER_NAME, t("seed.sampleAlias"), defaultBaseCurrency());
-      this.result = { action: "selected", ledger: folder };
-      this.close();
-    } catch (e) {
-      new import_obsidian20.Notice(t("onboarding.createSampleFailed", { msg: formatError(e) }));
-    }
-  }
-  /** 无账本时：提供示例账本创建和手动创建两个选项 */
-  renderEmptyState() {
-    this.bodyEl.empty();
-    this.currentStep = "main";
-    const titleEl = this.bodyEl.createEl("h2", { text: t("onboarding.welcome") });
-    titleEl.addClass("accounting-modal-title");
-    this.bodyEl.createEl("p", {
-      text: t("onboarding.emptyDesc"),
-      cls: "accounting-onboarding-desc"
-    });
-    const sampleBtn = this.bodyEl.createEl("button", {
-      text: t("onboarding.createSample"),
-      cls: "accounting-btn accounting-btn-primary accounting-btn-block"
-    });
-    sampleBtn.onclick = () => this.createSampleAndClose();
-    this.bodyEl.createEl("p", { text: t("onboarding.or"), cls: "accounting-onboarding-sep" });
-    const createBtn = this.bodyEl.createEl("button", {
-      text: t("onboarding.createNew"),
-      cls: "accounting-btn accounting-btn-secondary accounting-btn-block"
-    });
-    createBtn.onclick = () => this.renderCreateForm();
-  }
-  /** 渲染现有账本选择列表 */
-  async renderLedgerSelection(existing) {
-    this.bodyEl.empty();
-    this.currentStep = "main";
-    const titleEl = this.bodyEl.createEl("h2", { text: t("onboarding.selectLedger") });
-    titleEl.addClass("accounting-modal-title");
-    const listEl = this.bodyEl.createDiv("accounting-onboarding-folder-list");
-    for (const folder of existing.sort()) {
-      const label = await this.adapter.readLedgerAlias(folder);
-      const itemEl = listEl.createEl("button", {
-        text: label,
-        cls: "accounting-btn accounting-btn-secondary accounting-btn-block"
-      });
-      itemEl.onclick = () => {
-        this.result = { action: "selected", ledger: folder };
-        this.close();
-      };
-    }
-    const createBtn = this.bodyEl.createEl("button", {
-      text: "+ " + t("onboarding.createNew"),
-      cls: "accounting-btn accounting-btn-primary accounting-btn-block"
-    });
-    createBtn.onclick = () => this.renderCreateForm();
-    const sampleBtn = this.bodyEl.createEl("button", {
-      text: t("onboarding.createSample"),
-      cls: "accounting-btn accounting-btn-secondary accounting-btn-block"
-    });
-    sampleBtn.onclick = () => this.createSampleAndClose();
-  }
-  /** 渲染创建新账本表单：复用 renderCreateLedgerForm（与设置页一致：名称 + 别名 + 即时校验） */
-  async renderCreateForm() {
-    this.currentStep = "create";
-    const existing = await this.adapter.listLedgers();
-    renderCreateLedgerForm(
-      this.bodyEl,
-      existing,
-      {
-        onSubmit: async (name, alias, baseCurrency) => {
-          try {
-            const folder = await this.adapter.createLedger(name, alias || void 0, baseCurrency);
-            new import_obsidian20.Notice(t("onboarding.createdNotif", { name: alias || ObsidianDataAdapter.formatLedgerName(folder) }));
-            this.result = { action: "created", ledger: folder };
-            this.close();
-            return true;
-          } catch (e) {
-            new import_obsidian20.Notice(t("onboarding.createFailed", { msg: formatError(e) }));
-            return false;
-          }
-        },
-        onCancel: () => void this.renderMainStep()
-      },
-      { title: t("onboarding.createNew"), cancelText: t("onboarding.back"), submitText: t("onboarding.createSubmit") }
-    );
-  }
-  onClose() {
-    const { contentEl } = this;
-    contentEl.empty();
-    this.onComplete(this.result ?? { action: "skipped" });
-  }
-};
-
 // src/main.ts
-var DEFAULT_SETTINGS = { dataSubdir: ".data", autoOpenOnStartup: true, onboardingCompleted: false, locale: defaultLocale };
+var DEFAULT_SETTINGS = {
+  dataSubdir: ".data",
+  autoOpenOnStartup: true,
+  onboardingCompleted: false,
+  locale: defaultLocale,
+  accountGroupingMode: DEFAULT_ACCOUNT_GROUPING_MODE
+};
 var AccountingPlugin = class extends import_obsidian21.Plugin {
   settingsTab;
   /** 引导期间的背景设置页（应用主界面）；引导完成后按需刷新/关闭，避免双 Modal 堆叠。 */
@@ -12083,7 +12864,7 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
       if (cfg.lastSuccess?.slice(0, 10) === today) return;
       const baseCurrency = await adapter.readBaseCurrency();
       const url = `https://api.frankfurter.app/latest?from=${baseCurrency.toUpperCase()}`;
-      const resp = await (0, import_obsidian22.requestUrl)({ url, method: "GET" });
+      const resp = await (0, import_obsidian21.requestUrl)({ url, method: "GET" });
       const fetched = parseRateResponse(resp.json, baseCurrency, nowISO());
       if (!fetched) return;
       const rates = await adapter.readRates();
@@ -12217,7 +12998,7 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
     const adapter = this.adapter();
     openBalance(this.app, adapter, this.navCtx(adapter), void 0, this.switchLedgerAndReopenBalance, onOpened);
   };
-  /** 统计页顶部切换账本：用新 dataSubdir 重开统计页（新 adapter、新 navCtx）。onOpened 由胶囊路径传入：
+  /** 报表页顶部切换账本：用新 dataSubdir 重开报表页（新 adapter、新 navCtx）。onOpened 由胶囊路径传入：
    *  关旧页推迟到新页 onOpen（与导航条切换同模式），避免底层闪现。 */
   switchLedgerAndReopenReport = async (newSubdir, onOpened) => {
     if (!await this.gateAndSwitch(newSubdir)) return;
@@ -12248,6 +13029,11 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.settings.locale = resolveLocale(this.settings.locale);
     setLocale(this.settings.locale);
+    this.settings.accountGroupingMode = resolveAccountGroupingMode(this.settings.accountGroupingMode);
+    initAccountGroupingMode(this.settings.accountGroupingMode, async (m) => {
+      this.settings.accountGroupingMode = m;
+      await this.saveSettings();
+    });
     const adapter = new ObsidianDataAdapter(this.app.vault, this.settings.dataSubdir, this);
     this.settingsTab = new AccountingSettings(this.app, this, adapter);
   }

@@ -133,18 +133,22 @@
 }
 
 /* 顶部账本胶囊：绝对定位于 .modal（与右上角关闭按钮同父级坐标系），镜像其 top，
-   保证任意刘海/安全区下都与 ✕ 同一水平线。记账/流水/账户/统计四页共用（由 mountLedgerPill 挂到 modalEl）。
+   保证任意刘海/安全区下都与 ✕ 同一水平线。记账/流水/账户/报表四页共用（由 mountLedgerPill 挂到 modalEl）。
    挂 modalEl 而非 contentEl——contentEl 各页 render() 会 empty()，胶囊在 modalEl 上不受影响。 */
 .modal.accounting-fullscreen:not(.accounting-desktop) .accounting-entry-ledger {
   position: absolute;
-  top: max(env(safe-area-inset-top), 24px); /* 与移动端关闭按钮 top 完全一致 */
+  top: max(env(safe-area-inset-top), 24px);
+  /* 与移动端关闭按钮 top 完全一致 */
   left: 12px;
-  margin-bottom: 0; /* 覆盖流内默认 20px */
+  margin-bottom: 0;
+  /* 覆盖流内默认 20px */
   z-index: 2;
 }
+
 .modal.accounting-fullscreen.accounting-desktop .accounting-entry-ledger {
   position: absolute;
-  top: var(--size-4-2, 10px); /* 对齐桌面窄面板 ✕ 视觉位置 */
+  top: var(--size-4-2, 10px);
+  /* 对齐桌面窄面板 ✕ 视觉位置 */
   left: var(--size-4-2, 10px);
   margin-bottom: 0;
   z-index: 2;
@@ -292,19 +296,23 @@
   color: var(--text-muted);
   line-height: 1.4;
 }
+
 /* 容器已自带水平内边距时（如 .accounting-currency-base、Modal contentEl）去掉 help-tip 自身水平 padding，避免双重缩进。 */
 .accounting-help-tip.accounting-help-tip-flush {
   padding-left: 0;
   padding-right: 0;
 }
+
 .accounting-help-tip-head {
   display: flex;
   align-items: center;
   gap: 4px;
 }
+
 .accounting-help-tip-summary {
   min-width: 0;
 }
+
 .accounting-help-tip-btn {
   flex: 0 0 auto;
   width: 16px;
@@ -318,26 +326,31 @@
   line-height: 1;
   cursor: pointer;
 }
+
 .accounting-help-tip-btn.is-open {
   border-color: var(--interactive-accent);
   color: var(--text-normal);
 }
+
 @media (hover: hover) {
   .accounting-help-tip-btn:hover {
     border-color: var(--interactive-accent);
     color: var(--text-normal);
   }
 }
+
 .accounting-help-tip-detail {
   margin-top: 4px;
   word-break: break-all;
 }
+
 /* 设置页卡片标题栏帮助：只有 ? 常驻，说明以悬浮提示展示；不占用卡片 body 空间。 */
 .accounting-header-help {
   position: relative;
   flex: 0 0 auto;
   margin-left: auto;
 }
+
 .accounting-header-help-detail {
   position: absolute;
   top: calc(100% + 6px);
@@ -359,6 +372,7 @@
   white-space: normal;
   word-break: break-word;
 }
+
 /* 说明文字后面紧跟分隔线/下一分区时，加大下间距，避免文字贴线。 */
 .accounting-help-tip-before-divider {
   padding-bottom: var(--ac-card-pad-y);
@@ -634,6 +648,73 @@
   margin-bottom: 12px;
 }
 
+/* 余额页工具行：账户名搜索框（占剩余宽度，placeholder 自说明免标签）+ 类型/分组带短文字标签的
+   select 成对排布，三控件一行；极窄屏 flex-wrap 兜底换行（field 成对不拆散）。 */
+.accounting-grouping-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.accounting-grouping-row .accounting-search-wrap {
+  flex: 1 1 90px;
+}
+
+.accounting-grouping-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.accounting-grouping-select {
+  height: var(--ac-control-h-compact);
+  box-sizing: border-box;
+  padding: 0 26px 0 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-input);
+  corner-shape: round;
+  background: var(--background-primary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.2;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+/* 账户标签 chips：已有标签快捷点选（小按钮，紧凑高度 token；hover 走 hover 守卫）。 */
+.accounting-tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.accounting-tag-chip {
+  box-sizing: border-box;
+  height: var(--ac-control-h-compact);
+  padding: 0 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-btn);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .accounting-tag-chip:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
+}
+
 .accounting-group {
   margin-bottom: 10px;
 }
@@ -682,7 +763,7 @@
   font-size: 0.85em;
 }
 
-.accounting-group[open] > .accounting-group-head > .accounting-group-head-title::before {
+.accounting-group[open]>.accounting-group-head>.accounting-group-head-title::before {
   content: '▾';
 }
 
@@ -756,6 +837,7 @@
 }
 
 @media (hover: hover) {
+
   .accounting-row-name:hover,
   .accounting-row-name:hover::after {
     color: var(--interactive-accent);
@@ -780,7 +862,7 @@
    分组标题(medium)、账户行(small/12px) 同框时显小显弱、上下节奏脱节；叠一层把字号提到 small、
    padding 对齐账户行(12px 4px)，左缘与账户名对齐，作为"次级折叠区标题"层级低于主分组标题、不弱于账户行。
    基线供其他页（分类隐藏区/周期账已暂停/账户类型已停用）继续统一使用。 */
-.accounting-hidden > .accounting-collapsible-head {
+.accounting-hidden>.accounting-collapsible-head {
   font-size: var(--font-ui-small);
   padding: 12px 4px;
 }
@@ -863,10 +945,11 @@
   cursor: pointer;
 }
 
-/* 流水/诊断搜索框是 <input>，Obsidian 的 input[type] 覆盖 (0,1,1) 压过控件基线 (0,1,0)，
+/* 流水/诊断/余额页搜索框是 <input>，Obsidian 的 input[type] 覆盖 (0,1,1) 压过控件基线 (0,1,0)，
    偷走 border/背景/圆角；用模态根类前缀抬到 (0,2,0) 还原矩形（高度由 .accounting-search-input 的 !important 兜底）。 */
 .accounting-transaction-modal .accounting-search-input,
-.accounting-sub-modal .accounting-search-input {
+.accounting-sub-modal .accounting-search-input,
+.accounting-balance-modal .accounting-search-input {
   box-sizing: border-box;
   padding: 0 8px;
   border: 1px solid var(--background-modifier-border);
@@ -879,6 +962,7 @@
 }
 
 @media (hover: hover) {
+
   .accounting-filter-controls>button:hover,
   .accounting-filter-quick-btn:hover {
     background: var(--background-modifier-hover);
@@ -905,6 +989,7 @@
   text-align: center;
   flex-shrink: 0;
 }
+
 .accounting-date-range-wrap .accounting-datefield-label {
   justify-content: center;
 }
@@ -1039,7 +1124,7 @@
   line-height: 1;
 }
 
-/* 排序栏右侧紧凑 secondary 按钮族：「选择/完成」(.accounting-batch-toggle) + 「展开/折叠全部」(.accounting-collapse-toggle) 共享视觉；
+/* 排序栏右侧紧凑 secondary 按钮族：「选择/完成」(.accounting-batch-toggle) + 「展开/折叠」(.accounting-collapse-toggle) 共享视觉；
    margin-left:auto 仅给 batch-toggle 把整组推到行尾，collapse-toggle 紧随其后（右侧紧挨「选择」）。 */
 :is(.accounting-batch-toggle, .accounting-collapse-toggle) {
   display: inline-flex;
@@ -1243,6 +1328,7 @@
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
 }
+
 /* 原生 input：文字透明（隐藏系统 locale 的日期文字）、bg/边框透明（透出容器底色与边框），仍占据容器
    全区并直接捕获点按 → 唤起系统选择器。用后代选择器抬特异性到 (0,2,0)，压过 Obsidian app.css 的
    input[type] (0,1,1)——否则后者会给 input 套不透明背景，盖住下层标签。 */
@@ -1271,6 +1357,7 @@
   cursor: pointer;
   z-index: 1;
 }
+
 /* 焦点时也不显绿环（此 input 仅作透明触控层，焦点环没意义且会显胶囊轮廓）。特异性 (0,3,1) 压过
    全局 :focus-visible 的 (0,2,1)。 */
 .accounting-datefield .accounting-datefield-native:focus,
@@ -1278,9 +1365,11 @@
   outline: none;
   box-shadow: none;
 }
+
 .accounting-datefield .accounting-datefield-native::-webkit-calendar-picker-indicator {
   display: none;
 }
+
 /* 浮层标签：显示我们格式化的日期，置于 input 之上（z-index:2）确保可见；pointer-events:none 使点按
    穿透到下层原生 input 唤起选择器。padding:inherit 让标签文字对齐原 input 文字位置。 */
 .accounting-datefield-label {
@@ -1391,6 +1480,7 @@
   column-gap: 0;
   row-gap: 5px;
 }
+
 .modal.accounting-fullscreen.accounting-desktop .accounting-transaction-modal .accounting-filter-controls {
   justify-content: flex-start;
 }
@@ -1472,6 +1562,8 @@
 .accounting-tx-type {
   font-size: var(--font-ui-smaller);
   font-weight: 600;
+  width: 5em;
+  text-align: center;
   padding: 2px 6px;
   border-radius: 4px;
   display: inline-block;
@@ -1954,7 +2046,7 @@
   margin: 0 !important;
   box-sizing: border-box;
   /* 顶避让带：在 .modal（不滚动）上预留 safe-area + 52px。滚动容器 .modal-content 的可见顶沿落在此带下沿
-     ——记账/流水/账户/统计/设置 5 个全屏页共用此值，两端一致。+52 让上边缘落到右上 ✕ 与账本胶囊下沿之下
+     ——记账/流水/账户/报表/设置 5 个全屏页共用此值，两端一致。+52 让上边缘落到右上 ✕ 与账本胶囊下沿之下
      （无刘海基准下约 8~14px 呼吸；有刘海机 safe-area 更大、间距自动更宽）。桌面 env 取不到值，回退 62px。
      原由 .accounting-has-ledger-pill 在 contentEl 内给 padding-top，会随滚动滚走 → 穿帮；挪到 .modal 即固定不滚。 */
   padding-top: calc(max(env(safe-area-inset-top), 10px) + 52px);
@@ -1979,7 +2071,7 @@
      此处仅保留移动端专属的 transform/opacity 钉住（反压 Obsidian JS 逐帧开/关动画）。 */
 }
 
-/* 移动端全屏页 contentEl 顶部 padding：流水/账户/统计/设置四页清零——内容紧贴滚动区顶部（.modal 避让带
+/* 移动端全屏页 contentEl 顶部 padding：流水/账户/报表/设置四页清零——内容紧贴滚动区顶部（.modal 避让带
    safe-area+52 已统一提供 .modal-content 上边缘与右上 ✕ 的间距，见上方 .accounting-fullscreen 规则），
    各页内部元素自行设计离顶距离。设置页 sticky tab 栏（.accounting-settings-tabs）吸顶在滚动区顶，靠自身不透明
    底色遮住上划的正文（不穿帮）；默认 .modal-content 的 padding:5px 会在 tab 栏上方留一条隙，故一并清零。
@@ -2122,7 +2214,10 @@
 }
 
 .accounting-settings-tab {
-  flex: 1 1 0;
+  /* 内容感知弹性填充：基准取内容宽度、剩余空间均分（flex-basis:auto），英文下长短标签
+     （Recurring vs About）空隙更均匀；nowrap 兜底禁换行。中文标签视觉与等分（1 1 0）无差。 */
+  flex: 1 1 auto;
+  white-space: nowrap;
   padding: 10px 4px;
   background: transparent;
   border: none;
@@ -2206,7 +2301,7 @@
   min-width: 0;
 }
 
-/* 统一底部固定导航条（记账 · 流水 · 账户 · 统计 · 设置），全平台渲染。
+/* 统一底部固定导航条（记账 · 流水 · 账户 · 报表 · 设置），全平台渲染。
    固定到屏幕底部，其高度已计入 .modal.accounting-fullscreen 的 padding-bottom 预留，内容不会被遮挡。 */
 .accounting-nav-bar {
   display: flex;
@@ -2267,6 +2362,7 @@
 .accounting-nav-btn:disabled {
   opacity: 0.5;
 }
+
 .accounting-nav-btn.accounting-nav-current {
   background: var(--interactive-accent);
   color: var(--text-on-accent);
@@ -2493,24 +2589,29 @@
   border-bottom: 1px solid var(--background-modifier-border);
   font-size: var(--font-ui-small);
 }
+
 .accounting-about-row:last-child {
   border-bottom: none;
 }
+
 .accounting-about-label {
   flex: 0 0 3.5em;
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
 }
+
 .accounting-about-value {
   color: var(--text-normal);
   font-size: var(--font-ui-small);
   word-break: break-all;
 }
+
 .accounting-about-link {
   color: var(--text-accent, var(--interactive-accent));
   font-size: var(--font-ui-small);
   text-decoration: none;
 }
+
 .accounting-about-link:hover {
   text-decoration: underline;
 }
@@ -2571,7 +2672,7 @@
   font-size: 0.9em;
 }
 
-details[open] > .accounting-collapsible-head::before {
+details[open]>.accounting-collapsible-head::before {
   content: '▾';
 }
 
@@ -2592,8 +2693,54 @@ details[open] > .accounting-collapsible-head::before {
   position: sticky;
   top: 0;
   z-index: 2;
-  background: var(--background-primary); /* 不透明，遮住滚过的交易行；与列表区同色 */
+  background: var(--background-primary);
+  /* 不透明，遮住滚过的交易行；与列表区同色 */
   flex-wrap: wrap;
+}
+
+/* 时间序按月分组视图：列表 flex gap 在相邻月份头之间留透明缝，默认仅最新月展开、其余月份组折叠
+   后只剩 summary，相邻两头间仅隔这条缝，右侧 overlay 滚动条穿缝可见。
+   解法：列表 gap 清零、相邻月份组紧贴（无缝可透）；原间距吸收进月份头自身上下 padding——padding
+   属头背景区，背景覆盖整头，头明显加高且相邻两头背景连续，缝消失。组内交易行间距由 details 内
+   flex gap 承接（行间透明属正常列表观感）。 */
+.accounting-transaction-list--grouped {
+  gap: 0;
+  background: var(--background-primary);
+  /* 兜底：整个分组列表铺不透明底，内部任意元素残留的透明缝（summary margin、details 间距等）透出的都是同色，滚动条不再穿缝 */
+}
+
+.accounting-transaction-list--grouped .accounting-month-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* 组内交易行间距 */
+  margin: 0;
+  /* 覆盖 <details> UA/主题默认 margin */
+  background: var(--background-primary);
+  /* 背景提升到 details：吸收 summary 上/下任何默认 margin/padding 产生的透明缝，相邻月份组背景连续，滚动条不再穿缝 */
+}
+
+.accounting-transaction-list--grouped .accounting-month-head {
+  padding-top: calc(var(--ac-card-head-y, 8px) + 6px);
+  padding-bottom: calc(var(--ac-card-head-y, 8px) + 6px);
+  margin: 0;
+  /* 干掉 <summary> 在 flex 容器内的默认 margin-block，消除头底部的透明带 */
+  background: var(--background-primary);
+  /* 吸顶时自身背景必须不透明并随 sticky 固定，否则文字固定、背景滚走 */
+  align-items: center;
+  /* 头加高后，内容（含右侧 totals）整体垂直居中，避免文字靠上 */
+}
+
+/* 相邻月份头之间的视觉分隔线：贴在下一个 details 的顶部（margin 塌缩可靠），首组无前邻不画。 */
+.accounting-transaction-list--grouped .accounting-month-group+.accounting-month-group {
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* 右侧收入/支出/余额在窄屏 flex-wrap 下会换行成第二行，把月份名挤到头部上半区，视觉上文字偏上。
+   收紧为单行不换行（超出由列表横向 padding 容纳），保证月份名始终与金额同一行、垂直居中。 */
+.accounting-transaction-list--grouped .accounting-month-totals {
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 
 .accounting-month-label {
@@ -2696,6 +2843,22 @@ details[open] > .accounting-collapsible-head::before {
   font-weight: 400;
 }
 
+/* 标签行账户数：名称旁行内小字（非胶囊，桌面端同口径），避免长统计框与换行 */
+.accounting-cat-tag-usage {
+  font-size: var(--font-ui-smaller);
+  font-weight: 400;
+  color: var(--text-faint);
+  flex: 0 0 auto;
+}
+
+/* 隐藏标签行名称：基类 .accounting-ledger-folder 是 block，补 flex 与可见行同口径（名称+账户数同行） */
+.accounting-cat-tag-name-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--ac-gap-md);
+}
+
 /* 兼容旧分类分组空态类名；旧的全局已隐藏子分组不再渲染。 */
 .accounting-cat-sub {
   padding: var(--ac-card-head-y) var(--ac-card-pad-x) 2px;
@@ -2759,10 +2922,12 @@ details[open] > .accounting-collapsible-head::before {
   gap: var(--ac-gap-sm);
   min-width: 0;
 }
+
 .accounting-at-type-label-row .accounting-ledger-input {
   flex: 1 1 auto;
   min-width: 0;
 }
+
 .accounting-at-type-label-row .accounting-ledger-badge {
   flex: 0 0 auto;
 }
@@ -3167,6 +3332,7 @@ details[open] > .accounting-collapsible-head::before {
 .modal.accounting-fullscreen.accounting-desktop .accounting-report-modal .accounting-filter-box {
   padding: 6px 12px;
 }
+
 .modal.accounting-fullscreen.accounting-desktop .accounting-report-modal .accounting-filter-row {
   margin-bottom: 0;
 }
@@ -3615,15 +3781,18 @@ details[open] > .accounting-collapsible-head::before {
 .accounting-currency-picker {
   display: block;
 }
+
 .accounting-currency-picker-input {
   width: 100%;
   box-sizing: border-box;
 }
+
 .accounting-currency-add-holder {
   width: 100%;
   box-sizing: border-box;
   padding: 0 var(--ac-card-content-x) var(--ac-gap-sm);
 }
+
 /* 浮层挂 body（fixed），避开设置 Modal 的 overflow 裁切 */
 .accounting-currency-picker-dropdown {
   position: fixed;
@@ -3636,11 +3805,13 @@ details[open] > .accounting-collapsible-head::before {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
   padding: 4px 0;
 }
+
 .accounting-currency-picker-empty {
   padding: 6px 12px;
   font-size: var(--font-ui-small);
   color: var(--text-muted);
 }
+
 .accounting-currency-picker-group {
   position: sticky;
   top: 0;
@@ -3650,6 +3821,7 @@ details[open] > .accounting-collapsible-head::before {
   font-weight: 600;
   color: var(--text-muted);
 }
+
 .accounting-currency-picker-item {
   display: flex;
   align-items: center;
@@ -3658,19 +3830,23 @@ details[open] > .accounting-collapsible-head::before {
   color: var(--text-normal);
   cursor: pointer;
 }
+
 .accounting-currency-picker-item.is-active {
   background: var(--background-modifier-hover);
 }
+
 .accounting-currency-picker-cn {
   flex: 1 1 auto;
   min-width: 0;
 }
+
 .accounting-currency-picker-code {
   flex: 0 0 auto;
   margin-left: 8px;
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
 }
+
 .accounting-currency-picker-check {
   flex: 0 0 auto;
   margin-left: 6px;
@@ -3902,6 +4078,7 @@ details[open] > .accounting-collapsible-head::before {
   gap: var(--ac-gap-md);
   margin-bottom: var(--ac-gap-lg);
 }
+
 .accounting-diaglog-seg {
   display: inline-flex;
   gap: 2px;
@@ -3909,6 +4086,7 @@ details[open] > .accounting-collapsible-head::before {
   border-radius: var(--ac-radius-btn);
   background: var(--background-modifier-hover);
 }
+
 .accounting-diaglog-seg-btn {
   height: var(--ac-control-h-compact);
   box-sizing: border-box;
@@ -3920,15 +4098,18 @@ details[open] > .accounting-collapsible-head::before {
   color: var(--text-muted);
   cursor: pointer;
 }
+
 .accounting-diaglog-seg-btn.is-active {
   background: var(--background-primary);
   color: var(--text-normal);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
+
 .accounting-diaglog-search {
   flex: 1;
   min-width: 10rem;
 }
+
 .accounting-diaglog-list {
   max-height: 60vh;
   overflow: auto;
@@ -3940,10 +4121,12 @@ details[open] > .accounting-collapsible-head::before {
   font-size: var(--font-ui-smaller);
   line-height: 1.5;
 }
+
 .accounting-diaglog-line {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
 .accounting-diaglog-empty {
   color: var(--text-muted);
   text-align: center;
