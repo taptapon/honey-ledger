@@ -6937,7 +6937,6 @@ var BalanceModal = class extends import_obsidian11.Modal {
     };
     if (hidden.length > 0) {
       const h = contentEl.createEl("details", { cls: "accounting-hidden" });
-      if (filterActive) h.open = true;
       h.createEl("summary", { text: t("balance.hiddenSummary"), cls: "accounting-collapsible-head" });
       this.renderGroups(h, hidden, balances, baseBalances, snap, filterActive || this.allGroupsExpanded);
     }
