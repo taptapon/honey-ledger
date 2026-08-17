@@ -3447,7 +3447,7 @@ var zh = {
   "adjust.errInvalidTarget": "\u8BF7\u8F93\u5165\u6709\u6548\u7684\u4F59\u989D",
   "adjust.writeFailed": "\u5199\u5165\u5931\u8D25\uFF1A{{msg}}",
   // KR5/task6: balanceModal
-  "balance.emptyNoAccounts": "\u6682\u65E0\u8D26\u6237\uFF0C\u70B9\u300C\uFF0B \u65B0\u5EFA\u8D26\u6237\u300D\u521B\u5EFA",
+  "balance.emptyNoAccounts": "\u6682\u65E0\u8D26\u6237\uFF0C\u70B9\u53F3\u4E0A\u300C\uFF0B\u300D\u65B0\u5EFA",
   "balance.createAccountBtn": "\uFF0B \u65B0\u5EFA\u8D26\u6237",
   "balance.netWorth": "\u51C0\u8D44\u4EA7",
   "balance.netWorthWithCur": "\u51C0\u8D44\u4EA7\uFF08{{cur}}\uFF09",
@@ -3473,7 +3473,7 @@ var zh = {
   "accountGrouping.modeLabelShort": "\u5206\u7EC4",
   // 账户分组方式（与桌面 accountGrouping.* 同名对齐；type-group 为默认）
   "accountGrouping.modeLabel": "\u5206\u7EC4\u65B9\u5F0F",
-  "accountGrouping.mode.typeGroup": "\u6309\u7C7B\u578B\u5206\u7EC4",
+  "accountGrouping.mode.typeGroup": "\u6309\u7C7B\u578B\u7EC4",
   "accountGrouping.mode.type": "\u6309\u7C7B\u578B",
   "accountGrouping.mode.currency": "\u6309\u5E01\u79CD",
   "accountGrouping.mode.tag": "\u6309\u6807\u7B7E",
@@ -3758,7 +3758,7 @@ var zh = {
   "settings.accountTag.deleteConfirmUsed": "\u6807\u7B7E\u300C{{name}}\u300D\u88AB {{n}} \u4E2A\u8D26\u6237\u4F7F\u7528\uFF0C\u5C06\u9690\u85CF\uFF08\u8D26\u6237\u4E0E\u5206\u7EC4\u4E0D\u53D8\uFF0C\u4EC5\u4E0D\u518D\u51FA\u73B0\u5728\u5EFA\u8BAE\u4E2D\uFF09\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F",
   "settings.accountTag.purgeConfirm": "\u5F7B\u5E95\u5220\u9664\u6807\u7B7E\u300C{{name}}\u300D\uFF1F\u672A\u88AB\u4EFB\u4F55\u8D26\u6237\u4F7F\u7528\u3002",
   // KR7/task4: settings — 账户类型管理（卡片/分组/停用区/footer + RegroupTypeModal）
-  "settings.accountType.title": "\u8D26\u6237\u7C7B\u578B\u5206\u7EC4",
+  "settings.accountType.title": "\u8D26\u6237\u7C7B\u578B\u7EC4",
   "settings.accountType.resetBtn": "\u6062\u590D\u9ED8\u8BA4",
   "settings.accountType.createTitle": "\u65B0\u5EFA\u5206\u7EC4",
   "settings.accountType.deleteGroupConfirm": "\u5220\u9664\u5206\u7EC4\u300C{{label}}\u300D\uFF1F\u5176\u4E0B\u7C7B\u578B\u5C06\u8FC1\u79FB\u5230\u300C{{fallback}}\u300D\u3002",
@@ -4160,7 +4160,7 @@ var en = {
   "adjust.errInvalidTarget": "Please enter a valid balance",
   "adjust.writeFailed": "Write failed: {{msg}}",
   // KR5/task6: balanceModal
-  "balance.emptyNoAccounts": 'No accounts yet \u2014 tap "+ New account" to create one',
+  "balance.emptyNoAccounts": 'No accounts yet \u2014 tap "\uFF0B" at the top right to create one',
   "balance.createAccountBtn": "+ New account",
   "balance.netWorth": "Net worth",
   "balance.netWorthWithCur": "Net worth ({{cur}})",
@@ -6795,31 +6795,17 @@ var BalanceModal = class extends import_obsidian11.Modal {
       });
       return;
     }
+    const storedTypes = await this.adapter.readAccountTypeSettings();
+    this.accountTypeSettings = storedTypes ? normalizeAccountTypeSettings(storedTypes) : defaultAccountTypeSettings();
+    this.baseCurrency = await this.adapter.readBaseCurrency();
     if (snap.accounts.length === 0 && snap.transactions.length === 0) {
+      this.renderGroupingRow(contentEl, snap, false);
       contentEl.createEl("div", {
         text: t("balance.emptyNoAccounts"),
         cls: "accounting-empty"
       });
-      const createAccountEl2 = contentEl.createDiv({ cls: "accounting-create-account-row" });
-      const createBtn2 = createAccountEl2.createEl("button", {
-        text: t("balance.createAccountBtn"),
-        cls: "accounting-ledger-create"
-      });
-      createBtn2.onclick = () => {
-        new AccountCreateModal(
-          this.app,
-          this.adapter,
-          snap.accounts,
-          snap.categories,
-          this.accountTypeSettings,
-          () => this.refresh()
-        ).open();
-      };
       return;
     }
-    const storedTypes = await this.adapter.readAccountTypeSettings();
-    this.accountTypeSettings = storedTypes ? normalizeAccountTypeSettings(storedTypes) : defaultAccountTypeSettings();
-    this.baseCurrency = await this.adapter.readBaseCurrency();
     const rates = await this.adapter.readRates();
     const balances = computeBalances(snap.transactions, snap.accounts);
     const nw = computeNetWorth(snap.transactions, snap.accounts, { rates, base: this.baseCurrency, accountTypeSettings: this.accountTypeSettings });
@@ -6840,10 +6826,35 @@ var BalanceModal = class extends import_obsidian11.Modal {
     const sum = contentEl.createDiv({ cls: "accounting-summary" });
     sum.createEl("span", { text: t("balance.creditPayable", { amount: formatMoney(nw.creditPayable, this.baseCurrency) }) });
     sum.createEl("span", { text: t("balance.receivablesPayables", { rec: formatMoney(totalRec, this.baseCurrency), pay: formatMoney(totalPay, this.baseCurrency) }) });
+    this.renderGroupingRow(contentEl, snap, true);
+    const ql = this.keyword.trim().toLowerCase();
+    const matchKeyword = (a) => !ql || a.name.toLowerCase().includes(ql);
+    const matchType = (a) => !this.typeFilter || a.type === this.typeFilter;
+    const active = snap.accounts.filter((a) => a.active && matchKeyword(a) && matchType(a));
+    const hidden = snap.accounts.filter((a) => !a.active && matchKeyword(a) && matchType(a));
+    const filterActive = !!(this.keyword.trim() || this.typeFilter);
+    this.renderGroups(contentEl, active, balances, baseBalances, snap, filterActive || this.allGroupsExpanded);
+    if ((ql || this.typeFilter) && active.length === 0) {
+      contentEl.createEl("div", { text: t("balance.noMatch"), cls: "accounting-empty" });
+    }
+    if (hidden.length > 0) {
+      const h = contentEl.createEl("details", { cls: "accounting-hidden" });
+      h.createEl("summary", { text: t("balance.hiddenSummary"), cls: "accounting-collapsible-head" });
+      this.renderGroups(h, hidden, balances, baseBalances, snap, filterActive || this.allGroupsExpanded);
+    }
+  }
+  /** 统一底部导航条（由 CSS 固定到底部，内容区预留 safe-area）。 */
+  renderNav() {
+    renderNavBar(this.modalEl, "balance", this.navCtx, () => this.close());
+  }
+  /** 工具行：搜索框 + 类型/分组 select + 展开/折叠（可选）+ 常驻「＋」新建账户（最右靠右）。
+   *  右侧首个按钮带 .accounting-tool-right（margin-left:auto 推到行尾）：有展开按钮时由它承担，
+   *  否则由新建按钮承担——保证新建入口任何状态下都靠右常驻。 */
+  renderGroupingRow(parent, snap, withExpandToggle) {
     if (this.typeFilter && !this.accountTypeSettings.types.some((at) => at.type === this.typeFilter)) {
       this.typeFilter = "";
     }
-    const groupingRow = contentEl.createDiv({ cls: "accounting-grouping-row" });
+    const groupingRow = parent.createDiv({ cls: "accounting-grouping-row" });
     const searchWrap = groupingRow.createDiv({ cls: "accounting-search-wrap" });
     const keywordInput = searchWrap.createEl("input", {
       type: "text",
@@ -6901,29 +6912,21 @@ var BalanceModal = class extends import_obsidian11.Modal {
       void setAccountGroupingMode(groupSel.value).then(() => this.refresh());
     };
     const filterActive = !!(this.keyword.trim() || this.typeFilter);
-    if (!filterActive) {
-      const expandBtn = groupingRow.createEl("button", {
+    let expandBtn = null;
+    if (withExpandToggle && !filterActive) {
+      expandBtn = groupingRow.createEl("button", {
         text: this.allGroupsExpanded ? t("balance.collapseAll") : t("balance.expandAll"),
-        cls: "accounting-collapse-toggle"
+        cls: "accounting-collapse-toggle accounting-tool-right"
       });
       expandBtn.onclick = () => {
         this.allGroupsExpanded = !this.allGroupsExpanded;
         void this.refresh();
       };
     }
-    const ql = this.keyword.trim().toLowerCase();
-    const matchKeyword = (a) => !ql || a.name.toLowerCase().includes(ql);
-    const matchType = (a) => !this.typeFilter || a.type === this.typeFilter;
-    const active = snap.accounts.filter((a) => a.active && matchKeyword(a) && matchType(a));
-    const hidden = snap.accounts.filter((a) => !a.active && matchKeyword(a) && matchType(a));
-    this.renderGroups(contentEl, active, balances, baseBalances, snap, filterActive || this.allGroupsExpanded);
-    if ((ql || this.typeFilter) && active.length === 0) {
-      contentEl.createEl("div", { text: t("balance.noMatch"), cls: "accounting-empty" });
-    }
-    const createAccountEl = contentEl.createDiv({ cls: "accounting-create-account-row" });
-    const createBtn = createAccountEl.createEl("button", {
-      text: t("balance.createAccountBtn"),
-      cls: "accounting-ledger-create"
+    const createBtn = groupingRow.createEl("button", {
+      text: "\uFF0B",
+      cls: `accounting-ledger-create${expandBtn ? "" : " accounting-tool-right"}`,
+      attr: { "aria-label": t("balance.createAccountBtn") }
     });
     createBtn.onclick = () => {
       new AccountCreateModal(
@@ -6935,15 +6938,6 @@ var BalanceModal = class extends import_obsidian11.Modal {
         () => this.refresh()
       ).open();
     };
-    if (hidden.length > 0) {
-      const h = contentEl.createEl("details", { cls: "accounting-hidden" });
-      h.createEl("summary", { text: t("balance.hiddenSummary"), cls: "accounting-collapsible-head" });
-      this.renderGroups(h, hidden, balances, baseBalances, snap, filterActive || this.allGroupsExpanded);
-    }
-  }
-  /** 统一底部导航条（由 CSS 固定到底部，内容区预留 safe-area）。 */
-  renderNav() {
-    renderNavBar(this.modalEl, "balance", this.navCtx, () => this.close());
   }
   renderGroups(parent, accounts, balances, baseBalances, snap, expandAll) {
     const mode = accountGroupingMode();
@@ -7405,7 +7399,7 @@ var EntryModal = class extends import_obsidian13.Modal {
       const active = this.state.type === tp.key;
       const btn = this.typeRow.createEl("button", {
         text: t(tp.i18nKey),
-        cls: `accounting-settings-tab${active ? " accounting-settings-tab-active" : ""}`
+        cls: `accounting-settings-tab accounting-entry-tab-${tp.key}${active ? " accounting-settings-tab-active" : ""}`
       });
       btn.onclick = () => this.switchType(tp.key);
     }
@@ -10191,9 +10185,11 @@ var TransactionListModal = class extends import_obsidian18.Modal {
         return "";
     }
   }
-  /** 金额颜色：borrow/collect = 钱进己方（正向），lend/repay = 钱出己方（负向）。 */
+  /** 金额颜色（与桌面端 amountTone 同语义）：支出红/收入绿/转账青（内部流转中性）；
+   *  借贷 borrow/collect = 钱进己方（正向），lend/repay = 钱出己方（负向）。 */
   amountClass(tx) {
-    if (tx.type === "expense" || tx.type === "transfer") return "accounting-amount-negative";
+    if (tx.type === "expense") return "accounting-amount-negative";
+    if (tx.type === "transfer") return "accounting-amount-transfer";
     if (tx.type === "income") return "accounting-amount-positive";
     return loanCashIn(tx.direction) ? "accounting-amount-positive" : "accounting-amount-negative";
   }
@@ -12004,7 +12000,7 @@ var AccountingSettings = class {
   /**
    * 渲染「设置-分类」账户类型界面：拆两个卡片（与桌面端对齐）。
    *  1. 账户类型卡（accountTypes）：系统类型重命名 + 自定义类型新增/删除/改 kind + 启停。
-   *  2. 账户类型分组卡（accountType）：分组改名/增删/排序、类型归属/组内排序；类型行 label 只读（重命名/停用归「账户类型」卡）。
+   *  2. 账户类型组卡（accountType）：分组改名/增删/排序、类型归属/组内排序；类型行 label 只读（重命名/停用归「账户类型」卡）。
    * tap-based 编辑（不拖拽）：排序用上移/下移按钮，换组用 RegroupTypeModal。
    * 即时保存（与桌面端一致）：每次编辑直接写 account-types.json，无保存/取消 footer；
    * 破坏性操作（删类型/删分组/恢复默认）先 backup('pre-account-types') 再写。内联 label 输入 blur 提交（避免每击键写盘）。

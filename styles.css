@@ -183,12 +183,34 @@
 
 .accounting-entry-type {
   flex: 0 0 auto;
-  /* 顶部类型 tab 栏：按钮复用设置页 .accounting-settings-tab（纯文字 + 底部 accent 下划线），
+  /* 顶部类型 tab 栏：按钮复用设置页 .accounting-settings-tab（纯文字 + 底部下划线），
      本容器只负责横向排列 + 底部 1px 分隔线；不吸顶 sticky（记账页表单不长，类型区常驻顶部即可）。
      替代旧绿底卡片——进一步轻化，让底部主导航成为唯一强焦点。 */
   display: flex;
   border-bottom: 1px solid var(--background-modifier-border);
   margin-bottom: 20px;
+}
+
+/* 记账页类型 tab 选中态按类型语义色着色（文字 + 下划线，与类型徽章同色系）；
+   设置页 tab 仍走 accent 色，两页各自成体系。 */
+.accounting-settings-tab-active.accounting-entry-tab-expense {
+  color: var(--color-red);
+  border-bottom-color: var(--color-red);
+}
+
+.accounting-settings-tab-active.accounting-entry-tab-income {
+  color: var(--color-green);
+  border-bottom-color: var(--color-green);
+}
+
+.accounting-settings-tab-active.accounting-entry-tab-transfer {
+  color: var(--color-cyan);
+  border-bottom-color: var(--color-cyan);
+}
+
+.accounting-settings-tab-active.accounting-entry-tab-loan {
+  color: var(--color-orange);
+  border-bottom-color: var(--color-orange);
 }
 
 .accounting-entry-mini-btn.accounting-entry-toggle-active {
@@ -657,14 +679,20 @@
   margin-bottom: 10px;
 }
 
+/* 余额页搜索框收窄（不抢占整行剩余宽度，右侧控件不被挤换行）；仍可收缩兜底极窄屏 */
 .accounting-grouping-row .accounting-search-wrap {
-  flex: 1 1 90px;
+  flex: 0 1 100px;
 }
 
 .accounting-grouping-field {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* 余额页工具行右侧首个按钮（展开/折叠或「＋」新建）：推到行尾，其后按钮（如「＋」）紧随 */
+.accounting-grouping-row .accounting-tool-right {
+  margin-left: auto;
 }
 
 .accounting-grouping-select {
@@ -717,12 +745,6 @@
 
 .accounting-group {
   margin-bottom: 10px;
-}
-
-/* 新建账户按钮行：与账户分组保持一致间距 */
-.accounting-create-account-row {
-  margin-bottom: 10px;
-  text-align: center;
 }
 
 .accounting-group-head {
@@ -1580,7 +1602,7 @@
 }
 
 .accounting-tx-transfer {
-  background: var(--color-blue);
+  background: var(--color-cyan);
   color: var(--text-on-accent);
 }
 
@@ -1635,6 +1657,11 @@
 
 .accounting-amount-negative {
   color: var(--color-red);
+}
+
+/* 转账金额：内部流转中性，非正非负（与徽章同青色系，桌面端为 text-cyan-600）。 */
+.accounting-amount-transfer {
+  color: var(--color-cyan);
 }
 
 /* 流水详情弹窗样式 */
