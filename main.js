@@ -1193,6 +1193,8 @@ function extractAmountFromNote(text) {
   const numRe = /\d[\d,]*(?:\.\d+)?/g;
   const moneyPrefix = /* @__PURE__ */ new Set(["\xA5", "\uFFE5", "$", "\uFF04"]);
   const moneySuffix = /* @__PURE__ */ new Set(["\u5143", "\u5706", "\u5757"]);
+  const currencyWordBefore = ["\u4EBA\u6C11\u5E01", "\u7F8E\u5143", "\u6E2F\u5E01", "\u6B27\u5143", "\u65E5\u5143", "\u82F1\u9551"];
+  const nonAmountLabelBefore = ["\u8D26\u53F7", "\u5C3E\u53F7", "\u5361\u53F7", "\u4F59\u989D"];
   const excludedSuffix = /* @__PURE__ */ new Set([
     "\u676F",
     "\u4E2A",
@@ -1236,19 +1238,92 @@ function extractAmountFromNote(text) {
     const before = start > 0 ? text[start - 1] : "";
     const after = end < text.length ? text[end] : "";
     const rest = end < text.length ? text.slice(end) : "";
+    const beforeText = text.slice(0, start);
     if (before === ":" || before === "\uFF1A" || after === ":" || after === "\uFF1A") continue;
     if (after && excludedSuffix.has(after)) continue;
-    if (/^(ml|kg)/i.test(rest)) continue;
+    if (/^(ml|kg|l(?![a-z]))/i.test(rest)) continue;
+    if (nonAmountLabelBefore.some((w) => beforeText.endsWith(w))) continue;
     const cleaned = m[0].replace(/,/g, "");
     const val = Number(cleaned);
     if (!Number.isFinite(val) || val <= 0) continue;
-    const isMoney = before !== "" && moneyPrefix.has(before) || after !== "" && moneySuffix.has(after) || /^rmb/i.test(rest);
+    const isMoney = before !== "" && moneyPrefix.has(before) || after !== "" && moneySuffix.has(after) || /^rmb/i.test(rest) || currencyWordBefore.some((w) => beforeText.endsWith(w));
     toks.push({ value: cleaned, type: isMoney ? "money" : "plain" });
   }
   const money = toks.find((t2) => t2.type === "money");
   if (money) return money.value;
-  if (toks.length > 0) return toks[toks.length - 1].value;
+  if (toks.length > 0) {
+    const decimals = toks.filter((t2) => t2.value.includes("."));
+    const pool = decimals.length > 0 ? decimals : toks;
+    return pool[pool.length - 1].value;
+  }
   return null;
+}
+
+// ../../packages/core/src/noteAccount.ts
+function matchAccountFromNote(text, accounts) {
+  if (typeof text !== "string" || text.length === 0) return null;
+  const named = accounts.filter((a) => typeof a?.name === "string" && a.name.length > 0);
+  if (named.length === 0) return null;
+  const lower = text.toLowerCase();
+  let best = null;
+  let bestLen = -1;
+  let tie = false;
+  for (const a of named) {
+    if (!lower.includes(a.name.toLowerCase())) continue;
+    if (a.name.length > bestLen) {
+      best = a.id;
+      bestLen = a.name.length;
+      tie = false;
+    } else if (a.name.length === bestLen && a.id !== best) {
+      tie = true;
+    }
+  }
+  if (best !== null) return tie ? null : best;
+  const best2 = /* @__PURE__ */ new Map();
+  const record = (id, len, pos) => {
+    const cur = best2.get(id);
+    if (!cur || len > cur.len || len === cur.len && pos < cur.pos) best2.set(id, { len, pos });
+  };
+  for (const m of text.matchAll(/[\u4e00-\u9fff]{2,}/g)) {
+    const run = m[0];
+    const base = m.index ?? 0;
+    for (const a of named) {
+      if (a.name.length < 2) continue;
+      const rev = subseqSpan(a.name, run);
+      if (rev) record(a.id, rev.len, base + rev.pos);
+      for (let s = 0; s + 1 < run.length; s++) {
+        for (let e = run.length; e > s + 1; e--) {
+          if (!isAnchoredSubsequence(run.slice(s, e), a.name)) continue;
+          record(a.id, e - s, base + s);
+          break;
+        }
+      }
+    }
+  }
+  if (best2.size === 0) return null;
+  const top = [...best2.entries()].sort((x, y) => y[1].len - x[1].len || x[1].pos - y[1].pos);
+  if (top.length > 1 && top[0][1].len === top[1][1].len && top[0][1].pos === top[1][1].pos) return null;
+  return top[0][0];
+}
+function isAnchoredSubsequence(query, name) {
+  if (query[0] !== name[0]) return false;
+  let i = 1;
+  for (const ch of name.slice(1)) {
+    if (i === query.length) break;
+    if (ch === query[i]) i++;
+  }
+  return i === query.length;
+}
+function subseqSpan(query, run) {
+  let j = -1;
+  let first = -1;
+  for (const ch of query) {
+    const k = run.indexOf(ch, j + 1);
+    if (k < 0) return null;
+    if (first < 0) first = k;
+    j = k;
+  }
+  return { len: j - first + 1, pos: first };
 }
 
 // ../../packages/core/src/fold.ts
@@ -7578,6 +7653,9 @@ var EntryModal = class extends import_obsidian13.Modal {
         this.applyRatePrefill();
         this.rerender();
       }, void 0, odFor(s.account));
+      if (!this.accountTouched && s.account && s.account === this.noteAccountMatch()) {
+        wrap.createDiv({ cls: "accounting-entry-from-note", text: t("entry.fromNote") });
+      }
       const cats = this.categories.filter((c) => c.flow === s.type && c.active !== false).sort((a, b) => a.name.localeCompare(b.name, "zh"));
       this.selectRow(wrap, t("entry.field.category"), s.category, [
         { value: "", label: t("account.selectPlaceholder") },
@@ -7619,6 +7697,9 @@ var EntryModal = class extends import_obsidian13.Modal {
         this.applyRatePrefill();
         this.rerender();
       }, void 0, odFor(s.account));
+      if (!this.accountTouched && s.account && s.account === this.noteAccountMatch()) {
+        wrap.createDiv({ cls: "accounting-entry-from-note", text: t("entry.fromNote") });
+      }
       this.renderPersonField(wrap);
       this.renderRateRow(wrap);
       const mismatch = this.loanCurrencyMismatch();
@@ -7636,7 +7717,7 @@ var EntryModal = class extends import_obsidian13.Modal {
     noteTextarea.value = s.note;
     noteTextarea.placeholder = t("entry.notePlaceholder");
     noteTextarea.rows = 2;
-    noteTextarea.addEventListener("input", () => {
+    noteTextarea.addEventListener("input", (ev) => {
       s.note = noteTextarea.value;
       noteTextarea.style.height = "auto";
       noteTextarea.style.height = `${noteTextarea.scrollHeight}px`;
@@ -7646,6 +7727,25 @@ var EntryModal = class extends import_obsidian13.Modal {
           s.amount = ex;
           amountInput.value = ex;
           this.updateSettlePreview();
+        }
+      }
+      if (!this.accountTouched && !this.originalTxId && this.recurringMode === "none" && s.type !== "transfer" && !ev.isComposing) {
+        const id = matchAccountFromNote(s.note, this.accounts.filter((a) => a.active));
+        if (id && id !== s.account) {
+          const caret = noteTextarea.selectionStart ?? s.note.length;
+          s.account = id;
+          if (!this.categoryTouched && (s.type === "expense" || s.type === "income")) {
+            const c = inferDefaultCategory(this.transactions, this.categories, { type: s.type, account: id });
+            if (c) s.category = c;
+          }
+          this.applyRatePrefill();
+          this.rerender();
+          const ta = this.fieldContainer.querySelector("textarea");
+          if (ta) {
+            ta.focus();
+            ta.setSelectionRange(caret, caret);
+          }
+          return;
         }
       }
       this.updateFromNoteHint();
@@ -7967,6 +8067,10 @@ var EntryModal = class extends import_obsidian13.Modal {
     const show = s.amount.trim() !== "" && s.amount.trim() === extractAmountFromNote(s.note);
     if (show) el.show();
     else el.hide();
+  }
+  /** 当前备注的账户模糊匹配 id（active 账户；识别不出为 null）。渲染来源提示与备注联动共用。 */
+  noteAccountMatch() {
+    return matchAccountFromNote(this.state.note, this.accounts.filter((a) => a.active));
   }
   settleSignError(direction, outstanding) {
     switch (validateCollectRepayDirection(outstanding, direction)) {
