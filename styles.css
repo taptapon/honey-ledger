@@ -679,15 +679,16 @@
   margin-bottom: 10px;
 }
 
-/* 余额页搜索框收窄（不抢占整行剩余宽度，右侧控件不被挤换行）；仍可收缩兜底极窄屏 */
+/* 余额页搜索框可增长填充行内剩余空间（换行时第一行铺满）；仍可收缩兜底极窄屏 */
 .accounting-grouping-row .accounting-search-wrap {
-  flex: 0 1 100px;
+  flex: 1 1 70px;
 }
 
 .accounting-grouping-field {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: 0 1 auto;
 }
 
 /* 余额页工具行右侧首个按钮（展开/折叠或「＋」新建）：推到行尾，其后按钮（如「＋」）紧随 */
@@ -716,6 +717,11 @@
 }
 
 /* 账户标签 chips：已有标签快捷点选（小按钮，紧凑高度 token；hover 走 hover 守卫）。 */
+.accounting-tag-chips-row {
+  margin-bottom: 8px;
+  padding-left: 72px; /* 与 .accounting-adjust-label 宽度(64px) + gap(8px) 对齐，使 chips 左缘与输入框左缘对齐 */
+}
+
 .accounting-tag-chips {
   display: flex;
   flex-wrap: wrap;
@@ -741,25 +747,42 @@
     background: var(--background-modifier-hover);
     color: var(--text-normal);
   }
+
+  .accounting-tag-toggle:hover {
+    color: var(--text-accent);
+  }
+}
+
+/* 标签展开/收起按钮：无边框背景，与 chip 同字号，accent 色强调。 */
+.accounting-tag-toggle {
+  box-sizing: border-box;
+  height: var(--ac-control-h-compact);
+  padding: 0 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-accent);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 .accounting-group {
-  margin-bottom: 10px;
+  margin-bottom: 2px;
 }
 
 .accounting-group-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: var(--font-ui-medium);
+  font-size: var(--font-ui-small);
   font-weight: 600;
   color: var(--text-normal);
   /* 浅绿底色：color-mix 把主题 --color-green 混进次级背景，与下方账户行拉开区分；随明/暗主题自适应。
      前一行 --background-secondary 为兜底（color-mix 不可用时降级为原中性底）。
-     字号/高度：用 medium（§3「区块标题」归档）+ 10px padding——原 smaller/4px 比下方账户行（small/12px）
-     还小还矮、层级反了；现标题条与账户行高度协调、字号大一档确立分组标题层级。 */
+     字号/高度：用 small + 10px padding——与账户行同字号、靠粗体区分层级，标题条比行高略矮协调。 */
   background: var(--background-secondary);
-  background: color-mix(in srgb, var(--color-green) 8%, var(--background-secondary));
+  background: color-mix(in srgb, var(--color-green) 4%, var(--background-secondary));
   border: 1px solid var(--background-modifier-border);
   border-radius: 4px;
   padding: 10px 8px;
@@ -822,6 +845,27 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 子账户 ↳ 指示符：比正文字号稍小，颜色弱化，与名称保持间距 */
+.accounting-row-sub-icon {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+
+/* 主账户 ◆ 指示符（有子账户的父账户）：与子账户指示符同口径，与预估收益页一致 */
+.accounting-row-parent-icon {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+
+/* 普通账户 · 指示符：与主/子账户同口径，占位对齐 */
+.accounting-row-regular-icon {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-right: 2px;
 }
 
 /* 名称末尾 ›：提示"点开有更多操作"（查看流水/属性/合并）。faint 色不抢主体；移动端无 hover，
@@ -1119,10 +1163,11 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 12px 4px;
+  padding: 0 0 4px 12px;
   font-size: var(--font-ui-smaller);
   line-height: 1.2;
   color: var(--text-muted);
+  justify-content: flex-end;
 }
 
 .accounting-sort-bar .accounting-sort-label {
@@ -3364,6 +3409,15 @@ details[open]>.accounting-collapsible-head::before {
   margin-bottom: 0;
 }
 
+/* 报表页二级视图 tab 栏（复用设置页 .accounting-settings-tabs，sticky 吸顶）下方首个内容块统一 8px 间距：
+   flow=时间段 filter-box（绿卡）/ yield=stat-cards / 无流水空态，与设置页各 panel 首卡 8px 离顶同值，
+   否则绿卡/说明行紧贴 tab 栏下划线（0px）。 */
+.accounting-report-modal .accounting-filter-box,
+.accounting-report-modal .accounting-stat-cards,
+.accounting-report-modal .accounting-empty {
+  margin-top: 8px;
+}
+
 /* 收支结余三数字卡 */
 .accounting-stat-cards {
   display: grid;
@@ -3398,12 +3452,10 @@ details[open]>.accounting-collapsible-head::before {
 
 .accounting-stat-income {
   color: var(--color-green);
-  font-size: var(--font-ui-small);
 }
 
 .accounting-stat-expense {
   color: var(--color-red);
-  font-size: var(--font-ui-small);
 }
 
 /* 区块间距 */
@@ -4157,4 +4209,158 @@ details[open]>.accounting-collapsible-head::before {
 .accounting-diaglog-empty {
   color: var(--text-muted);
   text-align: center;
+}
+
+/* ===== 预估收益视图（reportModal 二级切换 yield 视图；product-accounts 规格）===== */
+
+.accounting-yield-note {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  padding: 2px 2px 8px;
+}
+
+/* 表格容器：表头 + 合并组头 + 明细行同处一个 display:table，跨行/跨组列宽一致、纵向对齐
+   （每行是 table-row、每格是 table-cell；账户列 width:100% 吃满剩余宽度，数字列按内容宽度右对齐） */
+.accounting-yield-table {
+  display: table;
+  width: 100%;
+  table-layout: auto;
+  border-collapse: collapse;
+}
+
+.accounting-yield-head,
+.accounting-yield-group,
+.accounting-yield-item {
+  display: table-row;
+}
+
+.accounting-yield-cell {
+  display: table-cell;
+  padding: 3px 8px;
+  vertical-align: middle;
+}
+
+.accounting-yield-cell-account {
+  text-align: left;
+  width: 100%;
+}
+
+.accounting-yield-cell-principal,
+.accounting-yield-cell-rate,
+.accounting-yield-cell-amount {
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.accounting-yield-cell-rate {
+  color: var(--text-muted);
+}
+
+.accounting-yield-cell-amount {
+  font-weight: 600;
+}
+
+.accounting-yield-cell-amount-income {
+  color: #059669;
+}
+
+.accounting-yield-cell-amount-cost {
+  color: #dc2626;
+}
+
+/* 表头行：小号 muted 标签 + 底分隔线 */
+.accounting-yield-head .accounting-yield-cell {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  padding-top: 2px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+/* 合并账户组头（非可点，区别于明细行）：底色弱化 + 组间分割线，本金合计/加权年化/净年金额各入本列对齐 */
+.accounting-yield-group .accounting-yield-cell {
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--background-modifier-border) 25%, transparent);
+  padding-top: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+/* 明细行：只读密度（小字号/密行距），比组头细 */
+.accounting-yield-item .accounting-yield-cell {
+  font-size: var(--font-ui-smaller);
+  padding-top: 3px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+/* 末行（最后一项）去底分隔线 */
+.accounting-yield-table> :last-child .accounting-yield-cell {
+  border-bottom: none;
+}
+
+/* 「（合并）」标注：组头内嵌弱化（.accounting-yield-name gap 已留距） */
+.accounting-yield-merged {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.accounting-yield-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.accounting-yield-indent {
+  color: var(--text-faint);
+}
+
+.accounting-yield-dir {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill, 999px);
+}
+
+.accounting-yield-dir-income {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+}
+
+.accounting-yield-dir-cost {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+}
+
+.accounting-yield-maturity {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill, 999px);
+}
+
+.accounting-yield-maturity-soon {
+  background: rgba(245, 158, 11, 0.15);
+  color: #b45309;
+}
+
+.accounting-yield-maturity-overdue {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+}
+
+.accounting-yield-sub {
+  margin-top: 1px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* 窄屏兜底：放不下四列时折叠本金列（收益率/预估年金额恒完整），账户列吃满剩余宽度 */
+@media (max-width: 400px) {
+  .accounting-yield-cell-principal {
+    display: none;
+  }
 }
