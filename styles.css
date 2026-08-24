@@ -444,6 +444,8 @@
 .accounting-entry-textarea {
   width: 100%;
   min-height: 48px;
+  /* 自动扩高封顶（entryModal fitNoteTextareaHeight 同口径）：防长备注被软键盘遮住无法选择文本 */
+  max-height: 15vh;
   resize: none;
   overflow-y: auto;
   line-height: 1.5;
@@ -810,6 +812,14 @@
 
 .accounting-group[open]>.accounting-group-head>.accounting-group-head-title::before {
   content: '▾';
+}
+
+/* 分组标题后的 资产/负债/动态 徽标文字：弱化（小于组名一档、常规字重、faint 色），仅作口径提示不抢组名 */
+.accounting-group-head-kind {
+  margin-left: 6px;
+  font-size: var(--font-ui-smaller);
+  font-weight: 400;
+  color: var(--text-faint);
 }
 
 .accounting-row {
@@ -3458,6 +3468,89 @@ details[open]>.accounting-collapsible-head::before {
   color: var(--color-red);
 }
 
+/* 年化率整行宽卡（预估收益视图）：跨满 stat-cards 网格列 */
+.accounting-stat-card-wide {
+  grid-column: 1 / -1;
+}
+
+/* 卡内 收益率/费息率/净收益率 三个带小标签的年化数字 */
+.accounting-yield-rates {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.accounting-yield-rate {
+  min-width: 0;
+}
+
+.accounting-yield-rate-label {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.accounting-yield-rate-value {
+  font-size: var(--font-ui-medium);
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 收益率区间分布图（预估收益视图）：图例方点 + 堆叠柱 + 轴/标签（文字 token，非系列色） */
+.accounting-yield-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.accounting-yield-leg-income,
+.accounting-yield-leg-cost {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.accounting-yield-leg-income::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--color-green);
+}
+
+.accounting-yield-leg-cost::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--color-red);
+}
+
+.accounting-yield-grid {
+  stroke: var(--background-modifier-border);
+  stroke-dasharray: 3 3;
+}
+
+.accounting-yield-axis-label,
+.accounting-yield-bucket-label,
+.accounting-yield-bucket-share {
+  font-size: var(--font-ui-smaller);
+  fill: var(--text-muted);
+}
+
+.accounting-yield-bucket-income {
+  fill: var(--color-green);
+}
+
+.accounting-yield-bucket-cost {
+  fill: var(--color-red);
+}
+
 /* 区块间距 */
 .accounting-section {
   margin-bottom: 14px;
@@ -4350,6 +4443,15 @@ details[open]>.accounting-collapsible-head::before {
 .accounting-yield-maturity-overdue {
   background: rgba(239, 68, 68, 0.12);
   color: #dc2626;
+}
+
+.accounting-yield-risk-level {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill, 999px);
+  background: rgba(100, 116, 139, 0.12);
+  color: var(--text-muted);
+  margin-left: 4px;
 }
 
 .accounting-yield-sub {

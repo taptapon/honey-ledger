@@ -25,6 +25,7 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 
 // ../../packages/core/src/types/account.ts
+var RISK_LEVELS = ["R1", "R2", "R3", "R4", "R5"];
 function kindOfType(type) {
   switch (type) {
     case "credit":
@@ -176,14 +177,20 @@ var ACCOUNT_GROUPING_MODES = [
   "type-group",
   "type",
   "currency",
-  "tag"
+  "tag",
+  "risk"
 ];
 var DEFAULT_ACCOUNT_GROUPING_MODE = "type-group";
 function isAccountGroupingMode(x) {
   return typeof x === "string" && ACCOUNT_GROUPING_MODES.includes(x);
 }
 var UNTAGGED_GROUP_ID = "__untagged__";
+var UNRATED_GROUP_ID = "__unrated__";
 var byNameZh = (a, b) => a.name.localeCompare(b.name, "zh");
+function groupKindOf(types, settings) {
+  if (types.some((t2) => accountKindOf(settings, t2) === "liability")) return "liability";
+  return types.length > 0 && types.every((t2) => t2 === "person") ? "dynamic" : "asset";
+}
 function toGroups(accounts, keyOf, order, makeGroup) {
   const byKey = /* @__PURE__ */ new Map();
   for (const a of accounts) {
@@ -215,7 +222,7 @@ function groupAccounts(mode, accounts, options) {
           return {
             id: key,
             label: { kind: "type-group", id: key, stored: g?.label ?? key },
-            hasLiability: (g?.types ?? []).some((at) => accountKindOf(settings, at.type) === "liability"),
+            kind: groupKindOf((g?.types ?? []).map((at) => at.type), settings),
             items
           };
         }
@@ -231,7 +238,7 @@ function groupAccounts(mode, accounts, options) {
           id: key,
           label: { kind: "type", type: key, stored: labelOf.get(key) ?? key },
           // 单类型组：按该类型配置判定（含停用类型——有历史账户即成组，与停用仅影响新建选择的语义一致）
-          hasLiability: accountKindOf(settings, key) === "liability",
+          kind: groupKindOf([key], settings),
           items
         })
       );
@@ -244,7 +251,7 @@ function groupAccounts(mode, accounts, options) {
       return toGroups(accounts, upper, order, (key, items) => ({
         id: key,
         label: { kind: "raw", text: items[0]?.currency ?? key },
-        hasLiability: items.some((a) => accountKindOf(settings, a.type) === "liability"),
+        kind: groupKindOf(items.map((a) => a.type), settings),
         items
       }));
     }
@@ -259,7 +266,23 @@ function groupAccounts(mode, accounts, options) {
         (key, items) => ({
           id: key,
           label: key === UNTAGGED_GROUP_ID ? { kind: "i18n", key: "accountGrouping.untagged" } : { kind: "raw", text: key },
-          hasLiability: items.some((a) => accountKindOf(settings, a.type) === "liability"),
+          kind: groupKindOf(items.map((a) => a.type), settings),
+          items
+        })
+      );
+    }
+    case "risk": {
+      const riskOrder = ["R1", "R2", "R3", "R4", "R5", UNRATED_GROUP_ID];
+      const hasUnrated = accounts.some((a) => !a.riskLevel);
+      const order = hasUnrated ? riskOrder : riskOrder.slice(0, 5);
+      return toGroups(
+        accounts,
+        (a) => a.riskLevel ?? UNRATED_GROUP_ID,
+        order,
+        (key, items) => ({
+          id: key,
+          label: key === UNRATED_GROUP_ID ? { kind: "i18n", key: "accountGrouping.unrated" } : { kind: "raw", text: key },
+          kind: groupKindOf(items.map((a) => a.type), settings),
           items
         })
       );
@@ -472,8 +495,28 @@ function formatMoneyInt(n, currency = "CNY") {
   const sym = currency === "CNY" ? "\xA5" : `${currency} `;
   return `${sign}${sym}${s}`;
 }
+function formatCompactAmount(n, currency = "CNY", locale = "zh") {
+  const sign = n < 0 ? "-" : "";
+  const abs = Math.abs(n);
+  const r1 = (x) => Math.round(x * 10) / 10;
+  if (currency.toUpperCase() === "CNY" && locale === "zh") {
+    if (abs >= 1e8) return `${sign}${r1(abs / 1e8)}\u4EBF`;
+    if (abs >= 1e4) return abs >= 1e6 ? `${sign}${Math.round(abs / 1e4)}\u4E07` : `${sign}${r1(abs / 1e4)}\u4E07`;
+    return `${sign}${Math.round(abs)}`;
+  }
+  if (abs >= 1e6) return `${sign}${r1(abs / 1e6)}M`;
+  if (abs >= 1e3) return `${sign}${r1(abs / 1e3)}k`;
+  return `${sign}${Math.round(abs)}`;
+}
 function formatAccountDisplayName(account, baseCurrency) {
-  return account.currency.toUpperCase() !== baseCurrency.toUpperCase() ? `${account.name}\uFF08${account.currency}\uFF09` : account.name;
+  const days = [
+    account.billingDay != null ? `\u8D26${account.billingDay}` : void 0,
+    account.repaymentDay != null ? `\u8FD8${account.repaymentDay}` : void 0
+  ].filter(Boolean).join("/");
+  const parts = [];
+  if (days) parts.push(days);
+  if (account.currency.toUpperCase() !== baseCurrency.toUpperCase()) parts.push(account.currency);
+  return parts.length ? `${account.name}\uFF08${parts.join("\xB7")}\uFF09` : account.name;
 }
 
 // ../../packages/core/src/amountCalc.ts
@@ -2816,6 +2859,10 @@ function rateOr(s) {
   if (!Number.isFinite(n) || n < 0 || n > 100) return void 0;
   return n / 100;
 }
+function riskLevelOr(s) {
+  const t2 = s.trim();
+  return RISK_LEVELS.includes(t2) ? t2 : void 0;
+}
 function applyAccountEdits(existing, edits, now) {
   const nextRate = rateOr(edits.expectedRate);
   return {
@@ -2835,7 +2882,8 @@ function applyAccountEdits(existing, edits, now) {
     expectedRate: nextRate,
     // percent 不 round2；值未变保留原设定时间，变化（含清空→重设）以注入 now 刷新
     rateUpdatedAt: nextRate === void 0 ? void 0 : existing.expectedRate === nextRate ? existing.rateUpdatedAt : now,
-    maturityDate: edits.maturityDate?.trim() || void 0
+    maturityDate: edits.maturityDate?.trim() || void 0,
+    riskLevel: riskLevelOr(edits.riskLevel)
   };
 }
 function planMergeAccount(input) {
@@ -2883,6 +2931,103 @@ function canMergeAccount(from, to) {
 }
 
 // ../../packages/core/src/expectedYield.ts
+var RATE_BUCKET_EDGES = [-8, -6, -4, -2, -1, 0, 1, 2, 4, 6, 8];
+function riskLevelBucketStats(items) {
+  const buckets = /* @__PURE__ */ new Map();
+  for (const r of RISK_LEVELS) buckets.set(r, { income: 0, cost: 0 });
+  buckets.set("unset", { income: 0, cost: 0 });
+  let total = 0;
+  for (const i of items) {
+    const key = i.riskLevel ?? "unset";
+    const b = buckets.get(key);
+    if (!b) continue;
+    if (i.direction === "income") b.income += i.principal;
+    else b.cost += i.principal;
+    total += i.principal;
+  }
+  const out = [];
+  for (const r of RISK_LEVELS) {
+    const b = buckets.get(r);
+    const p = round2(b.income + b.cost);
+    if (p === 0 && b.income === 0 && b.cost === 0) continue;
+    out.push({
+      riskLevel: r,
+      label: r,
+      incomePrincipal: round2(b.income),
+      costPrincipal: round2(b.cost),
+      principal: p,
+      share: total > 0 ? p / total : void 0
+    });
+  }
+  const u = buckets.get("unset");
+  const uIncome = round2(u.income);
+  const uCost = round2(u.cost);
+  if (uIncome > 0) {
+    out.push({
+      riskLevel: "unset",
+      label: "\u2014",
+      incomePrincipal: uIncome,
+      costPrincipal: 0,
+      principal: uIncome,
+      share: total > 0 ? uIncome / total : void 0
+    });
+  }
+  if (uCost > 0) {
+    out.push({
+      riskLevel: "unset",
+      label: "\u2014",
+      incomePrincipal: 0,
+      costPrincipal: uCost,
+      principal: uCost,
+      share: total > 0 ? uCost / total : void 0
+    });
+  }
+  return out;
+}
+function rateBucketStats(items) {
+  const m = RATE_BUCKET_EDGES.length;
+  const n = m + 1;
+  const income = new Array(n).fill(0);
+  const cost = new Array(n).fill(0);
+  const has = new Array(n).fill(false);
+  for (const i of items) {
+    if (i.expectedRate == null) continue;
+    const v = i.expectedRate * 100 * (i.direction === "cost" ? -1 : 1);
+    let idx;
+    if (v <= (RATE_BUCKET_EDGES[0] ?? -Infinity)) idx = 0;
+    else if (v > (RATE_BUCKET_EDGES[m - 1] ?? Infinity)) idx = n - 1;
+    else {
+      idx = 1;
+      while (idx < m && !(v > (RATE_BUCKET_EDGES[idx - 1] ?? -Infinity) && v <= (RATE_BUCKET_EDGES[idx] ?? Infinity))) idx++;
+    }
+    has[idx] = true;
+    if (i.direction === "income") income[idx] = (income[idx] ?? 0) + i.principal;
+    else cost[idx] = (cost[idx] ?? 0) + i.principal;
+  }
+  const first = has.indexOf(true);
+  const last = has.lastIndexOf(true);
+  if (first < 0) return [];
+  const total = income.reduce((s, v) => s + v, 0) + cost.reduce((s, v) => s + v, 0);
+  const out = [];
+  for (let idx = first; idx <= last; idx++) {
+    const openNeg = idx === 0;
+    const openPos = idx === n - 1;
+    const lower = openNeg ? void 0 : RATE_BUCKET_EDGES[idx - 1];
+    const upper = openPos ? void 0 : RATE_BUCKET_EDGES[idx];
+    const ip = round2(income[idx] ?? 0);
+    const cp = round2(cost[idx] ?? 0);
+    out.push({
+      lower,
+      upper,
+      label: openNeg ? `<${RATE_BUCKET_EDGES[0]}%` : openPos ? `>${RATE_BUCKET_EDGES[m - 1]}%` : `(${lower},${upper}%]`,
+      incomePrincipal: ip,
+      costPrincipal: cp,
+      principal: round2(ip + cp),
+      share: total > 0 ? ((income[idx] ?? 0) + (cost[idx] ?? 0)) / total : void 0
+    });
+  }
+  return out;
+}
 function expectedYieldReport(transactions, accounts, opts) {
   const native = computeBalances(transactions, accounts);
   const balances = opts?.base ? convertBalancesToBase(native, accounts, opts.rates ?? {}, opts.base, opts.logger) : native;
@@ -2923,6 +3068,7 @@ function expectedYieldReport(transactions, accounts, opts) {
       expectedRate: a.expectedRate,
       annualAmount: a.expectedRate == null ? void 0 : round2(principal * a.expectedRate),
       maturityDate: a.maturityDate,
+      riskLevel: a.riskLevel,
       currency: a.currency
     });
   }
@@ -2982,13 +3128,17 @@ function expectedYieldReport(transactions, accounts, opts) {
       costPrincipal += i.principal;
     }
   }
+  const netRateDenom = incomePrincipal + costPrincipal;
   return {
     groups,
     totalIncome: round2(totalIncome),
     totalCost: round2(totalCost),
     netExpected: round2(totalIncome - totalCost),
     weightedIncomeRate: incomePrincipal > 0 ? totalIncome / incomePrincipal : void 0,
-    weightedCostRate: costPrincipal > 0 ? totalCost / costPrincipal : void 0
+    weightedCostRate: costPrincipal > 0 ? totalCost / costPrincipal : void 0,
+    weightedNetRate: netRateDenom > 0 ? (totalIncome - totalCost) / netRateDenom : void 0,
+    rateBuckets: rateBucketStats(ordered),
+    riskLevelBuckets: riskLevelBucketStats(ordered)
   };
 }
 
@@ -3614,6 +3764,8 @@ var zh = {
   "account.field.parentAccount": "\u7236\u8D26\u6237",
   "account.field.expectedRate": "\u9884\u4F30\u5E74\u5316 (%)",
   "account.field.maturityDate": "\u5230\u671F\u65E5",
+  "account.field.riskLevel": "\u98CE\u9669\u7B49\u7EA7",
+  "account.riskLevelNone": "\u65E0",
   "account.parentNoneOption": "\u65E0",
   "account.expectedRatePlaceholder": "\u5982 2.5 = 2.5%",
   "account.rateHint": "\u8D44\u4EA7=\u6536\u76CA\u7387\uFF0C\u8D1F\u503A=\u8D39\u7387",
@@ -3668,6 +3820,7 @@ var zh = {
   "balance.hiddenSummary": "\u9690\u85CF\u8D26\u6237\uFF08\u4ECD\u8BA1\u5165\u51C0\u8D44\u4EA7\uFF09",
   "balance.kindAsset": "\u8D44\u4EA7",
   "balance.kindLiability": "\u8D1F\u503A",
+  "balance.kindDynamic": "\u52A8\u6001",
   "balance.accountOptionsHint": "\u67E5\u770B\u8D26\u6237\u9009\u9879",
   "balance.adjustHint": "\u70B9\u51FB\u8C03\u6574\u4F59\u989D",
   "balance.searchPlaceholder": "\u641C\u7D22\u8D26\u6237\u540D\u79F0",
@@ -3687,7 +3840,9 @@ var zh = {
   "accountGrouping.mode.type": "\u6309\u7C7B\u578B",
   "accountGrouping.mode.currency": "\u6309\u5E01\u79CD",
   "accountGrouping.mode.tag": "\u6309\u6807\u7B7E",
+  "accountGrouping.mode.risk": "\u6309\u98CE\u9669\u7B49\u7EA7",
   "accountGrouping.untagged": "\u65E0\u6807\u7B7E",
+  "accountGrouping.unrated": "\u672A\u5206\u7EA7",
   // KR6/task1: helpDisclosure + createLedgerForm
   "help.ariaLabel": "\u67E5\u770B\u8BF4\u660E",
   "ledger.create.title": "\u65B0\u5EFA\u8D26\u672C",
@@ -3709,12 +3864,15 @@ var zh = {
   "report.expectedYield.totalIncome": "\u9884\u4F30\u5E74\u6536\u76CA",
   "report.expectedYield.totalCost": "\u9884\u4F30\u5E74\u8D39\u606F",
   "report.expectedYield.netExpected": "\u51C0\u9884\u4F30",
-  "report.expectedYield.weighted": "\u52A0\u6743\u5E74\u5316(\u6536\u76CA/\u8D39\u606F)",
-  "report.expectedYield.income": "\u6536\u76CA",
-  "report.expectedYield.cost": "\u8D39\u606F",
+  "report.expectedYield.income": "\u6536\u76CA\u7387",
+  "report.expectedYield.cost": "\u8D39\u606F\u7387",
+  "report.expectedYield.net": "\u51C0\u6536\u76CA\u7387",
+  "report.expectedYield.rateDist": "\u6536\u76CA\u7387\u533A\u95F4\u5206\u5E03\uFF08\u91D1\u989D \xB7 \u5360\u6BD4\uFF09",
+  "report.expectedYield.riskDist": "\u98CE\u9669\u7B49\u7EA7\u5206\u5E03\uFF08\u91D1\u989D \xB7 \u5360\u6BD4\uFF09",
   "report.expectedYield.dueSoon": "\u5373\u5C06\u5230\u671F",
   "report.expectedYield.overdue": "\u5DF2\u5230\u671F",
   "report.expectedYield.mergedTag": "\uFF08\u5408\u5E76\uFF09",
+  "report.expectedYield.riskLevel": "\u98CE\u9669\u7B49\u7EA7",
   "report.expectedYield.empty": "\u6682\u65E0\u9884\u4F30\u6570\u636E\u2014\u2014\u5728\u8D26\u6237\u5C5E\u6027\u4E2D\u8BBE\u7F6E\u9884\u4F30\u5E74\u5316\u6216\u5230\u671F\u65E5\u540E\u663E\u793A",
   "report.expectedYield.sortLabel": "\u6392\u5E8F",
   "report.expectedYield.sortAmount": "\u6536\u76CA\u91D1\u989D \u9AD8\u2192\u4F4E",
@@ -4025,6 +4183,7 @@ var zh = {
   "settings.accountTypes.accountCountTip": "\u542F\u7528 {{active}} \u4E2A / \u5171 {{total}} \u4E2A\u8D26\u6237",
   "accountKind.asset": "\u8D44\u4EA7",
   "accountKind.liability": "\u8D1F\u503A",
+  "accountKind.dynamic": "\u52A8\u6001",
   // err.* — core AppError 错误码（两端 catch 处 formatError → t(code) 翻译；code 见 packages/core/src/errors.ts）
   "err.category.notFound": "\u5206\u7C7B\u4E0D\u5B58\u5728",
   "err.category.nameEmpty": "\u5206\u7C7B\u540D\u4E0D\u80FD\u4E3A\u7A7A",
@@ -4358,6 +4517,8 @@ var en = {
   "account.field.parentAccount": "Parent account",
   "account.field.expectedRate": "Expected APR (%)",
   "account.field.maturityDate": "Maturity date",
+  "account.field.riskLevel": "Risk level",
+  "account.riskLevelNone": "None",
   "account.parentNoneOption": "None",
   "account.expectedRatePlaceholder": "e.g. 2.5 = 2.5%",
   "account.rateHint": "Asset = yield, liability = rate",
@@ -4412,6 +4573,7 @@ var en = {
   "balance.hiddenSummary": "Hidden accounts (still counted in net worth)",
   "balance.kindAsset": "Assets",
   "balance.kindLiability": "Liabilities",
+  "balance.kindDynamic": "Dynamic",
   "balance.accountOptionsHint": "View account options",
   "balance.adjustHint": "Tap to adjust balance",
   "balance.searchPlaceholder": "Search account name",
@@ -4431,7 +4593,9 @@ var en = {
   "accountGrouping.mode.type": "Type",
   "accountGrouping.mode.currency": "Currency",
   "accountGrouping.mode.tag": "Tag",
+  "accountGrouping.mode.risk": "Risk level",
   "accountGrouping.untagged": "Untagged",
+  "accountGrouping.unrated": "Unrated",
   // KR6/task1: helpDisclosure + createLedgerForm
   "help.ariaLabel": "View explanation",
   "ledger.create.title": "New ledger",
@@ -4453,12 +4617,15 @@ var en = {
   "report.expectedYield.totalIncome": "Expected annual income",
   "report.expectedYield.totalCost": "Expected annual cost",
   "report.expectedYield.netExpected": "Net expected",
-  "report.expectedYield.weighted": "Weighted (yield/cost)",
-  "report.expectedYield.income": "Income",
-  "report.expectedYield.cost": "Cost",
+  "report.expectedYield.income": "Income rate",
+  "report.expectedYield.cost": "Cost rate",
+  "report.expectedYield.net": "Net rate",
+  "report.expectedYield.rateDist": "Rate distribution (amount \xB7 share)",
+  "report.expectedYield.riskDist": "Risk level distribution (amount \xB7 share)",
   "report.expectedYield.dueSoon": "Due soon",
   "report.expectedYield.overdue": "Overdue",
   "report.expectedYield.mergedTag": " (merged)",
+  "report.expectedYield.riskLevel": "Risk level",
   "report.expectedYield.empty": "No estimates yet \u2014 set an expected APR or maturity date in account properties",
   "report.expectedYield.sortLabel": "Sort",
   "report.expectedYield.sortAmount": "Annual amount high\u2192low",
@@ -4769,6 +4936,7 @@ var en = {
   "settings.accountTypes.accountCountTip": "{{active}} active / {{total}} total accounts",
   "accountKind.asset": "Asset",
   "accountKind.liability": "Liability",
+  "accountKind.dynamic": "Dynamic",
   // err.* — core AppError error codes (both ends' formatError → t(code); codes in packages/core/src/errors.ts)
   "err.category.notFound": "Category not found",
   "err.category.nameEmpty": "Category name cannot be empty",
@@ -6057,6 +6225,7 @@ var AccountPropertiesModal = class extends import_obsidian5.Modal {
   parentEl;
   rateEl;
   maturityEl;
+  riskLevelEl;
   creditBlockEl;
   footerEl;
   editing = false;
@@ -6107,6 +6276,12 @@ var AccountPropertiesModal = class extends import_obsidian5.Modal {
     this.rateEl.title = t("account.rateHint");
     const matRow = this.row(t("account.field.maturityDate"));
     this.maturityEl = this.input(matRow, "date");
+    const riskRow = this.row(t("account.field.riskLevel"));
+    this.riskLevelEl = riskRow.createEl("select", { cls: "accounting-adjust-input" });
+    this.riskLevelEl.createEl("option", { text: t("account.riskLevelNone"), value: "" });
+    for (const r of RISK_LEVELS) {
+      this.riskLevelEl.createEl("option", { text: r, value: r });
+    }
     this.creditBlockEl = contentEl.createDiv({ cls: "accounting-credit-block" });
     const clRow = this.row(t("account.field.creditLimit"), this.creditBlockEl);
     this.creditLimitEl = this.input(clRow, "number", "0.01");
@@ -6193,6 +6368,7 @@ var AccountPropertiesModal = class extends import_obsidian5.Modal {
     }
     this.rateEl.value = a.expectedRate != null ? String(Math.round(a.expectedRate * 100 * 1e6) / 1e6) : "";
     this.maturityEl.value = a.maturityDate ?? "";
+    this.riskLevelEl.value = a.riskLevel ?? "";
     this.toggleCredit();
   }
   /** 切换查看/编辑态：禁用或启用所有字段（币种除外——创建后不可变更，始终只读）；标签 chips 仅编辑态显示 */
@@ -6209,7 +6385,8 @@ var AccountPropertiesModal = class extends import_obsidian5.Modal {
       this.repaymentEl,
       this.parentEl,
       this.rateEl,
-      this.maturityEl
+      this.maturityEl,
+      this.riskLevelEl
     ];
     for (const el of els) el.disabled = !editable;
     this.currencyEl.disabled = true;
@@ -6262,7 +6439,8 @@ var AccountPropertiesModal = class extends import_obsidian5.Modal {
       repaymentDay: this.repaymentEl.value,
       parentAccountId: this.parentEl.value,
       expectedRate: this.rateEl.value,
-      maturityDate: this.maturityEl.value
+      maturityDate: this.maturityEl.value,
+      riskLevel: this.riskLevelEl.value
     };
     const updated = applyAccountEdits(this.account, edits, nowISO());
     try {
@@ -6496,6 +6674,7 @@ var AccountCreateModal = class extends import_obsidian8.Modal {
   parentEl;
   rateEl;
   maturityEl;
+  riskLevelEl;
   creditBlockEl;
   footerEl;
   rates = {};
@@ -6543,6 +6722,12 @@ var AccountCreateModal = class extends import_obsidian8.Modal {
     this.rateEl.title = t("account.rateHint");
     const matRow = this.row(t("account.field.maturityDate"));
     this.maturityEl = this.input(matRow, "date");
+    const riskRow = this.row(t("account.field.riskLevel"));
+    this.riskLevelEl = riskRow.createEl("select", { cls: "accounting-adjust-input" });
+    this.riskLevelEl.createEl("option", { text: t("account.riskLevelNone"), value: "" });
+    for (const r of RISK_LEVELS) {
+      this.riskLevelEl.createEl("option", { text: r, value: r });
+    }
     this.creditBlockEl = contentEl.createDiv({ cls: "accounting-credit-block" });
     const clRow = this.row(t("account.field.creditLimit"), this.creditBlockEl);
     this.creditLimitEl = this.input(clRow, "number", "0.01");
@@ -6676,6 +6861,7 @@ var AccountCreateModal = class extends import_obsidian8.Modal {
       parentAccountId: this.parentEl.value || void 0,
       expectedRate: rateRaw && Number.isFinite(rateNum) ? rateNum / 100 : void 0,
       maturityDate: this.maturityEl.value || void 0,
+      riskLevel: RISK_LEVELS.includes(this.riskLevelEl.value) ? this.riskLevelEl.value : void 0,
       active: true,
       createdAt: now,
       updatedAt: now
@@ -7256,7 +7442,8 @@ var BalanceModal = class extends import_obsidian11.Modal {
       ["type-group", "accountGrouping.mode.typeGroup"],
       ["type", "accountGrouping.mode.type"],
       ["currency", "accountGrouping.mode.currency"],
-      ["tag", "accountGrouping.mode.tag"]
+      ["tag", "accountGrouping.mode.tag"],
+      ["risk", "accountGrouping.mode.risk"]
     ]) {
       const o = groupSel.createEl("option", { text: t(key), value });
       if (value === accountGroupingMode()) o.selected = true;
@@ -7297,14 +7484,22 @@ var BalanceModal = class extends import_obsidian11.Modal {
     const kindBadgeMode = mode === "type-group" || mode === "type";
     const groups = groupAccountsOf(mode, accounts, this.accountTypeSettings, this.baseCurrency);
     const parentIds = new Set(snap.accounts.filter((a) => a.parentAccountId).map((a) => a.parentAccountId));
-    for (const g of groups) {
+    const totals = groups.map((g) => g.items.reduce((s, a) => s + (baseBalances.get(a.id) ?? 0), 0));
+    const absTotal = totals.reduce((s, v) => s + Math.abs(v), 0);
+    for (const [gi, g] of groups.entries()) {
       const group = parent.createEl("details", { cls: "accounting-group" });
       const head = group.createEl("summary", { cls: "accounting-group-head" });
-      const groupTotal = g.items.reduce((s, a) => s + (baseBalances.get(a.id) ?? 0), 0);
+      const groupTotal = totals[gi] ?? 0;
       if (expandAll) group.open = true;
-      const title = kindBadgeMode ? `${displayAccountGroupLabel(g)} \xB7 ${g.hasLiability ? t("balance.kindLiability") : t("balance.kindAsset")}` : displayAccountGroupLabel(g);
-      head.createEl("span", { text: title, cls: "accounting-group-head-title" });
-      head.createEl("span", { text: formatMoney(groupTotal, this.baseCurrency) });
+      const title = head.createEl("span", { text: displayAccountGroupLabel(g), cls: "accounting-group-head-title" });
+      if (kindBadgeMode) {
+        title.createSpan({
+          text: t(g.kind === "liability" ? "balance.kindLiability" : g.kind === "dynamic" ? "balance.kindDynamic" : "balance.kindAsset"),
+          cls: "accounting-group-head-kind"
+        });
+      }
+      const totalEl = head.createEl("span", { text: formatMoney(groupTotal, this.baseCurrency) });
+      if (absTotal > 0) totalEl.createSpan({ text: ` (${(groupTotal / absTotal * 100).toFixed(1)}%)`, cls: "accounting-muted" });
       for (const a of g.items) {
         const row = group.createDiv({ cls: "accounting-row" });
         const name = row.createEl("span", { cls: "accounting-row-name" });
@@ -7562,6 +7757,11 @@ function flashAmountError(el) {
       el.classList.remove("accounting-amount-error");
     }
   }, 160);
+}
+function fitNoteTextareaHeight(ta) {
+  const cap = Math.round(window.innerHeight * 0.15);
+  ta.style.height = "auto";
+  ta.style.height = `${Math.min(ta.scrollHeight, cap)}px`;
 }
 var EntryModal = class extends import_obsidian13.Modal {
   constructor(app, adapter, accounts, categories, onSubmitted, initialTx, isCopy = true, navCtx, slide, onSwitchLedger, recurring, onRecurringSaved, onOpened) {
@@ -8006,8 +8206,7 @@ var EntryModal = class extends import_obsidian13.Modal {
     noteTextarea.rows = 2;
     noteTextarea.addEventListener("input", (ev) => {
       s.note = noteTextarea.value;
-      noteTextarea.style.height = "auto";
-      noteTextarea.style.height = `${noteTextarea.scrollHeight}px`;
+      fitNoteTextareaHeight(noteTextarea);
       if (s.amount.trim() === "") {
         const ex = extractAmountFromNote(s.note);
         if (ex) {
@@ -8037,10 +8236,7 @@ var EntryModal = class extends import_obsidian13.Modal {
       }
       this.updateFromNoteHint();
     });
-    setTimeout(() => {
-      noteTextarea.style.height = "auto";
-      noteTextarea.style.height = `${noteTextarea.scrollHeight}px`;
-    }, 0);
+    setTimeout(() => fitNoteTextareaHeight(noteTextarea), 0);
     {
       const timeRow = wrap.createDiv({ cls: "accounting-entry-row" });
       timeRow.createEl("label", { text: this.repeatOn ? t("entry.startDate") : t("entry.time"), cls: "accounting-entry-label" });
@@ -8579,17 +8775,7 @@ var YIELD_SORT_OPTIONS = [
 ];
 var TOP_N = 5;
 function formatAxisAmount(n, currency) {
-  const sign = n < 0 ? "-" : "";
-  const abs = Math.abs(n);
-  const r1 = (x) => Math.round(x * 10) / 10;
-  if (currency === "CNY" && getLocale() === "zh") {
-    if (abs >= 1e8) return `${sign}${r1(abs / 1e8)}\u4EBF`;
-    if (abs >= 1e4) return abs >= 1e6 ? `${sign}${Math.round(abs / 1e4)}\u4E07` : `${sign}${r1(abs / 1e4)}\u4E07`;
-    return `${sign}${Math.round(abs)}`;
-  }
-  if (abs >= 1e6) return `${sign}${r1(abs / 1e6)}M`;
-  if (abs >= 1e3) return `${sign}${r1(abs / 1e3)}k`;
-  return `${sign}${Math.round(abs)}`;
+  return formatCompactAmount(n, currency, getLocale());
 }
 var ReportModal = class extends import_obsidian14.Modal {
   constructor(app, adapter, navCtx, slide, onSwitchLedger, onOpened) {
@@ -8775,7 +8961,20 @@ var ReportModal = class extends import_obsidian14.Modal {
       formatMoney(report.netExpected, this.baseCurrency),
       report.netExpected < 0 ? "accounting-stat-expense" : "accounting-stat-income"
     );
-    this.statCard(cards, t("report.expectedYield.weighted"), `${pct(report.weightedIncomeRate)} / ${pct(report.weightedCostRate)}`, "");
+    const weighted = cards.createDiv({ cls: "accounting-stat-card accounting-stat-card-wide" });
+    const rates = weighted.createDiv({ cls: "accounting-yield-rates" });
+    const rateCell = (label, rate, valueCls) => {
+      const cell = rates.createDiv({ cls: "accounting-yield-rate" });
+      cell.createEl("div", { text: label, cls: "accounting-yield-rate-label" });
+      cell.createEl("div", { text: pct(rate), cls: `accounting-yield-rate-value ${valueCls}` });
+    };
+    rateCell(t("report.expectedYield.income"), report.weightedIncomeRate, "accounting-stat-income");
+    rateCell(t("report.expectedYield.cost"), report.weightedCostRate, "accounting-stat-expense");
+    rateCell(
+      t("report.expectedYield.net"),
+      report.weightedNetRate,
+      report.weightedNetRate != null && report.weightedNetRate < 0 ? "accounting-stat-expense" : "accounting-stat-income"
+    );
     const sortOpt = YIELD_SORT_OPTIONS.find((o) => o.key === this.yieldSortKey);
     const sortKey = sortOpt?.key ?? "amount";
     const dir = sortOpt?.dir ?? -1;
@@ -8787,6 +8986,10 @@ var ReportModal = class extends import_obsidian14.Modal {
     });
     const now = /* @__PURE__ */ new Date();
     const todayMs = Date.parse(localDateStartISO(now.getFullYear(), now.getMonth() + 1, now.getDate()));
+    const activeBuckets = report.rateBuckets.filter((b) => b.incomePrincipal > 0 || b.costPrincipal > 0);
+    if (activeBuckets.length > 0) this.renderYieldRateDist(container, activeBuckets);
+    const activeRiskBuckets = report.riskLevelBuckets.filter((b) => b.incomePrincipal > 0 || b.costPrincipal > 0);
+    if (activeRiskBuckets.length > 0) this.renderYieldRiskLevelDist(container, activeRiskBuckets);
     const dirBadge = (dir2) => {
       const s = document.createElement("span");
       s.className = `accounting-yield-dir accounting-yield-dir-${dir2}`;
@@ -8842,6 +9045,117 @@ var ReportModal = class extends import_obsidian14.Modal {
       }
     }
   }
+  /**
+   * 收益率区间分布（core `rateBuckets` 单一真源，与桌面 Reports 预估视图同数据）：section 头
+   * （标题 + 收益/费率方点图例）+ SVG 发散柱图（横轴带符号年化区间，左开右闭，费率负半轴；
+   * 收益绿柱向上、费率红柱向下）。金额与占比**直接标在柱端**（紧凑金额 + 占比两行），
+   * 无点击展开。无利率条目时整个 section 不渲染（上游已判空）。
+   */
+  renderYieldRateDist(container, buckets) {
+    const section = container.createDiv({ cls: "accounting-section" });
+    const head = section.createDiv({ cls: "accounting-group-head" });
+    head.createEl("span", { text: t("report.expectedYield.rateDist") });
+    const legend = head.createEl("span", { cls: "accounting-yield-legend" });
+    legend.createSpan({ text: t("report.expectedYield.income"), cls: "accounting-yield-leg-income" });
+    legend.createSpan({ text: t("report.expectedYield.cost"), cls: "accounting-yield-leg-cost" });
+    this.renderYieldBucketSvg(section, buckets, container.clientWidth);
+  }
+  /** 风险等级分布（R1–R5 + 未设）：全部条目（含未设利率）均参与；按 R1→R5→unset 排序。
+   *  收益绿柱向上、费率红柱向下，柱端标金额与占比，同收益率分布图风格。 */
+  renderYieldRiskLevelDist(container, buckets) {
+    const section = container.createDiv({ cls: "accounting-section" });
+    const head = section.createDiv({ cls: "accounting-group-head" });
+    head.createEl("span", { text: t("report.expectedYield.riskDist") });
+    const legend = head.createEl("span", { cls: "accounting-yield-legend" });
+    legend.createSpan({ text: t("report.expectedYield.income"), cls: "accounting-yield-leg-income" });
+    legend.createSpan({ text: t("report.expectedYield.cost"), cls: "accounting-yield-leg-cost" });
+    this.renderYieldBucketSvg(section, buckets, container.clientWidth);
+  }
+  /** SVG 绘制收益率区间发散柱图（零基线居中）：收益绿柱自基线向上、费率红柱向下（负值语义），
+   *  横轴为带符号年化区间（左开右闭，费率负半轴）。金额与占比**直接标在柱端**（两行：紧凑金额 +
+   *  占比，费率金额为负）；柱下标区间标签；顶部/底部虚线网格线标 ±最大金额。柱体按区域高
+   *  留出标签空间缩放（最高柱不满格，标签永不越界）。 */
+  renderYieldBucketSvg(parent, buckets, availWidth) {
+    const NS = "http://www.w3.org/2000/svg";
+    const padL = 4;
+    const padR = 4;
+    const n = buckets.length;
+    const colW = Math.max((availWidth - padL - padR) / n, 34);
+    const W = padL + padR + n * colW;
+    const padT = 26;
+    const posH = 100;
+    const negH = 100;
+    const lblH = 30;
+    const baselineY = padT + posH;
+    const H = baselineY + negH + 34;
+    const maxInc = Math.max(1, ...buckets.map((b) => b.incomePrincipal));
+    const maxCost = Math.max(1, ...buckets.map((b) => b.costPrincipal));
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("xmlns", NS);
+    svg.setAttribute("width", String(W));
+    svg.setAttribute("height", String(H));
+    svg.classList.add("accounting-trend-svg");
+    const el = (tag) => document.createElementNS(NS, tag);
+    const text = (x, y, content, cls, anchor = "middle") => {
+      const node = el("text");
+      node.setAttribute("x", String(x));
+      node.setAttribute("y", String(y));
+      node.setAttribute("text-anchor", anchor);
+      node.setAttribute("class", cls);
+      node.textContent = content;
+      svg.appendChild(node);
+    };
+    const axis = el("line");
+    axis.setAttribute("x1", String(padL));
+    axis.setAttribute("x2", String(W));
+    axis.setAttribute("y1", String(baselineY));
+    axis.setAttribute("y2", String(baselineY));
+    axis.setAttribute("class", "accounting-trend-axis");
+    svg.appendChild(axis);
+    const gridLine = (y, label) => {
+      const line = el("line");
+      line.setAttribute("x1", String(padL));
+      line.setAttribute("x2", String(W));
+      line.setAttribute("y1", String(y));
+      line.setAttribute("y2", String(y));
+      line.setAttribute("class", "accounting-yield-grid");
+      svg.appendChild(line);
+      text(W - padR, y < baselineY ? y - 4 : y + 10, label, "accounting-yield-axis-label", "end");
+    };
+    gridLine(padT, formatAxisAmount(maxInc, this.baseCurrency));
+    gridLine(baselineY + negH, formatAxisAmount(-maxCost, this.baseCurrency));
+    const barW = Math.min(colW * 0.55, 36);
+    buckets.forEach((b, i) => {
+      const cx = padL + i * colW + colW / 2;
+      const hI = b.incomePrincipal / maxInc * (posH - lblH);
+      const hC = b.costPrincipal / maxCost * (negH - lblH);
+      if (hI > 0) {
+        const r = el("rect");
+        r.setAttribute("x", String(cx - barW / 2));
+        r.setAttribute("y", String(baselineY - hI));
+        r.setAttribute("width", String(barW));
+        r.setAttribute("height", String(hI));
+        r.setAttribute("class", "accounting-yield-bucket-income");
+        svg.appendChild(r);
+        text(cx, baselineY - hI - 15, formatAxisAmount(b.incomePrincipal, this.baseCurrency), "accounting-yield-bucket-share");
+        text(cx, baselineY - hI - 4, b.share == null ? "" : `${(b.share * 100).toFixed(1)}%`, "accounting-yield-bucket-share");
+      }
+      if (hC > 0) {
+        const r = el("rect");
+        r.setAttribute("x", String(cx - barW / 2));
+        r.setAttribute("y", String(baselineY));
+        r.setAttribute("width", String(barW));
+        r.setAttribute("height", String(hC));
+        r.setAttribute("class", "accounting-yield-bucket-cost");
+        svg.appendChild(r);
+        text(cx, baselineY + hC + 12, formatAxisAmount(-b.costPrincipal, this.baseCurrency), "accounting-yield-bucket-share");
+        text(cx, baselineY + hC + 24, b.share == null ? "" : `${(b.share * 100).toFixed(1)}%`, "accounting-yield-bucket-share");
+      }
+      text(cx, H - 6, b.label, "accounting-yield-bucket-label");
+    });
+    const wrap = parent.createDiv({ cls: "accounting-trend-chart-wrap" });
+    wrap.appendChild(svg);
+  }
   /** 预估收益排序栏：复用流水页排序栏样式（弱化、去边框），文字按钮 + ▾ 弹档位菜单；只读页无其他入口。 */
   renderYieldSortBar(container) {
     const bar = container.createDiv({ cls: "accounting-sort-bar" });
@@ -8896,6 +9210,9 @@ var ReportModal = class extends import_obsidian14.Modal {
     const nameRow = nameCell.createDiv({ cls: "accounting-yield-name" });
     nameRow.createSpan({ text: icon === "main" ? "\u25C6 " : "\u21B3 ", cls: "accounting-yield-indent" });
     nameRow.createSpan({ text: item.name });
+    if (item.riskLevel) {
+      nameRow.createSpan({ text: item.riskLevel, cls: "accounting-yield-risk-level" });
+    }
     nameRow.createSpan({
       text: item.direction === "income" ? t("report.expectedYield.income") : t("report.expectedYield.cost"),
       cls: `accounting-yield-dir accounting-yield-dir-${item.direction}`
@@ -11265,6 +11582,7 @@ var OnboardingModal = class extends import_obsidian19.Modal {
 var import_obsidian20 = require("obsidian");
 var FEEDBACK_EMAIL = "honeyledger@163.com";
 function kindOfLabel(type) {
+  if (type === "person") return t("accountKind.dynamic");
   return type === "credit" || type === "loan" ? t("accountKind.liability") : t("accountKind.asset");
 }
 var AccountingSettings = class {
