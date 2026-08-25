@@ -1636,7 +1636,7 @@ function buildMonthGroups(sorted, opts) {
     if (!ym) continue;
     let g = map.get(ym);
     if (!g) {
-      g = { ym, txs: [], income: 0, expense: 0 };
+      g = { ym, txs: [], income: 0, expense: 0, net: 0 };
       map.set(ym, g);
       order.push(ym);
     }
@@ -1653,8 +1653,8 @@ function buildMonthGroups(sorted, opts) {
   }
   return order.map((ym) => {
     const g = map.get(ym);
-    if (!g) return { ym, txs: [], income: 0, expense: 0 };
-    const res = { ...g, income: round2(g.income), expense: round2(g.expense) };
+    if (!g) return { ym, txs: [], income: 0, expense: 0, net: 0 };
+    const res = { ...g, income: round2(g.income), expense: round2(g.expense), net: round2(g.income - g.expense) };
     if (balanceByTxId) {
       const endTx = sort === "time-desc" ? g.txs[0] : g.txs[g.txs.length - 1];
       if (endTx) {
@@ -2886,6 +2886,11 @@ function applyAccountEdits(existing, edits, now) {
     riskLevel: riskLevelOr(edits.riskLevel)
   };
 }
+function accountNameExists(accounts, name, excludeId) {
+  const n = name.trim();
+  if (!n) return false;
+  return accounts.some((a) => a.id !== excludeId && a.name.trim() === n);
+}
 function planMergeAccount(input) {
   const { events, accounts, fromId, toId, now } = input;
   if (fromId === toId) return { events: [], accounts: [...accounts], rewritten: 0, deleted: 0 };
@@ -2946,6 +2951,29 @@ function riskLevelBucketStats(items) {
     total += i.principal;
   }
   const out = [];
+  const u = buckets.get("unset");
+  const uIncome = round2(u.income);
+  const uCost = round2(u.cost);
+  if (uCost > 0) {
+    out.push({
+      riskLevel: "unset",
+      label: "\u2014",
+      incomePrincipal: 0,
+      costPrincipal: uCost,
+      principal: uCost,
+      share: total > 0 ? uCost / total : void 0
+    });
+  }
+  if (uIncome > 0) {
+    out.push({
+      riskLevel: "unset",
+      label: "\u2014",
+      incomePrincipal: uIncome,
+      costPrincipal: 0,
+      principal: uIncome,
+      share: total > 0 ? uIncome / total : void 0
+    });
+  }
   for (const r of RISK_LEVELS) {
     const b = buckets.get(r);
     const p = round2(b.income + b.cost);
@@ -2957,29 +2985,6 @@ function riskLevelBucketStats(items) {
       costPrincipal: round2(b.cost),
       principal: p,
       share: total > 0 ? p / total : void 0
-    });
-  }
-  const u = buckets.get("unset");
-  const uIncome = round2(u.income);
-  const uCost = round2(u.cost);
-  if (uIncome > 0) {
-    out.push({
-      riskLevel: "unset",
-      label: "\u2014",
-      incomePrincipal: uIncome,
-      costPrincipal: 0,
-      principal: uIncome,
-      share: total > 0 ? uIncome / total : void 0
-    });
-  }
-  if (uCost > 0) {
-    out.push({
-      riskLevel: "unset",
-      label: "\u2014",
-      incomePrincipal: 0,
-      costPrincipal: uCost,
-      principal: uCost,
-      share: total > 0 ? uCost / total : void 0
     });
   }
   return out;
@@ -3646,6 +3651,7 @@ var zh = {
   "txList.loadMore": "\u52A0\u8F7D\u66F4\u591A\u2026",
   "txList.monthIncome": "\u6536",
   "txList.monthExpense": "\u652F",
+  "txList.monthNet": "\u51C0",
   "txList.monthIn": "\u8FDB",
   "txList.monthOut": "\u51FA",
   "txList.monthBalanceTitle": "{{account}} \u6708\u672B\u7D2F\u8BA1\u4F59\u989D",
@@ -3770,6 +3776,7 @@ var zh = {
   "account.expectedRatePlaceholder": "\u5982 2.5 = 2.5%",
   "account.rateHint": "\u8D44\u4EA7=\u6536\u76CA\u7387\uFF0C\u8D1F\u503A=\u8D39\u7387",
   "account.err.rateRange": "\u9884\u4F30\u5E74\u5316\u987B\u5728 0\u2013100 \u4E4B\u95F4",
+  "account.err.nameExists": "\u8BE5\u8D26\u6237\u540D\u5DF2\u5B58\u5728\uFF0C\u5982\u9700\u5408\u5E76\u8BF7\u4F7F\u7528\u5408\u5E76\u529F\u80FD",
   "account.createdNotif": "\u5DF2\u521B\u5EFA\u8D26\u6237\u300C{{name}}\u300D",
   "account.createFailed": "\u521B\u5EFA\u8D26\u6237\u5931\u8D25\uFF1A{{msg}}",
   // KR5/task3: accountPropertiesModal
@@ -4399,6 +4406,7 @@ var en = {
   "txList.loadMore": "Load more\u2026",
   "txList.monthIncome": "In",
   "txList.monthExpense": "Ex",
+  "txList.monthNet": "Net",
   "txList.monthIn": "In",
   "txList.monthOut": "Out",
   "txList.monthBalanceTitle": "{{account}} month-end balance",
@@ -4523,6 +4531,7 @@ var en = {
   "account.expectedRatePlaceholder": "e.g. 2.5 = 2.5%",
   "account.rateHint": "Asset = yield, liability = rate",
   "account.err.rateRange": "Expected APR must be between 0 and 100",
+  "account.err.nameExists": "This account name already exists. Use merge to combine instead.",
   "account.createdNotif": 'Created account "{{name}}"',
   "account.createFailed": "Create account failed: {{msg}}",
   // KR5/task3: accountPropertiesModal
@@ -6427,6 +6436,11 @@ var AccountPropertiesModal = class extends import_obsidian5.Modal {
       new import_obsidian5.Notice(t("account.err.rateRange"));
       return;
     }
+    const effectiveName = this.nameEl.value.trim() || this.account.name;
+    if (accountNameExists(this.accounts, effectiveName, this.account.id)) {
+      new import_obsidian5.Notice(t("account.err.nameExists"));
+      return;
+    }
     const edits = {
       name: this.nameEl.value,
       type: this.typeEl.value,
@@ -6823,6 +6837,10 @@ var AccountCreateModal = class extends import_obsidian8.Modal {
   }
   async submit() {
     const name = this.nameEl.value.trim();
+    if (accountNameExists(this.accounts, name)) {
+      new import_obsidian8.Notice(t("account.err.nameExists"));
+      return;
+    }
     const type = this.typeEl.value;
     const openingBalance = this.openingEl.value;
     const currency = this.currencyEl.value || "CNY";
@@ -8416,6 +8434,10 @@ var EntryModal = class extends import_obsidian13.Modal {
       addBtn.onclick = async () => {
         const name = nameInput.value.trim();
         if (!name) return;
+        if (accountNameExists(this.accounts, name)) {
+          this.showError(t("account.err.nameExists"));
+          return;
+        }
         const acc = this.adapter.newPersonAccount(name, this.state.personCurrency);
         this.accounts = [...this.accounts, acc];
         await this.adapter.writeMeta({ accounts: this.accounts, categories: this.categories });
@@ -8773,6 +8795,7 @@ var YIELD_SORT_OPTIONS = [
   { key: "rate", dir: -1, i18nKey: "report.expectedYield.sortRate" },
   { key: "name", dir: 1, i18nKey: "report.expectedYield.sortName" }
 ];
+var lastReportView = "flow";
 var TOP_N = 5;
 function formatAxisAmount(n, currency) {
   return formatCompactAmount(n, currency, getLocale());
@@ -8791,8 +8814,8 @@ var ReportModal = class extends import_obsidian14.Modal {
   transactions = [];
   loadFailed = false;
   range = "last1m";
-  /** 二级视图：flow=收支报表（默认）；yield=预估收益（时点口径） */
-  view = "flow";
+  /** 二级视图：flow=收支报表（默认）；yield=预估收益（时点口径）；初值取上次记住的视图 */
+  view = lastReportView;
   /** 预估收益列表排序：默认收益金额高→低（组为单位，选项见 YIELD_SORT_OPTIONS） */
   yieldSortKey = "amount";
   /** 账户元数据（净值序列归集用）；reloadData 时从 accounts.json 读取 */
@@ -8907,9 +8930,11 @@ var ReportModal = class extends import_obsidian14.Modal {
       btn.onclick = () => {
         if (this.view === opt.key) return;
         this.view = opt.key;
+        lastReportView = opt.key;
         this.render();
       };
     }
+    container.style.setProperty("--accounting-report-tabs-h", `${tabsEl.offsetHeight}px`);
   }
   /** 统一底部导航条（current='report'）。 */
   renderNav() {
@@ -8940,6 +8965,8 @@ var ReportModal = class extends import_obsidian14.Modal {
    * 收益率与预估年金额恒完整显示。到期 badge 按本地时钟算剩余天数（core 不持时钟）；本金本位币折算 +
    * 原币种括注。无利率/到期账户时空态。
    * 列表排序：排序栏 + 浮层菜单（组为单位），默认收益金额（组净年金额）高→低。
+   * 表头吸顶：滚动到顶后固定在二级视图 tab 栏正下方（offset 由 renderViewSwitch 量 tab 栏高度写入
+   * `--accounting-report-tabs-h`，样式见 styles.css `.accounting-yield-head .accounting-yield-cell`）。
    */
   renderExpectedYield(container) {
     const report = expectedYieldReport(this.transactions, this.accounts, {
@@ -9060,7 +9087,7 @@ var ReportModal = class extends import_obsidian14.Modal {
     legend.createSpan({ text: t("report.expectedYield.cost"), cls: "accounting-yield-leg-cost" });
     this.renderYieldBucketSvg(section, buckets, container.clientWidth);
   }
-  /** 风险等级分布（R1–R5 + 未设）：全部条目（含未设利率）均参与；按 R1→R5→unset 排序。
+  /** 风险等级分布（未设 + R1–R5）：全部条目（含未设利率）均参与；core 排序 = 未设（费息最左）→ R1→R5。
    *  收益绿柱向上、费率红柱向下，柱端标金额与占比，同收益率分布图风格。 */
   renderYieldRiskLevelDist(container, buckets) {
     const section = container.createDiv({ cls: "accounting-section" });
@@ -10874,7 +10901,7 @@ var TransactionListModal = class extends import_obsidian18.Modal {
     }
   }
   /**
-   * 时间序按月分组渲染：每月一个可折叠 `<details>`，标题=月份+笔数+收入/支出（+单账户月末累计余额）。
+   * 时间序按月分组渲染：每月一个可折叠 `<details>`，标题=月份+笔数+收入/支出/净额（+单账户月末累计余额）。
    * 原生 `<details>` 单月 toggle 免 JS state；批量「展开/折叠」由 allMonthsExpanded 字段驱动（render 重建按其复位 open，默认仅最新月）。
    * 懒渲染：折叠的 `<details>` 子节点虽不可见但仍占 DOM，故初始只为 open 的月份建行；折叠月在用户展开时（toggle 事件 / 展开按钮）才补建，
    * 把「全部」默认场景的 DOM 量从 O(N) 降到 O(最新月)，避免一次同步建数万节点卡顿。
@@ -10909,6 +10936,7 @@ var TransactionListModal = class extends import_obsidian18.Modal {
       const outLabel = singleAccount ? t("txList.monthOut") : t("txList.monthExpense");
       totals.createSpan({ text: `${inLabel} ${fmtInt(g.income)}`, cls: "accounting-amount-positive" });
       totals.createSpan({ text: `${outLabel} ${fmtInt(g.expense)}`, cls: "accounting-amount-negative" });
+      totals.createSpan({ text: `${t("txList.monthNet")} ${fmtInt(g.net)}`, cls: g.net < 0 ? "accounting-amount-negative" : "accounting-amount-positive" });
       if (g.endBalance != null) {
         totals.createSpan({
           text: t("txList.balancePrefix", { amount: fmtInt(g.endBalance) }),

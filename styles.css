@@ -4313,12 +4313,16 @@ details[open]>.accounting-collapsible-head::before {
 }
 
 /* 表格容器：表头 + 合并组头 + 明细行同处一个 display:table，跨行/跨组列宽一致、纵向对齐
-   （每行是 table-row、每格是 table-cell；账户列 width:100% 吃满剩余宽度，数字列按内容宽度右对齐） */
+   （每行是 table-row、每格是 table-cell；账户列 width:100% 吃满剩余宽度，数字列按内容宽度右对齐）。
+   border-collapse 用 separate（+ spacing 0）而非 collapse：collapse 下单元格边框由表格统一绘制，
+   不随 sticky 定位移动（表头吸顶时底线留在原位穿帮）；本表只有各行的单侧 border-bottom、无相邻边
+   可合并，separate 与 collapse 视觉无差。 */
 .accounting-yield-table {
   display: table;
   width: 100%;
   table-layout: auto;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
 .accounting-yield-head,
@@ -4362,8 +4366,19 @@ details[open]>.accounting-collapsible-head::before {
   color: #dc2626;
 }
 
-/* 表头行：小号 muted 标签 + 底分隔线 */
+/* 表头行：小号 muted 标签 + 底分隔线；**吸顶**——滚动到顶后固定在二级视图 tab 栏
+   （.accounting-settings-tabs，sticky top:0 + 不透明底 + z-index 5）正下方。
+   sticky 打在单元格上（display:table-cell，等价 th 吸顶的跨浏览器手法；打在 table-row 上
+   WebKit 支持不稳），四格同 top 即成整行；top 取 reportModal 渲染后量得的 tab 栏实际高度
+   （--accounting-report-tabs-h，主题字号浮动无法静态写死）。吸顶期间底色必须不透明，
+   遮住滚过的组头/明细行；z-index 低于 tab 栏，自身高于普通行（sticky 属定位元素本就在上，
+   显式给值与月份头 .accounting-month-head 同约定）。sticky 约束矩形是整个表格——表格滚出
+   视口时表头随之释放（与 HTML 表 th 吸顶同语义）。 */
 .accounting-yield-head .accounting-yield-cell {
+  position: sticky;
+  top: var(--accounting-report-tabs-h, 0px);
+  z-index: 2;
+  background: var(--background-primary);
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
   font-weight: 600;
