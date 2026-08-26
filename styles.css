@@ -814,6 +814,11 @@
   content: '▾';
 }
 
+/* 预估收益分布图头行（非 details，JS 切换）：默认收纳 ▸，展开（.is-open）翻 ▾——口径同上 */
+.accounting-yield-dist-head.is-open>.accounting-group-head-title::before {
+  content: '▾';
+}
+
 /* 分组标题后的 资产/负债/动态 徽标文字：弱化（小于组名一档、常规字重、faint 色），仅作口径提示不抢组名 */
 .accounting-group-head-kind {
   margin-left: 6px;
@@ -857,11 +862,18 @@
   white-space: nowrap;
 }
 
-/* 子账户 ↳ 指示符：比正文字号稍小，颜色弱化，与名称保持间距 */
+/* 子账户 ↳ 指示符：比正文字号稍小，颜色弱化，与名称保持间距；margin-left 与独立账户
+   ◇ 起始位拉开，形成「父聚合头 → ↳ 子账户」的缩进层级（对齐收益预估页形态）。 */
 .accounting-row-sub-icon {
   font-size: 0.85em;
   color: var(--text-muted);
   margin-right: 2px;
+  margin-left: 16px;
+}
+
+/* 分组模式扁平化的子账户：保留 ↳ 图标但去 16px 左缩进（父挂靠由 → 父账户名徽章表达） */
+.accounting-row-sub-icon-flat {
+  margin-left: 0;
 }
 
 /* 主账户 ◆ 指示符（有子账户的父账户）：与子账户指示符同口径，与预估收益页一致 */
@@ -900,6 +912,14 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 合并账户父行金额胶囊内的「（自身 ¥x）」括注 */
+.accounting-row-amount-own {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
 /* 点按反馈（:active 移动端可用、抬起即消失不粘，无需 hover 守卫；仅 :hover 才会粘，见 §6）：
    名称按下整条热区变 accent 色 + chevron 同步；金额胶囊按下加深底，与名称区反馈区隔。 */
 .accounting-row-name:active,
@@ -928,6 +948,16 @@
 .accounting-muted {
   color: var(--text-faint);
   margin-left: 4px;
+}
+
+/* 父账户金额胶囊内小字（不分组聚合头：「合计」前缀 + 「（自身 ¥x）」后缀，
+   与主数字同一点击热区；小字弱化不与主数字抢视觉） */
+.accounting-row-amount-tag {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-right: 4px;
+  white-space: nowrap;
 }
 
 .accounting-hidden {
@@ -4048,6 +4078,15 @@ details[open]>.accounting-collapsible-head::before {
   flex-wrap: nowrap;
   align-items: center;
   gap: 4px;
+}
+
+/* 在用币种禁删标注：替代删除按钮，中性灰小字 */
+.accounting-currency-rate-row .accounting-currency-inuse {
+  flex: 0 0 auto;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  line-height: 1;
+  white-space: nowrap;
 }
 
 /* 新增行按钮占位：与已有行「删除」按钮同尺寸，保持列对齐 */

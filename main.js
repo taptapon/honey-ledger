@@ -26,6 +26,7 @@ module.exports = __toCommonJS(main_exports);
 
 // ../../packages/core/src/types/account.ts
 var RISK_LEVELS = ["R1", "R2", "R3", "R4", "R5"];
+var LIQUIDITY_LEVELS = ["L1", "L2", "L3"];
 function kindOfType(type) {
   switch (type) {
     case "credit":
@@ -172,21 +173,57 @@ function displayGroupLabel(id, storedLabel, translate) {
   return DEFAULT_GROUP_LABEL[id] != null && storedLabel === DEFAULT_GROUP_LABEL[id] ? translate(`accountGroup.${id}`) : storedLabel;
 }
 
+// ../../packages/core/src/money.ts
+function round2(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
 // ../../packages/core/src/accountGrouping.ts
 var ACCOUNT_GROUPING_MODES = [
+  "none",
   "type-group",
   "type",
   "currency",
   "tag",
-  "risk"
+  "risk",
+  "liquidity"
 ];
-var DEFAULT_ACCOUNT_GROUPING_MODE = "type-group";
+var DEFAULT_ACCOUNT_GROUPING_MODE = "none";
 function isAccountGroupingMode(x) {
   return typeof x === "string" && ACCOUNT_GROUPING_MODES.includes(x);
 }
 var UNTAGGED_GROUP_ID = "__untagged__";
 var UNRATED_GROUP_ID = "__unrated__";
 var byNameZh = (a, b) => a.name.localeCompare(b.name, "zh");
+function nestAccounts(accounts) {
+  const childrenOf = /* @__PURE__ */ new Map();
+  const top = [];
+  const ids = new Set(accounts.map((a) => a.id));
+  for (const a of accounts) {
+    if (a.parentAccountId && ids.has(a.parentAccountId)) {
+      const arr = childrenOf.get(a.parentAccountId);
+      if (arr) arr.push(a);
+      else childrenOf.set(a.parentAccountId, [a]);
+    } else {
+      top.push(a);
+    }
+  }
+  return top.sort(byNameZh).map((account) => ({
+    account,
+    children: (childrenOf.get(account.id) ?? []).sort(byNameZh)
+  }));
+}
+function mergedAccountBalance(parent, children, balances, rates, base) {
+  const rateOf = (currency) => currency === base ? 1 : rates[currency]?.rate ?? 1;
+  const parentRate = rateOf(parent.currency);
+  const inParent = (bal, from) => {
+    if (from === parent.currency) return bal;
+    return round2(bal * rateOf(from) / parentRate);
+  };
+  return round2(
+    inParent(balances.get(parent.id) ?? 0, parent.currency) + children.reduce((s, c) => s + inParent(balances.get(c.id) ?? 0, c.currency), 0)
+  );
+}
 function groupKindOf(types, settings) {
   if (types.some((t2) => accountKindOf(settings, t2) === "liability")) return "liability";
   return types.length > 0 && types.every((t2) => t2 === "person") ? "dynamic" : "asset";
@@ -227,6 +264,16 @@ function groupAccounts(mode, accounts, options) {
           };
         }
       );
+    }
+    case "none": {
+      return [
+        {
+          id: "none",
+          label: { kind: "i18n", key: "accountGrouping.none" },
+          kind: groupKindOf(accounts.map((a) => a.type), settings),
+          items: accounts.slice().sort(byNameZh)
+        }
+      ];
     }
     case "type": {
       const labelOf = new Map(settings.types.map((t2) => [t2.type, t2.label]));
@@ -278,6 +325,22 @@ function groupAccounts(mode, accounts, options) {
       return toGroups(
         accounts,
         (a) => a.riskLevel ?? UNRATED_GROUP_ID,
+        order,
+        (key, items) => ({
+          id: key,
+          label: key === UNRATED_GROUP_ID ? { kind: "i18n", key: "accountGrouping.unrated" } : { kind: "raw", text: key },
+          kind: groupKindOf(items.map((a) => a.type), settings),
+          items
+        })
+      );
+    }
+    case "liquidity": {
+      const liquidityOrder = ["L1", "L2", "L3", UNRATED_GROUP_ID];
+      const hasUnrated = accounts.some((a) => !a.liquidityLevel);
+      const order = hasUnrated ? liquidityOrder : liquidityOrder.slice(0, 3);
+      return toGroups(
+        accounts,
+        (a) => a.liquidityLevel ?? UNRATED_GROUP_ID,
         order,
         (key, items) => ({
           id: key,
@@ -473,11 +536,6 @@ function rangeBounds(key, earliestData) {
 }
 function rangeDateBounds(key, earliestData) {
   return { start: rangeStartDate(key, earliestData), end: todayDateInput() };
-}
-
-// ../../packages/core/src/money.ts
-function round2(n) {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
 // ../../packages/core/src/format.ts
@@ -1081,10 +1139,21 @@ function currencyDisplayName(code, locale = "zh") {
   }
 }
 var COMMON_ORDER = new Map(COMMON_CURRENCIES.map((code, i) => [code, i]));
-function filterCurrencies(query, locale = "zh") {
+function filterCurrencies(query, locale = "zh", used = []) {
   const q = query.trim().toLowerCase();
-  const list = CURRENCY_CATALOG.map((c) => ({ code: c.code, name: currencyDisplayName(c.code, locale) }));
-  const filtered = q ? list.filter((c) => c.code.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)) : list;
+  const usedSet = usedCurrencies(used, "");
+  const candidates = [
+    ...Array.from(usedSet).map((code) => ({ code, name: currencyDisplayName(code, locale) })),
+    ...CURRENCY_CATALOG.map((c) => ({ code: c.code, name: currencyDisplayName(c.code, locale) }))
+  ];
+  const seen = /* @__PURE__ */ new Set();
+  const deduped = [];
+  for (const c of candidates) {
+    if (seen.has(c.code)) continue;
+    seen.add(c.code);
+    deduped.push(c);
+  }
+  const filtered = q ? deduped.filter((c) => c.code.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)) : deduped;
   return filtered.slice().sort((a, b) => {
     const ai = COMMON_ORDER.get(a.code);
     const bi = COMMON_ORDER.get(b.code);
@@ -1094,9 +1163,14 @@ function filterCurrencies(query, locale = "zh") {
     return a.code.localeCompare(b.code);
   });
 }
-function orderedCurrencyCatalog(locale = "zh") {
+function orderedCurrencyCatalog(locale = "zh", used = []) {
+  const usedSet = usedCurrencies(used, "");
   const commonSet = new Set(COMMON_CURRENCIES);
-  const common = COMMON_CURRENCIES.filter((code) => ISO4217_CURRENCIES.has(code)).map((code) => ({ code, name: currencyDisplayName(code, locale) }));
+  const commonCodes = [...COMMON_CURRENCIES];
+  for (const code of usedSet) {
+    if (!commonSet.has(code)) commonCodes.push(code);
+  }
+  const common = commonCodes.map((code) => ({ code, name: currencyDisplayName(code, locale) }));
   const rest = CURRENCY_CATALOG.filter((c) => !commonSet.has(c.code)).map((c) => ({ code: c.code, name: currencyDisplayName(c.code, locale) }));
   return [
     { labelKey: "currency.group.common", items: common },
@@ -1125,7 +1199,26 @@ function rateRowsToTable(rows, base) {
   }
   return t2;
 }
-function validateRateRows(rows, base) {
+function usedCurrencies(codes, base) {
+  const b = base.trim().toUpperCase();
+  const s = /* @__PURE__ */ new Set();
+  for (const c of codes) {
+    const up = c?.trim().toUpperCase();
+    if (up && up !== b) s.add(up);
+  }
+  return s;
+}
+function missingRateRows(rates, used) {
+  const inTable = new Set(Object.keys(rates).map((c) => c.toUpperCase()));
+  return Array.from(used).filter((c) => !inTable.has(c)).sort().map((c) => ({ id: `pending:${c}`, currency: c, rate: "", asOf: todayDateStr() }));
+}
+function rateRowsWithPending(rates, codes, base) {
+  return [
+    ...rateRowsFromTable(rates),
+    ...missingRateRows(rates, usedCurrencies(codes, base))
+  ];
+}
+function validateRateRows(rows, base, isoExempt) {
   const invalid = [];
   const seen = /* @__PURE__ */ new Set();
   const duplicates = [];
@@ -1142,7 +1235,7 @@ function validateRateRows(rows, base) {
       baseRows.push(c);
       continue;
     }
-    if (!isValidCurrency(c)) {
+    if (!isValidCurrency(c) && !isoExempt?.has(c)) {
       invalid.push(c);
       continue;
     }
@@ -2863,6 +2956,10 @@ function riskLevelOr(s) {
   const t2 = s.trim();
   return RISK_LEVELS.includes(t2) ? t2 : void 0;
 }
+function liquidityLevelOr(s) {
+  const t2 = s.trim();
+  return LIQUIDITY_LEVELS.includes(t2) ? t2 : void 0;
+}
 function applyAccountEdits(existing, edits, now) {
   const nextRate = rateOr(edits.expectedRate);
   return {
@@ -2883,7 +2980,8 @@ function applyAccountEdits(existing, edits, now) {
     // percent 不 round2；值未变保留原设定时间，变化（含清空→重设）以注入 now 刷新
     rateUpdatedAt: nextRate === void 0 ? void 0 : existing.expectedRate === nextRate ? existing.rateUpdatedAt : now,
     maturityDate: edits.maturityDate?.trim() || void 0,
-    riskLevel: riskLevelOr(edits.riskLevel)
+    riskLevel: riskLevelOr(edits.riskLevel),
+    liquidityLevel: liquidityLevelOr(edits.liquidityLevel)
   };
 }
 function accountNameExists(accounts, name, excludeId) {
@@ -2937,13 +3035,13 @@ function canMergeAccount(from, to) {
 
 // ../../packages/core/src/expectedYield.ts
 var RATE_BUCKET_EDGES = [-8, -6, -4, -2, -1, 0, 1, 2, 4, 6, 8];
-function riskLevelBucketStats(items) {
+function levelBucketStats(items, levels, levelOf) {
   const buckets = /* @__PURE__ */ new Map();
-  for (const r of RISK_LEVELS) buckets.set(r, { income: 0, cost: 0 });
+  for (const r of levels) buckets.set(r, { income: 0, cost: 0 });
   buckets.set("unset", { income: 0, cost: 0 });
   let total = 0;
   for (const i of items) {
-    const key = i.riskLevel ?? "unset";
+    const key = levelOf(i) ?? "unset";
     const b = buckets.get(key);
     if (!b) continue;
     if (i.direction === "income") b.income += i.principal;
@@ -2956,7 +3054,7 @@ function riskLevelBucketStats(items) {
   const uCost = round2(u.cost);
   if (uCost > 0) {
     out.push({
-      riskLevel: "unset",
+      level: "unset",
       label: "\u2014",
       incomePrincipal: 0,
       costPrincipal: uCost,
@@ -2966,7 +3064,7 @@ function riskLevelBucketStats(items) {
   }
   if (uIncome > 0) {
     out.push({
-      riskLevel: "unset",
+      level: "unset",
       label: "\u2014",
       incomePrincipal: uIncome,
       costPrincipal: 0,
@@ -2974,12 +3072,12 @@ function riskLevelBucketStats(items) {
       share: total > 0 ? uIncome / total : void 0
     });
   }
-  for (const r of RISK_LEVELS) {
+  for (const r of levels) {
     const b = buckets.get(r);
     const p = round2(b.income + b.cost);
     if (p === 0 && b.income === 0 && b.cost === 0) continue;
     out.push({
-      riskLevel: r,
+      level: r,
       label: r,
       incomePrincipal: round2(b.income),
       costPrincipal: round2(b.cost),
@@ -2989,14 +3087,28 @@ function riskLevelBucketStats(items) {
   }
   return out;
 }
+function riskLevelBucketStats(items) {
+  return levelBucketStats(items, RISK_LEVELS, (i) => i.riskLevel).map(({ level, ...rest }) => ({ riskLevel: level, ...rest }));
+}
+function liquidityLevelBucketStats(items) {
+  return levelBucketStats(items, LIQUIDITY_LEVELS, (i) => i.liquidityLevel).map(({ level, ...rest }) => ({ liquidityLevel: level, ...rest }));
+}
 function rateBucketStats(items) {
   const m = RATE_BUCKET_EDGES.length;
   const n = m + 1;
   const income = new Array(n).fill(0);
   const cost = new Array(n).fill(0);
   const has = new Array(n).fill(false);
+  let uIncome = 0;
+  let uCost = 0;
+  let total = 0;
   for (const i of items) {
-    if (i.expectedRate == null) continue;
+    total += i.principal;
+    if (i.expectedRate == null) {
+      if (i.direction === "income") uIncome += i.principal;
+      else uCost += i.principal;
+      continue;
+    }
     const v = i.expectedRate * 100 * (i.direction === "cost" ? -1 : 1);
     let idx;
     if (v <= (RATE_BUCKET_EDGES[0] ?? -Infinity)) idx = 0;
@@ -3009,11 +3121,28 @@ function rateBucketStats(items) {
     if (i.direction === "income") income[idx] = (income[idx] ?? 0) + i.principal;
     else cost[idx] = (cost[idx] ?? 0) + i.principal;
   }
+  const out = [];
+  if (uCost > 0) {
+    out.push({
+      label: "\u2014",
+      incomePrincipal: 0,
+      costPrincipal: round2(uCost),
+      principal: round2(uCost),
+      share: total > 0 ? uCost / total : void 0
+    });
+  }
+  if (uIncome > 0) {
+    out.push({
+      label: "\u2014",
+      incomePrincipal: round2(uIncome),
+      costPrincipal: 0,
+      principal: round2(uIncome),
+      share: total > 0 ? uIncome / total : void 0
+    });
+  }
   const first = has.indexOf(true);
   const last = has.lastIndexOf(true);
-  if (first < 0) return [];
-  const total = income.reduce((s, v) => s + v, 0) + cost.reduce((s, v) => s + v, 0);
-  const out = [];
+  if (first < 0) return out;
   for (let idx = first; idx <= last; idx++) {
     const openNeg = idx === 0;
     const openPos = idx === n - 1;
@@ -3074,6 +3203,7 @@ function expectedYieldReport(transactions, accounts, opts) {
       annualAmount: a.expectedRate == null ? void 0 : round2(principal * a.expectedRate),
       maturityDate: a.maturityDate,
       riskLevel: a.riskLevel,
+      liquidityLevel: a.liquidityLevel,
       currency: a.currency
     });
   }
@@ -3143,7 +3273,8 @@ function expectedYieldReport(transactions, accounts, opts) {
     weightedCostRate: costPrincipal > 0 ? totalCost / costPrincipal : void 0,
     weightedNetRate: netRateDenom > 0 ? (totalIncome - totalCost) / netRateDenom : void 0,
     rateBuckets: rateBucketStats(ordered),
-    riskLevelBuckets: riskLevelBucketStats(ordered)
+    riskLevelBuckets: riskLevelBucketStats(ordered),
+    liquidityLevelBuckets: liquidityLevelBucketStats(ordered)
   };
 }
 
@@ -3201,6 +3332,15 @@ function planRenameAccountTag(input) {
   }
   const { accounts: nextAccounts, retagged } = retagAccounts(accounts, fromTrimmed, toTrimmed, now);
   const nextCategories = row.id ? categories.map((c) => c.id === row.id ? { ...c, name: toTrimmed } : c) : [...categories];
+  return { accounts: nextAccounts, categories: nextCategories, retagged };
+}
+function planDeleteAccountTag(input) {
+  const { accounts, categories, from, now } = input;
+  const fromTrimmed = from.trim();
+  const row = accountTagList(categories, accounts).find((r) => r.name === fromTrimmed);
+  if (!row) throw new AppError("err.category.notFound", "\u6807\u7B7E\u4E0D\u5B58\u5728");
+  const { accounts: nextAccounts, retagged } = retagAccounts(accounts, fromTrimmed, "", now);
+  const nextCategories = row.id ? categories.filter((c) => c.id !== row.id) : [...categories];
   return { accounts: nextAccounts, categories: nextCategories, retagged };
 }
 function planMergeAccountTag(input) {
@@ -3772,6 +3912,8 @@ var zh = {
   "account.field.maturityDate": "\u5230\u671F\u65E5",
   "account.field.riskLevel": "\u98CE\u9669\u7B49\u7EA7",
   "account.riskLevelNone": "\u65E0",
+  "account.field.liquidityLevel": "\u6D41\u52A8\u6027\u7B49\u7EA7",
+  "account.liquidityLevelNone": "\u65E0",
   "account.parentNoneOption": "\u65E0",
   "account.expectedRatePlaceholder": "\u5982 2.5 = 2.5%",
   "account.rateHint": "\u8D44\u4EA7=\u6536\u76CA\u7387\uFF0C\u8D1F\u503A=\u8D39\u7387",
@@ -3839,15 +3981,21 @@ var zh = {
   "balance.allTypes": "\u5168\u90E8\u7C7B\u578B",
   "balance.typeFilterLabel": "\u8D26\u6237\u7C7B\u578B",
   "balance.typeLabel": "\u7C7B\u578B",
+  // 不分组模式（默认态）：主账户聚合行的「合计」标注 + 金额胶囊内父自身余额括注
+  "balance.mergedTag": "\u5408\u8BA1",
+  "balance.ownAmountNote": "\uFF08\u81EA\u8EAB {{amt}}\uFF09",
   // 分组方式可见短标签（一行容纳三控件；aria 仍用 modeLabel 全称）
   "accountGrouping.modeLabelShort": "\u5206\u7EC4",
   // 账户分组方式（与桌面 accountGrouping.* 同名对齐；type-group 为默认）
   "accountGrouping.modeLabel": "\u5206\u7EC4\u65B9\u5F0F",
+  "accountGrouping.none": "\u5168\u90E8\u8D26\u6237",
+  "accountGrouping.mode.none": "\u4E0D\u5206\u7EC4",
   "accountGrouping.mode.typeGroup": "\u6309\u7C7B\u578B\u7EC4",
   "accountGrouping.mode.type": "\u6309\u7C7B\u578B",
   "accountGrouping.mode.currency": "\u6309\u5E01\u79CD",
   "accountGrouping.mode.tag": "\u6309\u6807\u7B7E",
   "accountGrouping.mode.risk": "\u6309\u98CE\u9669\u7B49\u7EA7",
+  "accountGrouping.mode.liquidity": "\u6309\u6D41\u52A8\u6027\u7B49\u7EA7",
   "accountGrouping.untagged": "\u65E0\u6807\u7B7E",
   "accountGrouping.unrated": "\u672A\u5206\u7EA7",
   // KR6/task1: helpDisclosure + createLedgerForm
@@ -3876,10 +4024,12 @@ var zh = {
   "report.expectedYield.net": "\u51C0\u6536\u76CA\u7387",
   "report.expectedYield.rateDist": "\u6536\u76CA\u7387\u533A\u95F4\u5206\u5E03\uFF08\u91D1\u989D \xB7 \u5360\u6BD4\uFF09",
   "report.expectedYield.riskDist": "\u98CE\u9669\u7B49\u7EA7\u5206\u5E03\uFF08\u91D1\u989D \xB7 \u5360\u6BD4\uFF09",
+  "report.expectedYield.liquidityDist": "\u6D41\u52A8\u6027\u7B49\u7EA7\u5206\u5E03\uFF08\u91D1\u989D \xB7 \u5360\u6BD4\uFF09",
   "report.expectedYield.dueSoon": "\u5373\u5C06\u5230\u671F",
   "report.expectedYield.overdue": "\u5DF2\u5230\u671F",
   "report.expectedYield.mergedTag": "\uFF08\u5408\u5E76\uFF09",
   "report.expectedYield.riskLevel": "\u98CE\u9669\u7B49\u7EA7",
+  "report.expectedYield.liquidityLevel": "\u6D41\u52A8\u6027\u7B49\u7EA7",
   "report.expectedYield.empty": "\u6682\u65E0\u9884\u4F30\u6570\u636E\u2014\u2014\u5728\u8D26\u6237\u5C5E\u6027\u4E2D\u8BBE\u7F6E\u9884\u4F30\u5E74\u5316\u6216\u5230\u671F\u65E5\u540E\u663E\u793A",
   "report.expectedYield.sortLabel": "\u6392\u5E8F",
   "report.expectedYield.sortAmount": "\u6536\u76CA\u91D1\u989D \u9AD8\u2192\u4F4E",
@@ -4051,6 +4201,8 @@ var zh = {
   "settings.currency.noRates": "\u6682\u65E0\u5E01\u79CD",
   "settings.currency.addBtn": "\uFF0B \u6DFB\u52A0\u5E01\u79CD",
   "settings.currency.searchToAddPlaceholder": "\u641C\u7D22\u8981\u6DFB\u52A0\u7684\u5E01\u79CD",
+  "settings.currency.inUse": "\u5728\u7528",
+  "settings.currency.pendingRate": "\u5F85\u8865\u6C47\u7387",
   "settings.currency.errEmptyRows": "\u6709 {{n}} \u884C\u5E01\u79CD\u672A\u586B\u5199\uFF0C\u8BF7\u586B\u5199\u6216\u5220\u9664",
   "settings.currency.errInvalid": "\u65E0\u6548\u5E01\u79CD\uFF08\u975E ISO 4217 \u5E01\u79CD\u4EE3\u7801\uFF09\uFF1A{{list}}",
   "settings.currency.errBaseRow": "\u672C\u4F4D\u5E01 {{base}} \u65E0\u9700\u5728\u6C47\u7387\u8868\u4E2D\u7EF4\u62A4\uFF0C\u8BF7\u5220\u9664\u8BE5\u884C",
@@ -4152,7 +4304,8 @@ var zh = {
   "settings.accountTag.mergeNoTargets": "\u6CA1\u6709\u5176\u4ED6\u6807\u7B7E\u53EF\u5408\u5E76",
   "settings.accountTag.deleteAria": "\u5220\u9664\u6807\u7B7E",
   "settings.accountTag.purgeAria": "\u5F7B\u5E95\u5220\u9664\u6807\u7B7E",
-  "settings.accountTag.deleteConfirmUsed": "\u6807\u7B7E\u300C{{name}}\u300D\u88AB {{n}} \u4E2A\u8D26\u6237\u4F7F\u7528\uFF0C\u5C06\u9690\u85CF\uFF08\u8D26\u6237\u4E0E\u5206\u7EC4\u4E0D\u53D8\uFF0C\u4EC5\u4E0D\u518D\u51FA\u73B0\u5728\u5EFA\u8BAE\u4E2D\uFF09\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F",
+  "settings.accountTag.deleteConfirmUsed": "\u5C06\u79FB\u9664 {{n}} \u4E2A\u8D26\u6237\u4E0A\u7684\u6807\u7B7E\u300C{{name}}\u300D\u5E76\u5220\u9664\u8BE5\u6807\u7B7E\uFF0C\u4E0D\u53EF\u64A4\u9500\u3002",
+  "settings.accountTag.deletedUsedNotice": "\u5DF2\u4ECE {{n}} \u4E2A\u8D26\u6237\u79FB\u9664\u6807\u7B7E\u300C{{name}}\u300D",
   "settings.accountTag.purgeConfirm": "\u5F7B\u5E95\u5220\u9664\u6807\u7B7E\u300C{{name}}\u300D\uFF1F\u672A\u88AB\u4EFB\u4F55\u8D26\u6237\u4F7F\u7528\u3002",
   // KR7/task4: settings — 账户类型管理（卡片/分组/停用区/footer + RegroupTypeModal）
   "settings.accountType.title": "\u8D26\u6237\u7C7B\u578B\u7EC4",
@@ -4527,6 +4680,8 @@ var en = {
   "account.field.maturityDate": "Maturity date",
   "account.field.riskLevel": "Risk level",
   "account.riskLevelNone": "None",
+  "account.field.liquidityLevel": "Liquidity level",
+  "account.liquidityLevelNone": "None",
   "account.parentNoneOption": "None",
   "account.expectedRatePlaceholder": "e.g. 2.5 = 2.5%",
   "account.rateHint": "Asset = yield, liability = rate",
@@ -4594,15 +4749,21 @@ var en = {
   "balance.allTypes": "All types",
   "balance.typeFilterLabel": "Account type",
   "balance.typeLabel": "Type",
+  // Ungrouped mode (default): "total" tag on parent aggregate row + own-balance note inside amount pill
+  "balance.mergedTag": "total",
+  "balance.ownAmountNote": " (own {{amt}})",
   // Short visible label for grouping (aria keeps the full modeLabel)
   "accountGrouping.modeLabelShort": "Group",
   // Account grouping modes (key names mirror desktop accountGrouping.*; type-group is the default)
   "accountGrouping.modeLabel": "Group by",
+  "accountGrouping.none": "All accounts",
+  "accountGrouping.mode.none": "No grouping",
   "accountGrouping.mode.typeGroup": "Type group",
   "accountGrouping.mode.type": "Type",
   "accountGrouping.mode.currency": "Currency",
   "accountGrouping.mode.tag": "Tag",
   "accountGrouping.mode.risk": "Risk level",
+  "accountGrouping.mode.liquidity": "Liquidity level",
   "accountGrouping.untagged": "Untagged",
   "accountGrouping.unrated": "Unrated",
   // KR6/task1: helpDisclosure + createLedgerForm
@@ -4631,10 +4792,12 @@ var en = {
   "report.expectedYield.net": "Net rate",
   "report.expectedYield.rateDist": "Rate distribution (amount \xB7 share)",
   "report.expectedYield.riskDist": "Risk level distribution (amount \xB7 share)",
+  "report.expectedYield.liquidityDist": "Liquidity level distribution (amount \xB7 share)",
   "report.expectedYield.dueSoon": "Due soon",
   "report.expectedYield.overdue": "Overdue",
   "report.expectedYield.mergedTag": " (merged)",
   "report.expectedYield.riskLevel": "Risk level",
+  "report.expectedYield.liquidityLevel": "Liquidity level",
   "report.expectedYield.empty": "No estimates yet \u2014 set an expected APR or maturity date in account properties",
   "report.expectedYield.sortLabel": "Sort",
   "report.expectedYield.sortAmount": "Annual amount high\u2192low",
@@ -4806,6 +4969,8 @@ var en = {
   "settings.currency.noRates": "No currencies",
   "settings.currency.addBtn": "\uFF0B Add currency",
   "settings.currency.searchToAddPlaceholder": "Search currency to add",
+  "settings.currency.inUse": "In use",
+  "settings.currency.pendingRate": "Add rate",
   "settings.currency.errEmptyRows": "{{n}} row(s) have no currency; fill or delete them",
   "settings.currency.errInvalid": "Invalid currency (not an ISO 4217 code): {{list}}",
   "settings.currency.errBaseRow": "Base currency {{base}} needs no rate-table row; delete it",
@@ -4907,7 +5072,8 @@ var en = {
   "settings.accountTag.mergeNoTargets": "No other tags to merge into",
   "settings.accountTag.deleteAria": "Delete tag",
   "settings.accountTag.purgeAria": "Permanently delete tag",
-  "settings.accountTag.deleteConfirmUsed": 'Tag "{{name}}" is used by {{n}} account(s). Hide it? (accounts and grouping unchanged; it just stops appearing in suggestions)',
+  "settings.accountTag.deleteConfirmUsed": 'Remove tag "{{name}}" from {{n}} account(s) and delete the tag? This cannot be undone.',
+  "settings.accountTag.deletedUsedNotice": 'Removed tag "{{name}}" from {{n}} account(s)',
   "settings.accountTag.purgeConfirm": 'Permanently delete tag "{{name}}"? It is not used by any account.',
   // KR7/task4: settings — account-type management (card/group/disabled-area/footer + RegroupTypeModal)
   "settings.accountType.title": "Account type groups",
@@ -5176,16 +5342,15 @@ function displayAccountGroupLabel(group) {
 function groupAccountsOf(mode, accounts, settings, baseCurrency) {
   return groupAccounts(mode, accounts, { settings, baseCurrency });
 }
-function renderTagChips(host, accounts, target, max = 8, extraTags, initialVisible = 4) {
+function renderTagChips(host, accounts, target, extraTags, initialVisible = 4) {
   const tags = [.../* @__PURE__ */ new Set([
     ...extraTags ?? [],
     ...accounts.map((a) => a.tag).filter((x) => !!x)
   ])].sort((x, y) => x.localeCompare(y, "zh"));
   if (tags.length === 0) return null;
   const chips = host.createDiv({ cls: "accounting-tag-chips" });
-  const visible = tags.slice(0, max);
-  const needToggle = visible.length > initialVisible;
-  const shown = needToggle ? visible.slice(0, initialVisible) : visible;
+  const needToggle = tags.length > initialVisible;
+  const shown = needToggle ? tags.slice(0, initialVisible) : tags;
   for (const tag of shown) {
     const btn = chips.createEl("button", { type: "button", text: tag, cls: "accounting-tag-chip" });
     btn.onclick = () => {
@@ -5194,7 +5359,7 @@ function renderTagChips(host, accounts, target, max = 8, extraTags, initialVisib
   }
   const folded = [];
   if (needToggle) {
-    for (const tag of visible.slice(initialVisible)) {
+    for (const tag of tags.slice(initialVisible)) {
       const btn = chips.createEl("button", { type: "button", text: tag, cls: "accounting-tag-chip" });
       btn.onclick = () => {
         target.value = tag;
@@ -6235,6 +6400,7 @@ var AccountPropertiesModal = class extends import_obsidian5.Modal {
   rateEl;
   maturityEl;
   riskLevelEl;
+  liquidityLevelEl;
   creditBlockEl;
   footerEl;
   editing = false;
@@ -6269,7 +6435,7 @@ var AccountPropertiesModal = class extends import_obsidian5.Modal {
     this.tagEl = this.input(tagRow, "text");
     this.tagEl.placeholder = t("account.tagPlaceholder");
     const tagChipsRow = contentEl.createDiv({ cls: "accounting-tag-chips-row" });
-    this.tagChipsEl = renderTagChips(tagChipsRow, this.accounts, this.tagEl, 8, accountTagSuggestions(this.categories, this.accounts)) ?? tagChipsRow;
+    this.tagChipsEl = renderTagChips(tagChipsRow, this.accounts, this.tagEl, accountTagSuggestions(this.categories, this.accounts)) ?? tagChipsRow;
     this.tagChipsEl.style.display = "none";
     const parentRow = this.row(t("account.field.parentAccount"));
     this.parentEl = parentRow.createEl("select", { cls: "accounting-adjust-input" });
@@ -6290,6 +6456,12 @@ var AccountPropertiesModal = class extends import_obsidian5.Modal {
     this.riskLevelEl.createEl("option", { text: t("account.riskLevelNone"), value: "" });
     for (const r of RISK_LEVELS) {
       this.riskLevelEl.createEl("option", { text: r, value: r });
+    }
+    const liquidityRow = this.row(t("account.field.liquidityLevel"));
+    this.liquidityLevelEl = liquidityRow.createEl("select", { cls: "accounting-adjust-input" });
+    this.liquidityLevelEl.createEl("option", { text: t("account.liquidityLevelNone"), value: "" });
+    for (const l of LIQUIDITY_LEVELS) {
+      this.liquidityLevelEl.createEl("option", { text: l, value: l });
     }
     this.creditBlockEl = contentEl.createDiv({ cls: "accounting-credit-block" });
     const clRow = this.row(t("account.field.creditLimit"), this.creditBlockEl);
@@ -6378,6 +6550,7 @@ var AccountPropertiesModal = class extends import_obsidian5.Modal {
     this.rateEl.value = a.expectedRate != null ? String(Math.round(a.expectedRate * 100 * 1e6) / 1e6) : "";
     this.maturityEl.value = a.maturityDate ?? "";
     this.riskLevelEl.value = a.riskLevel ?? "";
+    this.liquidityLevelEl.value = a.liquidityLevel ?? "";
     this.toggleCredit();
   }
   /** 切换查看/编辑态：禁用或启用所有字段（币种除外——创建后不可变更，始终只读）；标签 chips 仅编辑态显示 */
@@ -6395,7 +6568,8 @@ var AccountPropertiesModal = class extends import_obsidian5.Modal {
       this.parentEl,
       this.rateEl,
       this.maturityEl,
-      this.riskLevelEl
+      this.riskLevelEl,
+      this.liquidityLevelEl
     ];
     for (const el of els) el.disabled = !editable;
     this.currencyEl.disabled = true;
@@ -6454,7 +6628,8 @@ var AccountPropertiesModal = class extends import_obsidian5.Modal {
       parentAccountId: this.parentEl.value,
       expectedRate: this.rateEl.value,
       maturityDate: this.maturityEl.value,
-      riskLevel: this.riskLevelEl.value
+      riskLevel: this.riskLevelEl.value,
+      liquidityLevel: this.liquidityLevelEl.value
     };
     const updated = applyAccountEdits(this.account, edits, nowISO());
     try {
@@ -6689,6 +6864,7 @@ var AccountCreateModal = class extends import_obsidian8.Modal {
   rateEl;
   maturityEl;
   riskLevelEl;
+  liquidityLevelEl;
   creditBlockEl;
   footerEl;
   rates = {};
@@ -6721,7 +6897,7 @@ var AccountCreateModal = class extends import_obsidian8.Modal {
     this.tagEl = this.input(tagRow, "text");
     this.tagEl.placeholder = t("account.tagPlaceholder");
     const tagChipsRow = contentEl.createDiv({ cls: "accounting-tag-chips-row" });
-    renderTagChips(tagChipsRow, this.accounts, this.tagEl, 8, accountTagSuggestions(this.categories, this.accounts));
+    renderTagChips(tagChipsRow, this.accounts, this.tagEl, accountTagSuggestions(this.categories, this.accounts));
     const parentRow = this.row(t("account.field.parentAccount"));
     this.parentEl = parentRow.createEl("select", { cls: "accounting-adjust-input" });
     this.parentEl.createEl("option", { text: t("account.parentNoneOption"), value: "" });
@@ -6741,6 +6917,12 @@ var AccountCreateModal = class extends import_obsidian8.Modal {
     this.riskLevelEl.createEl("option", { text: t("account.riskLevelNone"), value: "" });
     for (const r of RISK_LEVELS) {
       this.riskLevelEl.createEl("option", { text: r, value: r });
+    }
+    const liquidityRow = this.row(t("account.field.liquidityLevel"));
+    this.liquidityLevelEl = liquidityRow.createEl("select", { cls: "accounting-adjust-input" });
+    this.liquidityLevelEl.createEl("option", { text: t("account.liquidityLevelNone"), value: "" });
+    for (const l of LIQUIDITY_LEVELS) {
+      this.liquidityLevelEl.createEl("option", { text: l, value: l });
     }
     this.creditBlockEl = contentEl.createDiv({ cls: "accounting-credit-block" });
     const clRow = this.row(t("account.field.creditLimit"), this.creditBlockEl);
@@ -6880,6 +7062,7 @@ var AccountCreateModal = class extends import_obsidian8.Modal {
       expectedRate: rateRaw && Number.isFinite(rateNum) ? rateNum / 100 : void 0,
       maturityDate: this.maturityEl.value || void 0,
       riskLevel: RISK_LEVELS.includes(this.riskLevelEl.value) ? this.riskLevelEl.value : void 0,
+      liquidityLevel: LIQUIDITY_LEVELS.includes(this.liquidityLevelEl.value) ? this.liquidityLevelEl.value : void 0,
       active: true,
       createdAt: now,
       updatedAt: now
@@ -7390,14 +7573,14 @@ var BalanceModal = class extends import_obsidian11.Modal {
     const active = snap.accounts.filter((a) => a.active && matchKeyword(a) && matchType(a));
     const hidden = snap.accounts.filter((a) => !a.active && matchKeyword(a) && matchType(a));
     const filterActive = !!(this.keyword.trim() || this.typeFilter);
-    this.renderGroups(contentEl, active, balances, baseBalances, snap, filterActive || this.allGroupsExpanded);
+    this.renderGroups(contentEl, active, balances, baseBalances, rates, snap, filterActive || this.allGroupsExpanded);
     if ((ql || this.typeFilter) && active.length === 0) {
       contentEl.createEl("div", { text: t("balance.noMatch"), cls: "accounting-empty" });
     }
     if (hidden.length > 0) {
       const h = contentEl.createEl("details", { cls: "accounting-hidden" });
       h.createEl("summary", { text: t("balance.hiddenSummary"), cls: "accounting-collapsible-head" });
-      this.renderGroups(h, hidden, balances, baseBalances, snap, filterActive || this.allGroupsExpanded);
+      this.renderGroups(h, hidden, balances, baseBalances, rates, snap, filterActive || this.allGroupsExpanded);
     }
   }
   /** 统一底部导航条（由 CSS 固定到底部，内容区预留 safe-area）。 */
@@ -7457,11 +7640,13 @@ var BalanceModal = class extends import_obsidian11.Modal {
     groupField.createSpan({ text: t("accountGrouping.modeLabelShort"), cls: "accounting-filter-label" });
     const groupSel = groupField.createEl("select", { cls: "accounting-grouping-select", attr: { "aria-label": t("accountGrouping.modeLabel") } });
     for (const [value, key] of [
+      ["none", "accountGrouping.mode.none"],
       ["type-group", "accountGrouping.mode.typeGroup"],
       ["type", "accountGrouping.mode.type"],
       ["currency", "accountGrouping.mode.currency"],
       ["tag", "accountGrouping.mode.tag"],
-      ["risk", "accountGrouping.mode.risk"]
+      ["risk", "accountGrouping.mode.risk"],
+      ["liquidity", "accountGrouping.mode.liquidity"]
     ]) {
       const o = groupSel.createEl("option", { text: t(key), value });
       if (value === accountGroupingMode()) o.selected = true;
@@ -7497,11 +7682,11 @@ var BalanceModal = class extends import_obsidian11.Modal {
       ).open();
     };
   }
-  renderGroups(parent, accounts, balances, baseBalances, snap, expandAll) {
+  renderGroups(parent, accounts, balances, baseBalances, rates, snap, expandAll) {
     const mode = accountGroupingMode();
     const kindBadgeMode = mode === "type-group" || mode === "type";
     const groups = groupAccountsOf(mode, accounts, this.accountTypeSettings, this.baseCurrency);
-    const parentIds = new Set(snap.accounts.filter((a) => a.parentAccountId).map((a) => a.parentAccountId));
+    const parentIds = new Set(snap.accounts.flatMap((a) => a.parentAccountId ? [a.parentAccountId] : []));
     const totals = groups.map((g) => g.items.reduce((s, a) => s + (baseBalances.get(a.id) ?? 0), 0));
     const absTotal = totals.reduce((s, v) => s + Math.abs(v), 0);
     for (const [gi, g] of groups.entries()) {
@@ -7518,49 +7703,74 @@ var BalanceModal = class extends import_obsidian11.Modal {
       }
       const totalEl = head.createEl("span", { text: formatMoney(groupTotal, this.baseCurrency) });
       if (absTotal > 0) totalEl.createSpan({ text: ` (${(groupTotal / absTotal * 100).toFixed(1)}%)`, cls: "accounting-muted" });
-      for (const a of g.items) {
-        const row = group.createDiv({ cls: "accounting-row" });
-        const name = row.createEl("span", { cls: "accounting-row-name" });
-        const label = name.createEl("span", { cls: "accounting-row-name-label" });
-        if (a.parentAccountId) {
-          label.createEl("span", { text: "\u21B3 ", cls: "accounting-row-sub-icon" });
-        } else if (parentIds.has(a.id)) {
-          label.createEl("span", { text: "\u25C6 ", cls: "accounting-row-parent-icon" });
-        } else {
-          label.createEl("span", { text: "\u25C7 ", cls: "accounting-row-regular-icon" });
+      if (mode === "none") {
+        for (const n of nestAccounts(g.items)) {
+          const parent2 = n.account;
+          if (n.children.length > 0) {
+            const merged = mergedAccountBalance(parent2, n.children, balances, rates, this.baseCurrency);
+            this.renderAccountRow(group, parent2, balances, snap, parentIds, { amount: merged, currency: parent2.currency, mergedTag: true, ownAmount: balances.get(parent2.id) ?? 0 });
+            for (const c of n.children) this.renderAccountRow(group, c, balances, snap, parentIds);
+          } else {
+            this.renderAccountRow(group, parent2, balances, snap, parentIds);
+          }
         }
-        label.createEl("span", { text: formatAccountDisplayName(a, this.baseCurrency) });
-        if (a.tag) label.createSpan({ text: ` #${a.tag}`, cls: "accounting-muted" });
-        if (a.note) label.createSpan({ text: ` ${a.note}`, cls: "accounting-muted" });
-        name.title = t("balance.accountOptionsHint");
-        name.onclick = () => {
-          new AccountActionModal(
-            this.app,
-            this.adapter,
-            a,
-            snap.accounts,
-            snap.categories,
-            this.accountTypeSettings,
-            this.navCtx,
-            () => this.refresh()
-          ).open();
-        };
-        const balance = balances.get(a.id) ?? 0;
-        const amountEl = row.createEl("span", { text: formatMoney(balance, a.currency ?? "CNY"), cls: "accounting-row-amount" });
-        amountEl.title = t("balance.adjustHint");
-        amountEl.onclick = () => {
-          new AdjustBalanceModal(
-            this.app,
-            this.adapter,
-            a,
-            balance,
-            snap.accounts,
-            snap.categories,
-            () => this.refresh()
-          ).open();
-        };
+        continue;
+      }
+      for (const a of g.items) {
+        this.renderAccountRow(group, a, balances, snap, parentIds, { noIndent: true });
       }
     }
+  }
+  openAccountActions(a, snap) {
+    new AccountActionModal(
+      this.app,
+      this.adapter,
+      a,
+      snap.accounts,
+      snap.categories,
+      this.accountTypeSettings,
+      this.navCtx,
+      () => this.refresh()
+    ).open();
+  }
+  /** 单个账户行。parentIds 由 renderGroups 组级构建传入（◆ 标记用）。 */
+  renderAccountRow(parent, a, balances, snap, parentIds, opts) {
+    const row = parent.createDiv({ cls: "accounting-row" });
+    const name = row.createEl("span", { cls: "accounting-row-name" });
+    const label = name.createEl("span", { cls: "accounting-row-name-label" });
+    if (a.parentAccountId) {
+      label.createEl("span", { text: "\u21B3 ", cls: opts?.noIndent ? "accounting-row-sub-icon accounting-row-sub-icon-flat" : "accounting-row-sub-icon" });
+    } else if (parentIds.has(a.id)) {
+      label.createEl("span", { text: "\u25C6 ", cls: "accounting-row-parent-icon" });
+    } else {
+      label.createEl("span", { text: "\u25C7 ", cls: "accounting-row-regular-icon" });
+    }
+    label.createEl("span", { text: formatAccountDisplayName(a, this.baseCurrency) });
+    const parentName = a.parentAccountId ? snap.accounts.find((x) => x.id === a.parentAccountId)?.name : void 0;
+    if (parentName) label.createSpan({ text: ` \u2192 ${parentName}`, cls: "accounting-muted" });
+    if (a.tag) label.createSpan({ text: ` #${a.tag}`, cls: "accounting-muted" });
+    if (a.note) label.createSpan({ text: ` ${a.note}`, cls: "accounting-muted" });
+    name.title = t("balance.accountOptionsHint");
+    name.onclick = () => this.openAccountActions(a, snap);
+    const balance = balances.get(a.id) ?? 0;
+    const amountEl = row.createEl("span", { cls: "accounting-row-amount" });
+    if (opts?.mergedTag) amountEl.createSpan({ text: t("balance.mergedTag"), cls: "accounting-row-amount-tag" });
+    amountEl.createSpan({ text: formatMoney(opts?.amount ?? balance, opts?.currency ?? a.currency ?? "CNY") });
+    if (opts?.ownAmount !== void 0) {
+      amountEl.createSpan({ text: t("balance.ownAmountNote", { amt: formatMoney(opts.ownAmount, opts?.currency ?? this.baseCurrency) }), cls: "accounting-row-amount-own" });
+    }
+    amountEl.title = t("balance.adjustHint");
+    amountEl.onclick = () => {
+      new AdjustBalanceModal(
+        this.app,
+        this.adapter,
+        a,
+        balance,
+        snap.accounts,
+        snap.categories,
+        () => this.refresh()
+      ).open();
+    };
   }
   async loadSnapshot() {
     const events = await this.adapter.loadLog();
@@ -8825,6 +9035,8 @@ var ReportModal = class extends import_obsidian14.Modal {
   /** 支出/收入分类是否展开（默认折叠到 TOP_N，点「展开其他」逐项显示，不再合并为「其他」） */
   expandedExpense = false;
   expandedIncome = false;
+  /** 预估收益分布图展开集合（默认全收纳，点标题行切换；重开弹窗回到收纳） */
+  yieldDistOpen = /* @__PURE__ */ new Set();
   /** 本位币（聚合折算目标 + 金额符号；reloadData 时从 ledger.json 读取，默认 CNY） */
   baseCurrency = "CNY";
   /** 账户类型配置（预估收益的负债类方向判定用）；缺失回退 accountKindOf 静态推导 */
@@ -9014,9 +9226,11 @@ var ReportModal = class extends import_obsidian14.Modal {
     const now = /* @__PURE__ */ new Date();
     const todayMs = Date.parse(localDateStartISO(now.getFullYear(), now.getMonth() + 1, now.getDate()));
     const activeBuckets = report.rateBuckets.filter((b) => b.incomePrincipal > 0 || b.costPrincipal > 0);
-    if (activeBuckets.length > 0) this.renderYieldRateDist(container, activeBuckets);
+    if (activeBuckets.length > 0) this.renderYieldDistSection(container, activeBuckets, "report.expectedYield.rateDist");
     const activeRiskBuckets = report.riskLevelBuckets.filter((b) => b.incomePrincipal > 0 || b.costPrincipal > 0);
-    if (activeRiskBuckets.length > 0) this.renderYieldRiskLevelDist(container, activeRiskBuckets);
+    if (activeRiskBuckets.length > 0) this.renderYieldDistSection(container, activeRiskBuckets, "report.expectedYield.riskDist");
+    const activeLiquidityBuckets = report.liquidityLevelBuckets.filter((b) => b.incomePrincipal > 0 || b.costPrincipal > 0);
+    if (activeLiquidityBuckets.length > 0) this.renderYieldDistSection(container, activeLiquidityBuckets, "report.expectedYield.liquidityDist");
     const dirBadge = (dir2) => {
       const s = document.createElement("span");
       s.className = `accounting-yield-dir accounting-yield-dir-${dir2}`;
@@ -9073,30 +9287,34 @@ var ReportModal = class extends import_obsidian14.Modal {
     }
   }
   /**
-   * 收益率区间分布（core `rateBuckets` 单一真源，与桌面 Reports 预估视图同数据）：section 头
-   * （标题 + 收益/费率方点图例）+ SVG 发散柱图（横轴带符号年化区间，左开右闭，费率负半轴；
-   * 收益绿柱向上、费率红柱向下）。金额与占比**直接标在柱端**（紧凑金额 + 占比两行），
-   * 无点击展开。无利率条目时整个 section 不渲染（上游已判空）。
+   * 等级/收益率分布图共用 section（core buckets 单一真源，与桌面 Reports 预估视图同数据）：
+   * 头行（标题 + 收益/费率方点图例 + ▸/▾）+ SVG 发散柱图（收益绿柱向上、费率红柱向下）。
+   * 默认收纳只显示头行，点整条头行切换展开；SVG 按滚动容器宽度预先画好，折叠仅切显隐
+   * （重开弹窗回到收纳态）。金额与占比**直接标在柱端**（紧凑金额 + 占比两行），无点击展开。
    */
-  renderYieldRateDist(container, buckets) {
+  renderYieldDistSection(container, buckets, titleKey) {
     const section = container.createDiv({ cls: "accounting-section" });
-    const head = section.createDiv({ cls: "accounting-group-head" });
-    head.createEl("span", { text: t("report.expectedYield.rateDist") });
+    const head = section.createDiv({ cls: "accounting-group-head accounting-yield-dist-head" });
+    const title = head.createEl("span", { text: t(titleKey), cls: "accounting-group-head-title" });
     const legend = head.createEl("span", { cls: "accounting-yield-legend" });
     legend.createSpan({ text: t("report.expectedYield.income"), cls: "accounting-yield-leg-income" });
     legend.createSpan({ text: t("report.expectedYield.cost"), cls: "accounting-yield-leg-cost" });
-    this.renderYieldBucketSvg(section, buckets, container.clientWidth);
-  }
-  /** 风险等级分布（未设 + R1–R5）：全部条目（含未设利率）均参与；core 排序 = 未设（费息最左）→ R1→R5。
-   *  收益绿柱向上、费率红柱向下，柱端标金额与占比，同收益率分布图风格。 */
-  renderYieldRiskLevelDist(container, buckets) {
-    const section = container.createDiv({ cls: "accounting-section" });
-    const head = section.createDiv({ cls: "accounting-group-head" });
-    head.createEl("span", { text: t("report.expectedYield.riskDist") });
-    const legend = head.createEl("span", { cls: "accounting-yield-legend" });
-    legend.createSpan({ text: t("report.expectedYield.income"), cls: "accounting-yield-leg-income" });
-    legend.createSpan({ text: t("report.expectedYield.cost"), cls: "accounting-yield-leg-cost" });
-    this.renderYieldBucketSvg(section, buckets, container.clientWidth);
+    const body = section.createDiv();
+    const open = this.yieldDistOpen.has(titleKey);
+    body.style.display = open ? "" : "none";
+    this.renderYieldBucketSvg(body, buckets, container.clientWidth);
+    if (open) head.addClass("is-open");
+    head.onclick = () => {
+      if (this.yieldDistOpen.has(titleKey)) {
+        this.yieldDistOpen.delete(titleKey);
+        body.style.display = "none";
+        head.removeClass("is-open");
+      } else {
+        this.yieldDistOpen.add(titleKey);
+        body.style.display = "";
+        head.addClass("is-open");
+      }
+    };
   }
   /** SVG 绘制收益率区间发散柱图（零基线居中）：收益绿柱自基线向上、费率红柱向下（负值语义），
    *  横轴为带符号年化区间（左开右闭，费率负半轴）。金额与占比**直接标在柱端**（两行：紧凑金额 +
@@ -9239,6 +9457,9 @@ var ReportModal = class extends import_obsidian14.Modal {
     nameRow.createSpan({ text: item.name });
     if (item.riskLevel) {
       nameRow.createSpan({ text: item.riskLevel, cls: "accounting-yield-risk-level" });
+    }
+    if (item.liquidityLevel) {
+      nameRow.createSpan({ text: item.liquidityLevel, cls: "accounting-yield-risk-level", attr: { title: t("report.expectedYield.liquidityLevel") } });
     }
     nameRow.createSpan({
       text: item.direction === "income" ? t("report.expectedYield.income") : t("report.expectedYield.cost"),
@@ -10936,7 +11157,9 @@ var TransactionListModal = class extends import_obsidian18.Modal {
       const outLabel = singleAccount ? t("txList.monthOut") : t("txList.monthExpense");
       totals.createSpan({ text: `${inLabel} ${fmtInt(g.income)}`, cls: "accounting-amount-positive" });
       totals.createSpan({ text: `${outLabel} ${fmtInt(g.expense)}`, cls: "accounting-amount-negative" });
-      totals.createSpan({ text: `${t("txList.monthNet")} ${fmtInt(g.net)}`, cls: g.net < 0 ? "accounting-amount-negative" : "accounting-amount-positive" });
+      if (!singleAccount) {
+        totals.createSpan({ text: `${t("txList.monthNet")} ${fmtInt(g.net)}`, cls: g.net < 0 ? "accounting-amount-negative" : "accounting-amount-positive" });
+      }
       if (g.endBalance != null) {
         totals.createSpan({
           text: t("txList.balancePrefix", { amount: fmtInt(g.endBalance) }),
@@ -11263,10 +11486,10 @@ function createCurrencyPicker(parent, opts) {
   function sections(text) {
     const term = text.trim();
     if (term) {
-      const items = filterCurrencies(term, getLocale()).filter((c) => !excludeSet.has(c.code));
+      const items = filterCurrencies(term, getLocale(), opts.used).filter((c) => !excludeSet.has(c.code));
       return [{ label: t("settings.currency.searchResults", { n: items.length }), items }];
     }
-    return orderedCurrencyCatalog(getLocale()).map((g) => ({ label: t(g.labelKey, { count: g.count }), items: g.items.filter((c) => !excludeSet.has(c.code)) })).filter((g) => g.items.length > 0);
+    return orderedCurrencyCatalog(getLocale(), opts.used).map((g) => ({ label: t(g.labelKey, { count: g.count }), items: g.items.filter((c) => !excludeSet.has(c.code)) })).filter((g) => g.items.length > 0);
   }
   function paint() {
     dropdown.querySelectorAll("[data-idx]").forEach((el) => {
@@ -12014,6 +12237,7 @@ var AccountingSettings = class {
     const baseHolder = baseRow.createDiv({ cls: "accounting-currency-base-sel" });
     createCurrencyPicker(baseHolder, {
       value: baseCurrency,
+      used: accountCurrencies,
       onPick: async (cur) => {
         const oldBase = baseCurrency;
         if (cur === oldBase) return;
@@ -12043,7 +12267,8 @@ var AccountingSettings = class {
       }
     });
     bodyEl.createEl("div", { text: t("settings.currency.ratesTableTitle", { base: baseCurrency }), cls: "accounting-currency-section-title" });
-    const rows = rateRowsFromTable(rates);
+    const usedSet = usedCurrencies(accountCurrencies, baseCurrency);
+    const rows = rateRowsWithPending(rates, accountCurrencies, baseCurrency);
     const listEl = bodyEl.createDiv({ cls: "accounting-currency-rates" });
     let dirty = false;
     const setDirty = (d) => {
@@ -12058,6 +12283,7 @@ var AccountingSettings = class {
         listEl.createEl("p", { text: t("settings.currency.noRates"), cls: "accounting-ledger-empty" });
       }
       for (const [i, r] of rows.entries()) {
+        const inUse = usedSet.has(r.currency.trim().toUpperCase());
         const row = listEl.createDiv({ cls: "accounting-currency-rate-row" });
         row.createEl("span", { text: r.currency, cls: "accounting-currency-cur-readonly" });
         row.createEl("span", { text: "1 =" });
@@ -12065,7 +12291,7 @@ var AccountingSettings = class {
         rateIn.type = "text";
         rateIn.inputMode = "decimal";
         rateIn.value = r.rate;
-        rateIn.placeholder = "rate";
+        rateIn.placeholder = inUse ? t("settings.currency.pendingRate") : "rate";
         rateIn.addEventListener("input", () => {
           r.rate = rateIn.value;
           setDirty(true);
@@ -12081,12 +12307,16 @@ var AccountingSettings = class {
         });
         row.appendChild(dateIn);
         if (r.isNew) rateIn.focus();
-        const delBtn = row.createEl("button", { text: t("common.delete"), cls: "accounting-ledger-delete" });
-        delBtn.onclick = () => {
-          rows.splice(i, 1);
-          setDirty(true);
-          renderList();
-        };
+        if (inUse) {
+          row.createEl("span", { text: t("settings.currency.inUse"), cls: "accounting-currency-inuse" });
+        } else {
+          const delBtn = row.createEl("button", { text: t("common.delete"), cls: "accounting-ledger-delete" });
+          delBtn.onclick = () => {
+            rows.splice(i, 1);
+            setDirty(true);
+            renderList();
+          };
+        }
       }
     };
     renderList();
@@ -12110,6 +12340,7 @@ var AccountingSettings = class {
       const used = rows.map((r) => r.currency.trim().toUpperCase()).filter(Boolean);
       addPicker = createCurrencyPicker(addHolder, {
         exclude: [...used, baseCurrency],
+        used: accountCurrencies,
         placeholder: t("settings.currency.searchToAddPlaceholder"),
         onPick: (code) => {
           rows.push({ id: crypto.randomUUID(), currency: code, rate: "", asOf: todayDateStr(), isNew: true });
@@ -12131,7 +12362,7 @@ var AccountingSettings = class {
       void refresh();
     };
     saveBtn.onclick = async () => {
-      const { invalid, duplicates, missingRate, emptyRows, baseRows } = validateRateRows(rows, baseCurrency);
+      const { invalid, duplicates, missingRate, emptyRows, baseRows } = validateRateRows(rows, baseCurrency, usedSet);
       if (emptyRows > 0) {
         new import_obsidian20.Notice(t("settings.currency.errEmptyRows", { n: emptyRows }), 5e3);
         return;
@@ -12644,7 +12875,7 @@ var AccountingSettings = class {
     this.refreshers.push(refreshTags);
     void refreshTags();
   }
-  /** 可见标签行：重命名 / 合并 / 删除（删除双态：被引用→隐藏，未引用→物理删；与分类行同口径）。 */
+  /** 可见标签行：重命名 / 合并 / 删除（真删除：清空账户标签 + 删托管条目）。 */
   renderAccountTagItem(containerEl, row, allRows, refresh) {
     const itemEl = containerEl.createDiv("accounting-ledger-item");
     const infoEl = itemEl.createDiv("accounting-ledger-info");
@@ -12941,22 +13172,15 @@ var AccountingSettings = class {
     await adapter.writeMeta({ accounts: plan.accounts, categories: plan.categories });
     return { retagged: plan.retagged };
   }
-  /** 删除标签双态：被引用→隐藏（派生行补建 active:false 条目）；未被引用→物理删条目。单步 confirm（与分类删除同口径）。 */
+  /** 删除标签（真删除）：清空全部账户的该标签并删托管条目（若有），无事件无备份。confirm 明示受影响账户数。 */
   async handleDeleteAccountTag(row) {
     const adapter = this.currentAdapter();
     const { accounts, categories } = await adapter.readMeta();
-    if (row.usage > 0) {
-      if (!confirm(t("settings.accountTag.deleteConfirmUsed", { name: row.name, n: row.usage }))) return;
-      const next = row.id ? categories.map((c) => c.id === row.id ? { ...c, active: false } : c) : [...categories, { id: newCategoryId(), name: row.name, flow: "accountTag", active: false }];
-      await adapter.writeMeta({ accounts, categories: next });
-      new import_obsidian20.Notice(t("settings.category.hiddenNotice", { name: row.name }));
-    } else {
-      if (!confirm(t("settings.accountTag.purgeConfirm", { name: row.name }))) return;
-      if (!row.id) return;
-      const next = categories.filter((c) => c.id !== row.id);
-      await adapter.writeMeta({ accounts, categories: next });
-      new import_obsidian20.Notice(t("settings.category.deletedNotice", { name: row.name }));
-    }
+    const message = row.usage > 0 ? t("settings.accountTag.deleteConfirmUsed", { name: row.name, n: row.usage }) : t("settings.accountTag.purgeConfirm", { name: row.name });
+    if (!confirm(message)) return;
+    const plan = planDeleteAccountTag({ accounts, categories, from: row.name, now: nowISO() });
+    await adapter.writeMeta({ accounts: plan.accounts, categories: plan.categories });
+    new import_obsidian20.Notice(row.usage > 0 ? t("settings.accountTag.deletedUsedNotice", { name: row.name, n: plan.retagged }) : t("settings.category.deletedNotice", { name: row.name }));
   }
   /** 恢复隐藏标签：active 置为可见（隐藏行必有托管条目）。 */
   async handleRestoreAccountTag(row) {
