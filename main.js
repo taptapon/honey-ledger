@@ -3163,11 +3163,12 @@ function rateBucketStats(items) {
   return out;
 }
 function expectedYieldReport(transactions, accounts, opts) {
-  const native = computeBalances(transactions, accounts);
-  const balances = opts?.base ? convertBalancesToBase(native, accounts, opts.rates ?? {}, opts.base, opts.logger) : native;
-  const nameOf = new Map(accounts.map((a) => [a.id, a.name]));
+  const visible = accounts.filter((a) => a.active !== false);
+  const native = computeBalances(transactions, visible);
+  const balances = opts?.base ? convertBalancesToBase(native, visible, opts.rates ?? {}, opts.base, opts.logger) : native;
+  const nameOf = new Map(visible.map((a) => [a.id, a.name]));
   const items = [];
-  for (const a of accounts) {
+  for (const a of visible) {
     if (a.expectedRate == null && a.maturityDate == null) continue;
     const bal = balances.get(a.id) ?? 0;
     const nativeBal = native.get(a.id) ?? 0;
@@ -3972,7 +3973,7 @@ var zh = {
   "balance.kindDynamic": "\u52A8\u6001",
   "balance.accountOptionsHint": "\u67E5\u770B\u8D26\u6237\u9009\u9879",
   "balance.adjustHint": "\u70B9\u51FB\u8C03\u6574\u4F59\u989D",
-  "balance.searchPlaceholder": "\u641C\u7D22\u8D26\u6237\u540D\u79F0",
+  "balance.searchPlaceholder": "\u641C\u7D22\u8D26\u6237",
   "balance.ariaClearSearch": "\u6E05\u9664\u641C\u7D22",
   "balance.noMatch": "\u6CA1\u6709\u5339\u914D\u7684\u8D26\u6237",
   // 展开/折叠（与流水页 txList.* 同文案、桌面 accounts.* 同语义）
@@ -4740,7 +4741,7 @@ var en = {
   "balance.kindDynamic": "Dynamic",
   "balance.accountOptionsHint": "View account options",
   "balance.adjustHint": "Tap to adjust balance",
-  "balance.searchPlaceholder": "Search account name",
+  "balance.searchPlaceholder": "Search account",
   "balance.ariaClearSearch": "Clear search",
   "balance.noMatch": "No matching accounts",
   // Expand/collapse all (same wording as txList.*, same semantics as desktop accounts.*)
@@ -6001,7 +6002,100 @@ var ObsidianDataAdapter = class _ObsidianDataAdapter {
 };
 
 // src/diagLogModal.ts
+var import_obsidian2 = require("obsidian");
+
+// src/keyboardAvoidance.ts
 var import_obsidian = require("obsidian");
+function bindEnterToBlur(rootEl) {
+  if (rootEl.dataset["acEnterBlurBound"]) return;
+  rootEl.dataset["acEnterBlurBound"] = "1";
+  rootEl.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const el = e.target;
+    if (!(el instanceof HTMLInputElement)) return;
+    switch (el.type) {
+      case "text":
+      case "search":
+      case "password":
+      case "number":
+      case "tel":
+      case "url":
+      case "email":
+        el.blur();
+    }
+  });
+}
+function bindKeyboardAvoidance(options) {
+  const { rootEl, modalEl, mode } = options;
+  const targetBottomRatio = options.targetBottomRatio ?? 0.45;
+  const delayMs = options.delayMs ?? 320;
+  let activeInput = null;
+  let disposed = false;
+  const reset = () => {
+    if (mode === "transform") {
+      modalEl.style.transform = "";
+    } else {
+      modalEl.style.top = "";
+      modalEl.style.position = "";
+    }
+  };
+  const isSmallScreen = () => import_obsidian.Platform.isMobile || window.innerWidth < 768;
+  const isSoftKeyboardTarget = (el) => {
+    if (el.tagName === "TEXTAREA") return true;
+    return el.tagName === "INPUT" && el.type === "text";
+  };
+  const liftActive = () => {
+    if (disposed || !isSmallScreen()) return;
+    reset();
+    const el = activeInput;
+    if (!el) return;
+    void modalEl.offsetWidth;
+    const rect = el.getBoundingClientRect();
+    const modalTop = modalEl.getBoundingClientRect().top;
+    const targetBottom = window.innerHeight * targetBottomRatio;
+    let shift = Math.max(0, Math.round(rect.bottom - targetBottom));
+    shift = Math.min(shift, Math.max(0, modalTop));
+    if (shift > 12) {
+      if (mode === "transform") {
+        modalEl.style.transform = `translateY(${-shift}px)`;
+      } else {
+        modalEl.style.position = "relative";
+        modalEl.style.top = `${-shift}px`;
+      }
+      window.setTimeout(() => el.scrollIntoView({ block: "center" }), 30);
+    }
+  };
+  const onFocusIn = (e) => {
+    const el = e.target;
+    if (!el || !isSoftKeyboardTarget(el)) return;
+    activeInput = el;
+    window.setTimeout(liftActive, delayMs);
+  };
+  const onFocusOut = () => {
+    activeInput = null;
+    window.setTimeout(liftActive, delayMs);
+  };
+  const onViewportResize = () => {
+    if (activeInput) liftActive();
+  };
+  rootEl.addEventListener("focusin", onFocusIn);
+  rootEl.addEventListener("focusout", onFocusOut);
+  window.visualViewport?.addEventListener("resize", onViewportResize);
+  return {
+    reset,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      rootEl.removeEventListener("focusin", onFocusIn);
+      rootEl.removeEventListener("focusout", onFocusOut);
+      window.visualViewport?.removeEventListener("resize", onViewportResize);
+      activeInput = null;
+      reset();
+    }
+  };
+}
+
+// src/diagLogModal.ts
 var LEVELS = ["ALL", "ERROR", "WARN", "INFO", "DEBUG"];
 var TONE = {
   ERROR: "var(--color-red)",
@@ -6012,7 +6106,7 @@ var TONE = {
 function lineLevel(line) {
   return line.split(/\s+/)[1] ?? null;
 }
-var DiagLogModal = class extends import_obsidian.Modal {
+var DiagLogModal = class extends import_obsidian2.Modal {
   level = "ALL";
   keyword = "";
   listEl;
@@ -6021,9 +6115,10 @@ var DiagLogModal = class extends import_obsidian.Modal {
   }
   async onOpen() {
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian2.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     const { contentEl } = this;
     contentEl.empty();
+    bindEnterToBlur(contentEl);
     contentEl.createEl("h2", { text: t("diaglog.title") }).addClass("accounting-modal-title");
     const toolbar = contentEl.createDiv({ cls: "accounting-diaglog-toolbar" });
     const seg = toolbar.createDiv({ cls: "accounting-diaglog-seg" });
@@ -6048,9 +6143,9 @@ var DiagLogModal = class extends import_obsidian.Modal {
     exportBtn.onclick = async () => {
       try {
         const path = await exportPluginLog();
-        new import_obsidian.Notice(`${t("diaglog.exportDone")}: ${path}`);
+        new import_obsidian2.Notice(`${t("diaglog.exportDone")}: ${path}`);
       } catch {
-        new import_obsidian.Notice(t("diaglog.exportFail"));
+        new import_obsidian2.Notice(t("diaglog.exportFail"));
       }
     };
     this.listEl = contentEl.createDiv({ cls: "accounting-diaglog-list" });
@@ -6091,8 +6186,8 @@ var DiagLogModal = class extends import_obsidian.Modal {
 };
 
 // src/ledgerHeader.ts
-var import_obsidian2 = require("obsidian");
-var LedgerSwitchModal = class extends import_obsidian2.Modal {
+var import_obsidian3 = require("obsidian");
+var LedgerSwitchModal = class extends import_obsidian3.Modal {
   constructor(app, current, ledgers, onPick) {
     super(app);
     this.current = current;
@@ -6164,8 +6259,8 @@ function mountLedgerPill(modalEl, app, adapter, alias, onPick) {
 }
 
 // src/ledgerPasswordModal.ts
-var import_obsidian3 = require("obsidian");
-var LedgerPasswordModal = class extends import_obsidian3.Modal {
+var import_obsidian4 = require("obsidian");
+var LedgerPasswordModal = class extends import_obsidian4.Modal {
   constructor(app, props, onSubmit, onCancel) {
     super(app);
     this.props = props;
@@ -6178,7 +6273,7 @@ var LedgerPasswordModal = class extends import_obsidian3.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian3.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian4.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     const title = this.props.mode === "unlock" ? t("settings.password.unlockTitle", { name: this.props.alias }) : this.props.mode === "set" ? t("settings.password.setTitle") : this.props.mode === "change" ? t("settings.password.changeTitle") : t("settings.password.removeTitle");
     contentEl.createEl("h2", { text: title });
     if (this.props.mode === "unlock") {
@@ -6302,80 +6397,6 @@ var import_obsidian7 = require("obsidian");
 
 // src/accountPropertiesModal.ts
 var import_obsidian5 = require("obsidian");
-
-// src/keyboardAvoidance.ts
-var import_obsidian4 = require("obsidian");
-function bindKeyboardAvoidance(options) {
-  const { rootEl, modalEl, mode } = options;
-  const targetBottomRatio = options.targetBottomRatio ?? 0.45;
-  const delayMs = options.delayMs ?? 320;
-  let activeInput = null;
-  let disposed = false;
-  const reset = () => {
-    if (mode === "transform") {
-      modalEl.style.transform = "";
-    } else {
-      modalEl.style.top = "";
-      modalEl.style.position = "";
-    }
-  };
-  const isSmallScreen = () => import_obsidian4.Platform.isMobile || window.innerWidth < 768;
-  const isSoftKeyboardTarget = (el) => {
-    if (el.tagName === "TEXTAREA") return true;
-    return el.tagName === "INPUT" && el.type === "text";
-  };
-  const liftActive = () => {
-    if (disposed || !isSmallScreen()) return;
-    reset();
-    const el = activeInput;
-    if (!el) return;
-    void modalEl.offsetWidth;
-    const rect = el.getBoundingClientRect();
-    const modalTop = modalEl.getBoundingClientRect().top;
-    const targetBottom = window.innerHeight * targetBottomRatio;
-    let shift = Math.max(0, Math.round(rect.bottom - targetBottom));
-    shift = Math.min(shift, Math.max(0, modalTop));
-    if (shift > 12) {
-      if (mode === "transform") {
-        modalEl.style.transform = `translateY(${-shift}px)`;
-      } else {
-        modalEl.style.position = "relative";
-        modalEl.style.top = `${-shift}px`;
-      }
-      window.setTimeout(() => el.scrollIntoView({ block: "center" }), 30);
-    }
-  };
-  const onFocusIn = (e) => {
-    const el = e.target;
-    if (!el || !isSoftKeyboardTarget(el)) return;
-    activeInput = el;
-    window.setTimeout(liftActive, delayMs);
-  };
-  const onFocusOut = () => {
-    activeInput = null;
-    window.setTimeout(liftActive, delayMs);
-  };
-  const onViewportResize = () => {
-    if (activeInput) liftActive();
-  };
-  rootEl.addEventListener("focusin", onFocusIn);
-  rootEl.addEventListener("focusout", onFocusOut);
-  window.visualViewport?.addEventListener("resize", onViewportResize);
-  return {
-    reset,
-    dispose() {
-      if (disposed) return;
-      disposed = true;
-      rootEl.removeEventListener("focusin", onFocusIn);
-      rootEl.removeEventListener("focusout", onFocusOut);
-      window.visualViewport?.removeEventListener("resize", onViewportResize);
-      activeInput = null;
-      reset();
-    }
-  };
-}
-
-// src/accountPropertiesModal.ts
 var AccountPropertiesModal = class extends import_obsidian5.Modal {
   constructor(app, adapter, account, accounts, categories, accountTypeSettings, onSaved) {
     super(app);
@@ -6490,6 +6511,7 @@ var AccountPropertiesModal = class extends import_obsidian5.Modal {
         else this.close();
       }
     });
+    bindEnterToBlur(contentEl);
     this.keyboardAvoidance = bindKeyboardAvoidance({
       rootEl: contentEl,
       modalEl: this.modalEl,
@@ -6881,6 +6903,7 @@ var AccountCreateModal = class extends import_obsidian8.Modal {
     this.modalEl.addClass("accounting-sub-modal");
     if (!import_obsidian8.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.addClass("accounting-adjust-modal");
+    bindEnterToBlur(contentEl);
     contentEl.createEl("div", { text: t("account.create.title"), cls: "accounting-adjust-title" });
     const nameRow = this.row(t("account.field.name"));
     this.nameEl = this.input(nameRow, "text");
@@ -8122,6 +8145,7 @@ var EntryModal = class extends import_obsidian13.Modal {
     contentEl.addClass("accounting-entry-modal");
     const sc = slideClass(this.slide);
     if (sc) contentEl.addClass(sc);
+    bindEnterToBlur(contentEl);
     renderNavOrBack(this.modalEl, "entry", this.navCtx, () => this.close(), this.recurringMode !== "none" || this.drillDown);
     if (this.onSwitchLedger) {
       const ledgerAlias = await this.adapter.readActiveLedgerAlias();
@@ -9175,7 +9199,7 @@ var ReportModal = class extends import_obsidian14.Modal {
    * 随后（↳ 图标）；无子产品的组主账户以组行样式直出（无「（合并）」标注、方向取条目自身、无明细行）
    * ——即使只有主账户也以「合并账户」形态展示，与桌面端一致。窄屏放不下四列时折叠本金列（账户列占满），
    * 收益率与预估年金额恒完整显示。到期 badge 按本地时钟算剩余天数（core 不持时钟）；本金本位币折算 +
-   * 原币种括注。无利率/到期账户时空态。
+   * 原币种括注；列表金额整数显示（`formatMoneyInt`，去小数位；合计卡仍两位小数）。无利率/到期账户时空态。
    * 列表排序：排序栏 + 浮层菜单（组为单位），默认收益金额（组净年金额）高→低。
    * 表头吸顶：滚动到顶后固定在二级视图 tab 栏正下方（offset 由 renderViewSwitch 量 tab 栏高度写入
    * `--accounting-report-tabs-h`，样式见 styles.css `.accounting-yield-head .accounting-yield-cell`）。
@@ -9258,10 +9282,10 @@ var ReportModal = class extends import_obsidian14.Modal {
         nm.createEl("span", { text: t("report.expectedYield.mergedTag"), cls: "accounting-yield-merged" });
         if (g.subtotal > 0) nm.appendChild(dirBadge("income"));
         else if (g.subtotal < 0) nm.appendChild(dirBadge("cost"));
-        row.createEl("span", { text: formatMoney(g.principalTotal, this.baseCurrency), cls: "accounting-yield-cell accounting-yield-cell-principal" });
+        row.createEl("span", { text: formatMoneyInt(g.principalTotal, this.baseCurrency), cls: "accounting-yield-cell accounting-yield-cell-principal" });
         row.createEl("span", { text: pct(g.weightedRate), cls: "accounting-yield-cell accounting-yield-cell-rate" });
         row.createEl("span", {
-          text: formatMoney(g.subtotal, this.baseCurrency),
+          text: formatMoneyInt(g.subtotal, this.baseCurrency),
           cls: `accounting-yield-cell accounting-yield-cell-amount${g.subtotal < 0 ? " accounting-yield-cell-amount-cost" : ""}`
         });
         if (g.parentItem) this.renderYieldItem(table, g.parentItem, todayMs, "main");
@@ -9275,10 +9299,10 @@ var ReportModal = class extends import_obsidian14.Modal {
         const nm = nameEl.createDiv({ cls: "accounting-yield-name" });
         nm.createEl("span", { text: pi.name });
         nm.appendChild(dirBadge(pi.direction));
-        row.createEl("span", { text: formatMoney(pi.principal, this.baseCurrency), cls: "accounting-yield-cell accounting-yield-cell-principal" });
+        row.createEl("span", { text: formatMoneyInt(pi.principal, this.baseCurrency), cls: "accounting-yield-cell accounting-yield-cell-principal" });
         row.createEl("span", { text: pct(pi.expectedRate), cls: "accounting-yield-cell accounting-yield-cell-rate" });
         row.createEl("span", {
-          text: pi.annualAmount == null ? "\u2014" : formatMoney(pi.annualAmount, this.baseCurrency),
+          text: pi.annualAmount == null ? "\u2014" : formatMoneyInt(pi.annualAmount, this.baseCurrency),
           cls: `accounting-yield-cell accounting-yield-cell-amount accounting-yield-cell-amount-${pi.direction}`
         });
         nm.style.cursor = "pointer";
@@ -9477,11 +9501,11 @@ var ReportModal = class extends import_obsidian14.Modal {
       if (!acct) return;
       new AccountActionModal(this.app, this.adapter, acct, this.accounts, this.categories, this.accountTypeSettings, this.navCtx, () => this.reloadData()).open();
     };
-    const principal = item.currency !== this.baseCurrency ? `${formatMoney(item.principal, this.baseCurrency)} (${formatMoney(item.principalNative, item.currency)})` : formatMoney(item.principal, this.baseCurrency);
+    const principal = item.currency !== this.baseCurrency ? `${formatMoneyInt(item.principal, this.baseCurrency)} (${formatMoneyInt(item.principalNative, item.currency)})` : formatMoneyInt(item.principal, this.baseCurrency);
     row.createEl("span", { text: principal, cls: "accounting-yield-cell accounting-yield-cell-principal" });
     row.createEl("span", { text: item.expectedRate != null ? `${(item.expectedRate * 100).toFixed(2)}%` : "\u2014", cls: "accounting-yield-cell accounting-yield-cell-rate" });
     row.createEl("span", {
-      text: item.annualAmount == null ? "\u2014" : formatMoney(item.annualAmount, this.baseCurrency),
+      text: item.annualAmount == null ? "\u2014" : formatMoneyInt(item.annualAmount, this.baseCurrency),
       cls: `accounting-yield-cell accounting-yield-cell-amount accounting-yield-cell-amount-${item.direction}`
     });
   }
@@ -10063,6 +10087,7 @@ var BatchModifyModal = class extends import_obsidian16.Modal {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("accounting-modal");
+    bindEnterToBlur(contentEl);
     try {
       this.baseCurrency = await this.adapter.readBaseCurrency();
     } catch {
@@ -11553,6 +11578,7 @@ function createCurrencyPicker(parent, opts) {
   function pick(code) {
     input.value = `${currencyDisplayName(code, getLocale())} ${code}`;
     close();
+    input.blur();
     opts.onPick(code);
   }
   input.addEventListener("focus", openPanel);
@@ -11625,6 +11651,7 @@ function createCurrencyPicker(parent, opts) {
 // src/createLedgerForm.ts
 function renderCreateLedgerForm(container, existing, handlers, opts = {}) {
   container.empty();
+  bindEnterToBlur(container);
   container.createEl("h2", { text: opts.title ?? t("ledger.create.title") });
   const nameInput = container.createEl("input", { type: "text", cls: "accounting-ledger-input" });
   nameInput.placeholder = t("ledger.create.namePlaceholder");
@@ -12270,6 +12297,7 @@ var AccountingSettings = class {
     const usedSet = usedCurrencies(accountCurrencies, baseCurrency);
     const rows = rateRowsWithPending(rates, accountCurrencies, baseCurrency);
     const listEl = bodyEl.createDiv({ cls: "accounting-currency-rates" });
+    bindEnterToBlur(listEl);
     let dirty = false;
     const setDirty = (d) => {
       dirty = d;
@@ -13532,6 +13560,7 @@ var RenameLedgerAliasModal = class extends import_obsidian20.Modal {
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
     if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    bindEnterToBlur(contentEl);
     contentEl.createEl("h2", { text: t("settings.ledger.renameAliasTitle") });
     this.input = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
     this.input.value = this.currentAlias;
@@ -13619,6 +13648,7 @@ var CreateCategoryModal = class extends import_obsidian20.Modal {
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
     if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    bindEnterToBlur(contentEl);
     contentEl.createEl("h2", { text: t("settings.category.createTitle", { title: this.flowTitle }) });
     this.nameInput = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
     this.nameInput.placeholder = this.placeholder;
@@ -13655,6 +13685,7 @@ var RenameCategoryModal = class extends import_obsidian20.Modal {
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
     if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    bindEnterToBlur(contentEl);
     contentEl.createEl("h2", { text: this.title ?? t("settings.category.renameTitle") });
     this.input = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
     this.input.value = this.cat.name;
@@ -13786,6 +13817,7 @@ var CreateAccountTypeModal = class extends import_obsidian20.Modal {
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
     if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    bindEnterToBlur(contentEl);
     contentEl.createEl("h2", { text: t("settings.accountTypes.createTitle") });
     this.labelInput = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
     this.labelInput.placeholder = t("settings.accountTypes.newPlaceholder");
@@ -13827,6 +13859,7 @@ var CreateAccountTypeGroupModal = class extends import_obsidian20.Modal {
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
     if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    bindEnterToBlur(contentEl);
     contentEl.createEl("h2", { text: t("settings.accountType.createTitle") });
     this.nameInput = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
     this.nameInput.placeholder = t("settings.accountType.newGroupPlaceholder");
