@@ -1378,10 +1378,20 @@ function extractAmountFromNote(text) {
     const after = end < text.length ? text[end] : "";
     const rest = end < text.length ? text.slice(end) : "";
     const beforeText = text.slice(0, start);
-    if (before === ":" || before === "\uFF1A" || after === ":" || after === "\uFF1A") continue;
+    if (before === ":" || before === "\uFF1A") {
+      const prev = start > 1 ? text[start - 2] : "";
+      if (/\d/.test(prev)) continue;
+    }
+    if (after === ":" || after === "\uFF1A") {
+      const next = end + 1 < text.length ? text[end + 1] : "";
+      if (/\d/.test(next)) continue;
+    }
     if (after && excludedSuffix.has(after)) continue;
     if (/^(ml|kg|l(?![a-z]))/i.test(rest)) continue;
-    if (nonAmountLabelBefore.some((w) => beforeText.endsWith(w))) continue;
+    if (nonAmountLabelBefore.some(
+      (w) => beforeText.endsWith(w) || beforeText.endsWith(`${w}\u4E3A`) || beforeText.endsWith(`${w}\u662F`)
+    ))
+      continue;
     const cleaned = m[0].replace(/,/g, "");
     const val = Number(cleaned);
     if (!Number.isFinite(val) || val <= 0) continue;
@@ -2920,24 +2930,21 @@ function inferDefaultCategory(transactions, categories, input) {
   const result = (input.account ? score(true) : null) ?? score(false);
   return result ? pickWinner(result) : void 0;
 }
-function inferTransferAccounts(transactions, accounts, now) {
+function inferTransferAccounts(transactions, accounts) {
   const candidates = candidateIds(accounts);
   if (candidates.size === 0) return {};
-  const nowMs = Date.parse(now ?? nowISO());
-  const map = /* @__PURE__ */ new Map();
+  let latest;
   for (const tx of transactions) {
     if (tx.type !== "transfer") continue;
-    const from2 = tx.fromAccount;
-    const to2 = tx.toAccount;
-    if (!from2 || !to2 || !candidates.has(from2) || !candidates.has(to2)) continue;
-    const r = weightOf(tx.ts, nowMs);
-    if (!r) continue;
-    accumulate(map, `${from2} ${to2}`, r.w, r.ms);
+    const from = tx.fromAccount;
+    const to = tx.toAccount;
+    if (!from || !to || !candidates.has(from) || !candidates.has(to)) continue;
+    const ms = Date.parse(tx.ts);
+    if (Number.isNaN(ms)) continue;
+    if (!latest || ms > latest.ms) latest = { from, to, ms };
   }
-  const best = pickWinner(map);
-  if (!best) return {};
-  const [from, to] = best.split(" ");
-  return { fromAccount: from, toAccount: to };
+  if (!latest) return {};
+  return { fromAccount: latest.from, toAccount: latest.to };
 }
 
 // ../../packages/core/src/accountOps.ts
@@ -3711,7 +3718,6 @@ var zh = {
   "nav.dashboard": "\u62A5\u8868",
   "nav.settings": "\u8BBE\u7F6E",
   "nav.back": "\u2039 \u8FD4\u56DE",
-  "keypad.done": "\u5B8C\u6210",
   "keypad.error": "\u26A0 \u516C\u5F0F\u6709\u8BEF",
   // KR4/task4: transactionDetailModal — reused desktop-aligned keys + plugin-specific txDetail.*
   "common.delete": "\u5220\u9664",
@@ -3809,6 +3815,9 @@ var zh = {
   "account.selectPlaceholder": "\u8BF7\u9009\u62E9",
   "entry.amount": "\u91D1\u989D",
   "entry.amountWithCur": "\u91D1\u989D\uFF08{{cur}}\uFF09",
+  "entry.clear": "\u6E05\u9664",
+  "entry.again": "\u518D\u8BB0",
+  "entry.saved": "\u5DF2\u4FDD\u5B58",
   "entry.fromNote": "\u2190 \u6765\u81EA\u5907\u6CE8",
   "entry.rateLabel": "\u6C47\u7387\uFF081 {{from}} \u2192 {{to}}\uFF09",
   "entry.ratePlaceholder": "1 {{from}} = ? {{to}}",
@@ -3982,9 +3991,9 @@ var zh = {
   "balance.allTypes": "\u5168\u90E8\u7C7B\u578B",
   "balance.typeFilterLabel": "\u8D26\u6237\u7C7B\u578B",
   "balance.typeLabel": "\u7C7B\u578B",
-  // 不分组模式（默认态）：主账户聚合行的「合计」标注 + 金额胶囊内父自身余额括注
-  "balance.mergedTag": "\u5408\u8BA1",
-  "balance.ownAmountNote": "\uFF08\u81EA\u8EAB {{amt}}\uFF09",
+  // 不分组模式（默认态）：主账户聚合行的「合」标注 + 金额胶囊内父自身余额括注（单字省宽）
+  "balance.mergedTag": "\u5408",
+  "balance.ownAmountNote": "\uFF08\u81EA {{amt}}\uFF09",
   // 分组方式可见短标签（一行容纳三控件；aria 仍用 modeLabel 全称）
   "accountGrouping.modeLabelShort": "\u5206\u7EC4",
   // 账户分组方式（与桌面 accountGrouping.* 同名对齐；type-group 为默认）
@@ -4479,7 +4488,6 @@ var en = {
   "nav.dashboard": "Reports",
   "nav.settings": "Settings",
   "nav.back": "\u2039 Back",
-  "keypad.done": "Done",
   "keypad.error": "\u26A0 Invalid formula",
   // KR4/task4: transactionDetailModal — reused desktop-aligned keys + plugin-specific txDetail.*
   "common.delete": "Delete",
@@ -4577,6 +4585,9 @@ var en = {
   "account.selectPlaceholder": "Select",
   "entry.amount": "Amount",
   "entry.amountWithCur": "Amount ({{cur}})",
+  "entry.clear": "Clear",
+  "entry.again": "Save & new",
+  "entry.saved": "Saved",
   "entry.fromNote": "\u2190 from note",
   "entry.rateLabel": "Rate (1 {{from}} \u2192 {{to}})",
   "entry.ratePlaceholder": "1 {{from}} = ? {{to}}",
@@ -6006,6 +6017,9 @@ var import_obsidian2 = require("obsidian");
 
 // src/keyboardAvoidance.ts
 var import_obsidian = require("obsidian");
+var KEYBOARD_GAP_PX = 8;
+var MIN_AVAIL_PX = 120;
+var FALLBACK_KB_TOP_RATIO = 0.55;
 function bindEnterToBlur(rootEl) {
   if (rootEl.dataset["acEnterBlurBound"]) return;
   rootEl.dataset["acEnterBlurBound"] = "1";
@@ -6031,6 +6045,11 @@ function bindKeyboardAvoidance(options) {
   const delayMs = options.delayMs ?? 320;
   let activeInput = null;
   let disposed = false;
+  let shrinkApplied = false;
+  let focusViewportH = 0;
+  let vvReportedShrink = false;
+  let viewportResized = false;
+  let awaitingRise = false;
   const reset = () => {
     if (mode === "transform") {
       modalEl.style.transform = "";
@@ -6038,14 +6057,64 @@ function bindKeyboardAvoidance(options) {
       modalEl.style.top = "";
       modalEl.style.position = "";
     }
+    if (shrinkApplied) {
+      rootEl.style.maxHeight = "";
+      rootEl.style.overflowY = "";
+      shrinkApplied = false;
+    }
+    if (mode === "top") {
+      document.documentElement.style.scrollPaddingBottom = "";
+    }
   };
   const isSmallScreen = () => import_obsidian.Platform.isMobile || window.innerWidth < 768;
   const isSoftKeyboardTarget = (el) => {
-    if (el.tagName === "TEXTAREA") return true;
-    return el.tagName === "INPUT" && el.type === "text";
+    if (el instanceof HTMLTextAreaElement) return !el.readOnly && !el.disabled;
+    if (!(el instanceof HTMLInputElement)) return false;
+    if (el.readOnly || el.disabled) return false;
+    switch (el.type) {
+      case "text":
+      case "number":
+      // iOS 数字框弹数字软键盘同样遮挡：账户属性/新建账户的余额、信用额度等此前完全无避让
+      case "tel":
+      case "url":
+      case "email":
+      case "search":
+      case "password":
+        return true;
+      default:
+        return false;
+    }
   };
-  const liftActive = () => {
-    if (disposed || !isSmallScreen()) return;
+  const keyboardInfo = () => {
+    const vv = window.visualViewport;
+    if (!vv || vv.height <= 0) {
+      return { kbTop: Math.round(window.innerHeight * FALLBACK_KB_TOP_RATIO), visTop: 0 };
+    }
+    const kbTop = vv.offsetTop + vv.height;
+    if (kbTop >= window.innerHeight - 2) return null;
+    return { kbTop: Math.round(kbTop), visTop: vv.offsetTop };
+  };
+  const vvReportsKeyboard = () => {
+    const vv = window.visualViewport;
+    return !!vv && vv.height > 0 && vv.offsetTop + vv.height < window.innerHeight - 2;
+  };
+  const safeAreaTop = () => {
+    const probe = document.createElement("div");
+    probe.style.cssText = "position:fixed;top:0;left:0;width:0;height:0;visibility:hidden;padding-top:max(env(safe-area-inset-top),10px);";
+    document.body.appendChild(probe);
+    const h = Math.ceil(parseFloat(getComputedStyle(probe).paddingTop) || 0);
+    probe.remove();
+    return h;
+  };
+  const applyShift = (shift) => {
+    if (mode === "transform") {
+      modalEl.style.transform = `translateY(${-shift}px)`;
+    } else {
+      modalEl.style.position = "relative";
+      modalEl.style.top = `${-shift}px`;
+    }
+  };
+  const liftActiveTransformLegacy = () => {
     reset();
     const el = activeInput;
     if (!el) return;
@@ -6056,19 +6125,110 @@ function bindKeyboardAvoidance(options) {
     let shift = Math.max(0, Math.round(rect.bottom - targetBottom));
     shift = Math.min(shift, Math.max(0, modalTop));
     if (shift > 12) {
-      if (mode === "transform") {
-        modalEl.style.transform = `translateY(${-shift}px)`;
-      } else {
-        modalEl.style.position = "relative";
-        modalEl.style.top = `${-shift}px`;
-      }
+      applyShift(shift);
       window.setTimeout(() => el.scrollIntoView({ block: "center" }), 30);
+    }
+  };
+  const resolveKeyboard = () => {
+    const kb = keyboardInfo();
+    if (kb) {
+      vvReportedShrink = true;
+      awaitingRise = false;
+      return kb;
+    }
+    if (focusViewportH > 0 && window.innerHeight < focusViewportH - 2) viewportResized = true;
+    if (viewportResized) return null;
+    if (vvReportedShrink && !awaitingRise) return null;
+    if (!import_obsidian.Platform.isMobile || !focusViewportH) return null;
+    return { kbTop: Math.round(window.innerHeight * FALLBACK_KB_TOP_RATIO), visTop: 0 };
+  };
+  const liftActive = () => {
+    if (disposed || !isSmallScreen()) return;
+    if (mode === "transform") {
+      liftActiveTransformLegacy();
+      return;
+    }
+    const el = activeInput;
+    if (!el) {
+      reset();
+      return;
+    }
+    const kb = resolveKeyboard();
+    if (!kb) {
+      reset();
+      return;
+    }
+    const topLimit = Math.max(kb.visTop, safeAreaTop());
+    const target = kb.kbTop - KEYBOARD_GAP_PX;
+    {
+      const rCur = modalEl.getBoundingClientRect();
+      const bandCur = rootEl.getBoundingClientRect();
+      const elCur = el.getBoundingClientRect();
+      if (rCur.bottom <= target + 1 && elCur.top >= bandCur.top - 1 && elCur.bottom <= bandCur.bottom + 1) {
+        document.documentElement.style.scrollPaddingBottom = `${Math.max(0, window.innerHeight - kb.kbTop)}px`;
+        return;
+      }
+    }
+    reset();
+    document.documentElement.style.scrollPaddingBottom = `${Math.max(0, window.innerHeight - kb.kbTop)}px`;
+    const r0 = modalEl.getBoundingClientRect();
+    if (r0.bottom <= target) return;
+    const excess = r0.bottom - target;
+    const lift = Math.min(excess, Math.max(0, r0.top - topLimit));
+    let applied = 0;
+    if (lift > 1) {
+      applied = Math.round(lift);
+      applyShift(applied);
+    }
+    const avail = Math.max(MIN_AVAIL_PX, target - topLimit);
+    if (r0.height > avail) {
+      const contentH = rootEl.getBoundingClientRect().height;
+      rootEl.style.maxHeight = `${Math.max(MIN_AVAIL_PX, Math.floor(contentH - (r0.height - avail)))}px`;
+      rootEl.style.overflowY = "auto";
+      shrinkApplied = true;
+      void modalEl.offsetWidth;
+      const r1 = modalEl.getBoundingClientRect();
+      const delta = Math.round(r1.top - topLimit);
+      if (delta !== 0) {
+        applied += delta;
+        applyShift(applied);
+      }
+      for (let pass = 0; pass < 2; pass++) {
+        void modalEl.offsetWidth;
+        const r2 = modalEl.getBoundingClientRect();
+        if (r2.bottom <= target + 1) break;
+        const cur = rootEl.getBoundingClientRect().height;
+        const next = cur - (r2.bottom - target);
+        if (next <= MIN_AVAIL_PX || next >= cur) break;
+        rootEl.style.maxHeight = `${Math.floor(next)}px`;
+        void modalEl.offsetWidth;
+        const r3 = modalEl.getBoundingClientRect();
+        const delta3 = Math.round(r3.top - topLimit);
+        if (delta3 !== 0) {
+          applied += delta3;
+          applyShift(applied);
+        }
+      }
+    }
+    {
+      const MARGIN = 12;
+      const er = el.getBoundingClientRect();
+      const cr = rootEl.getBoundingClientRect();
+      let to = null;
+      if (er.top < cr.top) to = rootEl.scrollTop + (er.top - cr.top - MARGIN);
+      else if (er.bottom > cr.bottom) to = rootEl.scrollTop + (er.bottom - cr.bottom + MARGIN);
+      if (to != null) rootEl.scrollTo({ top: to, behavior: "auto" });
     }
   };
   const onFocusIn = (e) => {
     const el = e.target;
     if (!el || !isSoftKeyboardTarget(el)) return;
     activeInput = el;
+    focusViewportH = window.innerHeight;
+    awaitingRise = !vvReportsKeyboard() && !viewportResized;
+    if (mode === "top" && awaitingRise) {
+      window.setTimeout(liftActive, 40);
+    }
     window.setTimeout(liftActive, delayMs);
   };
   const onFocusOut = () => {
@@ -6076,8 +6236,16 @@ function bindKeyboardAvoidance(options) {
     window.setTimeout(liftActive, delayMs);
   };
   const onViewportResize = () => {
+    if (!vvReportsKeyboard()) awaitingRise = false;
     if (activeInput) liftActive();
   };
+  let containerOverflow = "";
+  const modalContainer = modalEl.parentElement;
+  const containerLocked = mode === "top" && !!modalContainer && modalContainer !== document.body;
+  if (containerLocked && modalContainer) {
+    containerOverflow = modalContainer.style.overflow;
+    modalContainer.style.overflow = "hidden";
+  }
   rootEl.addEventListener("focusin", onFocusIn);
   rootEl.addEventListener("focusout", onFocusOut);
   window.visualViewport?.addEventListener("resize", onViewportResize);
@@ -6089,6 +6257,7 @@ function bindKeyboardAvoidance(options) {
       rootEl.removeEventListener("focusin", onFocusIn);
       rootEl.removeEventListener("focusout", onFocusOut);
       window.visualViewport?.removeEventListener("resize", onViewportResize);
+      if (containerLocked && modalContainer) modalContainer.style.overflow = containerOverflow;
       activeInput = null;
       reset();
     }
@@ -7838,7 +8007,7 @@ var KEYS = [
   { label: "+/-", act: "sign", cls: "accounting-calc-key--util" },
   { label: "0", act: "append", ch: "0" },
   { label: ".", act: "append", ch: "." },
-  { label: "\u5B8C\u6210", act: "equals", i18nKey: "keypad.done", cls: "accounting-calc-key--eq" }
+  { label: "=", act: "equals", cls: "accounting-calc-key--util" }
 ];
 function hasOperator(v) {
   return /[+×÷*/%]/.test(v) || v.slice(1).includes("-") || v.slice(1).includes("\u2212");
@@ -7856,18 +8025,14 @@ function mountCalculatorKeypad(host, h) {
   function press(k) {
     const v = h.getValue();
     let next = v;
-    let shouldClose = false;
     if (k.act === "clear") next = "";
     else if (k.act === "back") next = v.slice(0, -1);
     else if (k.act === "append") next = v + (k.ch ?? "");
     else if (k.act === "sign") next = v.startsWith("-") ? v.slice(1) : "-" + v;
     else if (k.act === "equals") {
       const r = evaluateAmount(v);
-      if (v.trim() === "") {
-        shouldClose = true;
-      } else if (r.ok && r.value > 0) {
+      if (r.ok && r.value > 0) {
         next = String(round2(r.value));
-        shouldClose = true;
       } else {
         preview.empty();
         preview.createEl("span", { text: t("keypad.error"), cls: "accounting-calc-preview-error" });
@@ -7879,15 +8044,15 @@ function mountCalculatorKeypad(host, h) {
       h.onChange(next);
       renderPreview();
     }
-    if (shouldClose) h.onClose?.();
   }
   for (const k of KEYS) {
     const btn = grid.createEl("button", { cls: `accounting-calc-key ${k.cls ?? ""}`.trim() });
     btn.type = "button";
-    btn.setText(k.i18nKey ? t(k.i18nKey) : k.label);
+    btn.setText(k.label);
     btn.addEventListener("click", () => press(k));
   }
   renderPreview();
+  return { refresh: renderPreview };
 }
 
 // src/settlement.ts
@@ -7998,6 +8163,21 @@ var WEEKDAYS = [
   { i18nKey: "entry.weekday.fri" },
   { i18nKey: "entry.weekday.sat" }
 ];
+var LAST_TRANSFER_KEY = "accounting.lastTransferPair";
+function readLastTransferPair() {
+  try {
+    const v = JSON.parse(window.localStorage.getItem(LAST_TRANSFER_KEY) ?? "");
+    return typeof v?.fromAccount === "string" && typeof v?.toAccount === "string" ? v : null;
+  } catch {
+    return null;
+  }
+}
+function saveLastTransferPair(pair) {
+  try {
+    window.localStorage.setItem(LAST_TRANSFER_KEY, JSON.stringify(pair));
+  } catch {
+  }
+}
 function flashAmountError(el) {
   let n = 0;
   el.classList.remove("accounting-amount-error");
@@ -8078,9 +8258,15 @@ var EntryModal = class extends import_obsidian13.Modal {
   drillDown = false;
   opened = false;
   closing = false;
-  calcOpen = false;
   amountInputEl = null;
-  keypadHostEl = null;
+  /** 底部 dock 内的保存键（onOpen 创建一次）：字段区 rerender 不重建，仅按需刷新 disabled。 */
+  submitBtnEl = null;
+  /** dock 内「再记」键（仅纯新建模式显示，renderFields 尾部同步显隐）。 */
+  againBtnEl = null;
+  /** 计算器句柄：外部改写金额（清除/再记/备注提取）后刷新预览行。 */
+  calcKeypad;
+  /** onOpen 推断完成后的状态快照：「清除」恢复到这个默认态（编辑/复制模式=载入值）。 */
+  initialState;
   recurringMode = "none";
   repeatLocked = false;
   repeatOn = false;
@@ -8160,53 +8346,45 @@ var EntryModal = class extends import_obsidian13.Modal {
     this.baseCurrency = await this.adapter.readBaseCurrency();
     this.rates = await this.adapter.readRates();
     this.maybeInferDefaults();
+    this.initialState = { ...this.state };
     this.typeRow = contentEl.createDiv({ cls: "accounting-entry-type" });
     this.renderTypeButtons();
     this.fieldContainer = contentEl.createDiv({ cls: "accounting-entry-fields" });
     this.renderFields();
     this.errorEl = contentEl.createDiv({ cls: "accounting-entry-error-slot" });
+    const dock = contentEl.createDiv({ cls: "accounting-entry-footer", attr: { "data-no-swipe": "" } });
+    const keypadHost = dock.createDiv({ cls: "accounting-calc-host" });
+    this.calcKeypad = mountCalculatorKeypad(keypadHost, {
+      getValue: () => this.state.amount,
+      onChange: (next) => {
+        this.state.amount = next;
+        if (this.amountInputEl) this.amountInputEl.value = next;
+        this.updateSettlePreview();
+        this.updateFromNoteHint();
+        this.updateOverdraftHints();
+      },
+      onError: () => {
+        if (this.amountInputEl) flashAmountError(this.amountInputEl);
+      }
+    });
+    const actions = dock.createDiv({ cls: "accounting-entry-actions" });
+    const clearBtn = actions.createEl("button", { text: t("entry.clear"), cls: "accounting-entry-aux" });
+    clearBtn.onclick = () => this.clearForm();
+    this.againBtnEl = actions.createEl("button", { text: t("entry.again"), cls: "accounting-entry-aux" });
+    this.againBtnEl.onclick = () => void this.submit(true);
+    this.submitBtnEl = actions.createEl("button", { text: t("common.save"), cls: "accounting-entry-submit" });
+    this.submitBtnEl.onclick = () => void this.submit(false);
     this.keyboardAvoidance = bindKeyboardAvoidance({
       rootEl: this.fieldContainer,
       modalEl: this.modalEl,
       mode: "transform"
     });
-    this.contentEl.addEventListener("click", this.handleOutsideClick);
     this.swipeTabs = bindSwipeTabs({
       host: this.contentEl,
       onNext: () => this.stepType(1),
       onPrev: () => this.stepType(-1)
     });
   }
-  /** 收起计算器键盘（「完成」/取消共用）。 */
-  closeKeypad() {
-    this.keypadHostEl?.hide();
-    this.calcOpen = false;
-  }
-  /** 点计算器之外（其它输入项 / 空白）：合法正数→折叠提交（同「完成」），否则→清空（取消）。
-   *  排除计算器内部（交给按键）与金额框本身（点击保持打开）。 */
-  handleOutsideClick = (e) => {
-    if (!this.calcOpen) return;
-    const target = e.target;
-    if (!target) return;
-    if (this.keypadHostEl?.contains(target)) return;
-    if (this.amountInputEl && (target === this.amountInputEl || this.amountInputEl.contains(target))) return;
-    const r = evaluateAmount(this.state.amount);
-    const input = this.amountInputEl;
-    if (input) {
-      if (r.ok && r.value > 0) {
-        const folded = String(round2(r.value));
-        this.state.amount = folded;
-        input.value = folded;
-      } else {
-        this.state.amount = "";
-        input.value = "";
-        this.keypadHostEl?.querySelector(".accounting-calc-preview")?.empty();
-      }
-      this.updateSettlePreview();
-    }
-    this.closeKeypad();
-    this.updateFromNoteHint();
-  };
   renderTypeButtons() {
     this.typeRow.empty();
     for (const tp of TYPES) {
@@ -8238,9 +8416,13 @@ var EntryModal = class extends import_obsidian13.Modal {
     if (this.state.type === "transfer") {
       if (this.fromTouched || this.toTouched) return;
       const pair = inferTransferAccounts(this.transactions, this.accounts);
-      if (pair.fromAccount && pair.toAccount) {
-        this.state.fromAccount = pair.fromAccount;
-        this.state.toAccount = pair.toAccount;
+      const last = readLastTransferPair();
+      const valid = (id) => id && this.accounts.some((a) => a.id === id && a.active) ? id : void 0;
+      const from = pair.fromAccount ?? valid(last?.fromAccount);
+      const to = pair.toAccount ?? valid(last?.toAccount);
+      if (from && to && from !== to) {
+        this.state.fromAccount = from;
+        this.state.toAccount = to;
       }
       return;
     }
@@ -8260,6 +8442,19 @@ var EntryModal = class extends import_obsidian13.Modal {
   rerender() {
     this.fieldContainer.empty();
     this.renderFields();
+  }
+  /** 「清除」：恢复 onOpen 时（推断后）的默认态快照；编辑/复制/周期账模式 = 回到载入值。
+   *  touched 一并复位（默认值推断可重新生效）；重复开关 / schedule 不动。 */
+  clearForm() {
+    this.state = { ...this.initialState };
+    this.accountTouched = false;
+    this.categoryTouched = false;
+    this.fromTouched = false;
+    this.toTouched = false;
+    this.errorEl.empty();
+    this.renderTypeButtons();
+    this.rerender();
+    this.calcKeypad?.refresh();
   }
   /** 移动端轻扫按方向（+1 下一个 / -1 上一个）切交易类型 tab：在 TYPES 顺序内夹界、不循环。
    *  与点按 tab 同路径——switchType 内改 state.type 后 renderTypeButtons + rerender。 */
@@ -8356,27 +8551,7 @@ var EntryModal = class extends import_obsidian13.Modal {
     amountInput.inputMode = "decimal";
     amountInput.value = s.amount;
     amountInput.placeholder = "0.00";
-    const keypadHost = amountStack.createDiv({ cls: "accounting-calc-host", attr: { "data-no-swipe": "" } });
     this.amountInputEl = amountInput;
-    this.keypadHostEl = keypadHost;
-    mountCalculatorKeypad(keypadHost, {
-      getValue: () => s.amount,
-      onChange: (next) => {
-        s.amount = next;
-        amountInput.value = next;
-        this.updateSettlePreview();
-        this.updateFromNoteHint();
-        this.updateOverdraftHints();
-      },
-      onClose: () => this.closeKeypad(),
-      onError: () => flashAmountError(amountInput)
-    });
-    keypadHost.hide();
-    this.calcOpen = false;
-    amountInput.addEventListener("click", () => {
-      keypadHost.show();
-      this.calcOpen = true;
-    });
     this.fromNoteHintEl = amountStack.createDiv({ cls: "accounting-entry-from-note", text: t("entry.fromNote") });
     this.fromNoteHintEl.hide();
     this.updateFromNoteHint();
@@ -8465,6 +8640,7 @@ var EntryModal = class extends import_obsidian13.Modal {
           s.amount = ex;
           amountInput.value = ex;
           this.updateSettlePreview();
+          this.calcKeypad?.refresh();
         }
       }
       if (!this.accountTouched && !this.originalTxId && this.recurringMode === "none" && s.type !== "transfer" && !ev.isComposing) {
@@ -8513,12 +8689,12 @@ var EntryModal = class extends import_obsidian13.Modal {
       };
     }
     this.renderRecurringSection(wrap);
-    const submitBtn = wrap.createEl("button", {
-      text: t("common.save"),
-      cls: "accounting-entry-submit"
-    });
-    submitBtn.disabled = !!this.loanCurrencyMismatch();
-    submitBtn.onclick = () => this.submit();
+    if (this.submitBtnEl) this.submitBtnEl.disabled = !!this.loanCurrencyMismatch();
+    if (this.againBtnEl) {
+      const pureNew = !this.originalTxId && this.recurringMode === "none" && !this.drillDown && !this.repeatOn;
+      if (pureNew) this.againBtnEl.show();
+      else this.againBtnEl.hide();
+    }
   }
   renderRecurringSection(wrap) {
     if (!this.repeatOn) return;
@@ -8927,7 +9103,9 @@ var EntryModal = class extends import_obsidian13.Modal {
     else this.onSubmitted();
     this.close();
   }
-  async submit() {
+  /** keepOpen=true（「再记」）：保存成功后留在当前页连续记账，只清金额，其余字段保持；
+   *  结清路径（submitSettlement）不透传、照常关闭——结清后往来已平，无继续记语义。 */
+  async submit(keepOpen = false) {
     const s = this.state;
     const amtRes = evaluateAmount(s.amount);
     if (!amtRes.ok || amtRes.value <= 0) {
@@ -8987,8 +9165,21 @@ var EntryModal = class extends import_obsidian13.Modal {
     const now = nowISO();
     const ev = { ...base, op: "upsert", createdAt: now, updatedAt: now, source: "manual" };
     await this.adapter.appendEvents([ev]);
-    this.onSubmitted(ev.id);
-    this.close();
+    if (ev.type === "transfer" && ev.fromAccount && ev.toAccount) {
+      saveLastTransferPair({ fromAccount: ev.fromAccount, toAccount: ev.toAccount });
+    }
+    if (!keepOpen) {
+      this.onSubmitted(ev.id, ev.account ?? ev.fromAccount);
+      return this.close();
+    }
+    s.amount = "";
+    if (this.amountInputEl) this.amountInputEl.value = "";
+    this.updateSettlePreview();
+    this.updateFromNoteHint();
+    this.updateOverdraftHints();
+    this.errorEl.empty();
+    this.calcKeypad?.refresh();
+    new import_obsidian13.Notice(t("entry.saved"));
   }
   /** 走 Obsidian 原生关闭：pop 全局 keymap scope（Modal.open 时 push 的 Escape/Tab 捕获）并恢复焦点，
    *  再由基类回调 onClose。默认关闭动画已被 inline animation/transition:none 中和，仍是即时摘除——
@@ -9003,7 +9194,6 @@ var EntryModal = class extends import_obsidian13.Modal {
     this.keyboardAvoidance = void 0;
     this.swipeTabs?.dispose();
     this.swipeTabs = void 0;
-    this.contentEl.removeEventListener("click", this.handleOutsideClick);
     this.contentEl.style.maxHeight = "";
     this.contentEl.empty();
   }
@@ -11445,9 +11635,9 @@ async function openEntry(app, adapter, afterSubmit, navCtx, slide, onSwitchLedge
     adapter,
     meta.accounts,
     meta.categories,
-    () => {
+    (_newTxId, presetAccountId) => {
       afterSubmit?.();
-      openList(app, adapter, navCtx, void 0, void 0);
+      openList(app, adapter, navCtx, presetAccountId, void 0);
     },
     void 0,
     true,

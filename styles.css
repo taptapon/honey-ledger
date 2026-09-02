@@ -64,7 +64,8 @@
   box-shadow: var(--ac-focus-ring);
 }
 
-/* 记一笔表单：flex 列布局，字段区内部滚动，按钮固定底部 */
+/* 记一笔表单：flex 列布局（类型 tab 固定顶部 → 字段区内部滚动 → 错误条 → 底部常驻 dock）。
+   contentEl 自身不滚动（overflow:hidden），唯一滚动区是 .accounting-entry-fields。 */
 .accounting-entry-modal {
   display: flex;
   flex-direction: column;
@@ -73,7 +74,7 @@
   max-height: min(88vh, 640px);
   margin: 0 auto;
   padding: 40px 16px;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 /* 记一笔页 contentEl 自身即滚动容器，其 padding-top 不能再占顶部避让带——顶部带已改由 .modal 的
@@ -436,9 +437,14 @@
   min-height: 0;
 }
 
+/* 底部常驻 dock（计算器 + 保存键）：字段区滚动时恒贴底；data-no-swipe 由 TS 挂（轻扫守卫） */
 .accounting-entry-footer {
   flex: 0 0 auto;
-  padding-top: 10px;
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--background-modifier-border);
 }
 
 .accounting-entry-textarea {
@@ -451,9 +457,20 @@
   line-height: 1.5;
 }
 
+/* dock 右侧按钮列：清除/再记/保存 高度比 1:1:2（flex 1:1:2 基线 0，随 dock 高度拉伸） */
+.accounting-entry-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 64px;
+}
+
+/* 保存键：按钮列底、占双份高（flex:2），大触控目标；Hero 语义 + accent 底不变 */
 .accounting-entry-submit {
-  width: 120px;
-  height: var(--ac-control-h-hero);
+  flex: 2 1 0;
+  min-width: 0;
+  height: auto;
   border: none;
   border-radius: 8px;
   background: var(--interactive-accent);
@@ -461,10 +478,32 @@
   font-size: var(--font-ui-normal);
   font-weight: 600;
   cursor: pointer;
-  margin-top: 12px;
-  margin-left: auto;
-  margin-right: auto;
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 清除/再记：按钮列上方两颗次级键（各占保存键一半高），secondary 视觉、字号小一档 */
+.accounting-entry-aux {
+  flex: 1 1 0;
+  min-width: 0;
+  height: auto;
+  padding: 0 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ac-radius-btn);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (hover: hover) {
+  .accounting-entry-aux:hover {
+    background: var(--background-modifier-hover);
+  }
 }
 
 @media (hover: hover) {
@@ -481,14 +520,12 @@
 
 /* 金额计算器键盘（移动端，替代 iOS 系统数字键盘）。
    金额框 readonly 抑制系统键盘，由本网格驱动表达式；提交边界求值。布局与桌面端一致。
-   .accounting-amount-stack 是输入位（含输入框 + 定位锚点）；计算器绝对定位浮于下方各行之上，
-   不挤压布局（与桌面端 calc-keypad 浮层体验一致），宽=输入框宽、左缘与下方各行对齐。 */
+   计算器常驻记账页底部 dock（.accounting-entry-footer）内，不再点击金额框弹出。 */
 .accounting-amount-stack {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  position: relative;
 }
 
 .accounting-amount-display {
@@ -511,12 +548,8 @@
 }
 
 .accounting-calc-host {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 100%;
-  z-index: 20;
-  margin-top: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 6px;
   background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
@@ -560,21 +593,10 @@
   font-weight: 600;
 }
 
-.accounting-calc-key--eq {
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
-  border-color: transparent;
-  font-weight: 600;
-}
-
 /* hover 仅桌面指针设备；触屏（iOS WebView）:hover 会粘住，包进 @media (hover:hover)。 */
 @media (hover: hover) {
   .accounting-calc-key:hover {
     background: var(--background-modifier-hover);
-  }
-
-  .accounting-calc-key--eq:hover {
-    filter: brightness(1.12);
   }
 }
 
@@ -2080,6 +2102,8 @@
   gap: 8px;
   justify-content: flex-end;
   margin-top: 8px;
+  /* 键盘避让收缩内容区后，flex 列里 footer 按钮不被压缩 */
+  flex-shrink: 0;
 }
 
 /* select 触发器统一自定义外观；弹出的 option 列表仍由系统渲染（不可定制）。 */
