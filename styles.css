@@ -312,6 +312,12 @@
   line-height: 1.4;
 }
 
+/* 负余额软警告：与余额提示同行，inline 红字。 */
+.accounting-entry-overdraft {
+  margin-left: 4px;
+  color: var(--text-error);
+}
+
 /* 「?」渐进式帮助：summary 常驻 + 点击 ? 展开 detail（详见 openspec ui-help-disclosure）。 */
 .accounting-help-tip {
   padding: 4px var(--ac-card-content-x) 2px;
@@ -457,21 +463,13 @@
   line-height: 1.5;
 }
 
-/* dock 右侧按钮列：清除/再记/保存 高度比 1:1:2（flex 1:1:2 基线 0，随 dock 高度拉伸） */
-.accounting-entry-actions {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 64px;
-}
-
-/* 保存键：按钮列底、占双份高（flex:2），大触控目标；Hero 语义 + accent 底不变 */
+/* 保存键：键区右侧动作列底、占三份高（flex:3），大触控目标；Hero 语义 + accent 底不变。
+   加 1px 边框与同列次级键（.accounting-calc-key/aux 均有边框）视觉一致。 */
 .accounting-entry-submit {
-  flex: 2 1 0;
+  flex: 3 1 0;
   min-width: 0;
   height: auto;
-  border: none;
+  border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
   background: var(--interactive-accent);
   color: var(--text-on-accent);
@@ -483,27 +481,13 @@
   justify-content: center;
 }
 
-/* 清除/再记：按钮列上方两颗次级键（各占保存键一半高），secondary 视觉、字号小一档 */
-.accounting-entry-aux {
+/* 清除/再记：动作列上方两颗次级键（各占保存键三分之一高）——视觉/hover 由组合的 .accounting-btn-secondary
+   变体提供（双类选择器覆盖其 height/padding），此类只留布局覆盖 */
+.accounting-btn.accounting-entry-aux {
   flex: 1 1 0;
   min-width: 0;
   height: auto;
   padding: 0 6px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--ac-radius-btn);
-  background: var(--background-secondary);
-  color: var(--text-normal);
-  font-size: var(--font-ui-small);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-@media (hover: hover) {
-  .accounting-entry-aux:hover {
-    background: var(--background-modifier-hover);
-  }
 }
 
 @media (hover: hover) {
@@ -558,9 +542,11 @@
 }
 
 .accounting-calc-preview {
-  min-height: 24px;
+  height: 24px;
   margin-bottom: 6px;
   padding: 4px 8px;
+  white-space: nowrap;
+  overflow: hidden;
   border-radius: 4px;
   background: var(--background-secondary);
   color: var(--text-muted);
@@ -568,10 +554,26 @@
   text-align: right;
 }
 
+/* 键区主体：5 等分列网格——左 4 份为数字键网格（内嵌 4 列，列宽恰与外侧等宽）+ 右 1 份动作列
+   （清除/再记/保存，与数字键列等宽、随键区同高拉伸）。 */
+.accounting-calc-body {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
 .accounting-calc-grid {
+  grid-column: span 4;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
+}
+
+.accounting-calc-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
 
 .accounting-calc-key {
@@ -4104,9 +4106,14 @@ details[open]>.accounting-collapsible-head::before {
   gap: 4px;
 }
 
-/* 在用币种禁删标注：替代删除按钮，中性灰小字 */
+/* 在用币种禁删标注：替代删除按钮，中性灰小字。
+   与删除按钮同固定宽并居中——两者宽度若不同，会经 rate/date 的 flex-grow 传导，
+   导致各行金额/日期列横向错位。 */
 .accounting-currency-rate-row .accounting-currency-inuse {
-  flex: 0 0 auto;
+  flex: 0 0 4em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
   line-height: 1;
@@ -4173,6 +4180,12 @@ details[open]>.accounting-collapsible-head::before {
   cursor: pointer;
   -webkit-appearance: none;
   appearance: none;
+}
+
+/* 删除按钮与「使用中」标注同宽居中，保证各行金额/日期列对齐（见 .accounting-currency-inuse 注） */
+.accounting-settings-modal .accounting-currency-rate-row .accounting-ledger-delete {
+  flex: 0 0 4em;
+  text-align: center;
 }
 
 /* 取消按钮：中性色（与桌面端 btn-sm-secondary 一致） */
@@ -4390,7 +4403,8 @@ details[open]>.accounting-collapsible-head::before {
 
 .accounting-yield-head,
 .accounting-yield-group,
-.accounting-yield-item {
+.accounting-yield-item,
+.accounting-yield-total {
   display: table-row;
 }
 
@@ -4458,6 +4472,23 @@ details[open]>.accounting-collapsible-head::before {
   padding-top: 6px;
   padding-bottom: 4px;
   border-bottom: 1px solid var(--background-modifier-border);
+}
+
+/* 拆表标题（资产（收益）/ 负债（费息））：表上方小节标签，弱化加粗 */
+.accounting-yield-table-title {
+  margin: 10px 0 2px;
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* 表合计行：加粗、列对齐同表（年金额格沿用 -income/-cost 着色）；分隔线取上一行
+   border-bottom（自身不再加线，避免 border-collapse:separate 下双线），末行去线规则照常命中 */
+.accounting-yield-total .accounting-yield-cell {
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  padding-top: 6px;
+  padding-bottom: 2px;
 }
 
 /* 明细行：只读密度（小字号/密行距），比组头细 */

@@ -541,10 +541,20 @@ function rangeDateBounds(key, earliestData) {
 // ../../packages/core/src/format.ts
 function formatMoney(n, currency = "CNY") {
   const sign = n < 0 ? "-" : "";
-  const abs = Math.abs(n);
-  const s = abs.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const sym = currency === "CNY" ? "\xA5" : `${currency} `;
-  return `${sign}${sym}${s}`;
+  return `${sign}${sym}${formatAmountPlain(Math.abs(n))}`;
+}
+function formatAmountPlain(n) {
+  return n.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function formatExpression(expr) {
+  return expr.replace(/\d+(\.\d*)?/g, (m) => {
+    const dot = m.indexOf(".");
+    const int = dot === -1 ? m : m.slice(0, dot);
+    const dec = dot === -1 ? "" : m.slice(dot);
+    const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return grouped + dec;
+  });
 }
 function formatMoneyInt(n, currency = "CNY") {
   const sign = n < 0 ? "-" : "";
@@ -755,6 +765,57 @@ function evaluateAmount(expr) {
 function amountValueOr(expr, fallback = 0) {
   const r = evaluateAmount(expr);
   return r.ok ? round2(r.value) : fallback;
+}
+var CALC_KEYS = [
+  { label: "\u232B", act: "back" },
+  { label: "C", act: "clear" },
+  { label: "%", act: "append", ch: "%" },
+  { label: "\xF7", act: "append", ch: "\xF7" },
+  { label: "7", act: "append", ch: "7" },
+  { label: "8", act: "append", ch: "8" },
+  { label: "9", act: "append", ch: "9" },
+  { label: "\xD7", act: "append", ch: "\xD7" },
+  { label: "4", act: "append", ch: "4" },
+  { label: "5", act: "append", ch: "5" },
+  { label: "6", act: "append", ch: "6" },
+  { label: "\u2212", act: "append", ch: "\u2212" },
+  { label: "1", act: "append", ch: "1" },
+  { label: "2", act: "append", ch: "2" },
+  { label: "3", act: "append", ch: "3" },
+  { label: "+", act: "append", ch: "+" },
+  { label: "+/-", act: "sign" },
+  { label: "0", act: "append", ch: "0" },
+  { label: ".", act: "append", ch: "." },
+  { label: "=", act: "equals" }
+];
+function exprHasOperator(v) {
+  return /[+×÷*/%]/.test(v) || v.slice(1).includes("-") || v.slice(1).includes("\u2212");
+}
+var BINARY_OPS = /* @__PURE__ */ new Set(["+", "\xD7", "\xF7", "\u2212"]);
+function applyCalcKey(expr, act, ch) {
+  if (act === "clear") return { next: "" };
+  if (act === "back") return { next: expr.slice(0, -1) };
+  if (act === "append") {
+    const c = ch ?? "";
+    if (BINARY_OPS.has(c) && BINARY_OPS.has(expr.slice(-1))) return { next: expr.slice(0, -1) + c };
+    return { next: expr + c };
+  }
+  if (act === "sign") return { next: expr.startsWith("-") ? expr.slice(1) : "-" + expr };
+  const r = evaluateAmount(expr);
+  if (r.ok && r.value > 0) return { next: String(round2(r.value)) };
+  return r.ok ? { next: expr, error: true, reason: "nonPositive" } : { next: expr, error: true, reason: "invalid" };
+}
+var CALC_ERROR_KEYS = {
+  invalid: "keypad.invalid",
+  nonPositive: "keypad.nonPositive"
+};
+function amountDisplayString(expr) {
+  const r = evaluateAmount(expr);
+  return r.ok ? formatAmountPlain(round2(r.value)) : "";
+}
+function formatCalcPreview(expr) {
+  const r = evaluateAmount(expr);
+  return formatExpression(expr) + (r.ok && exprHasOperator(expr) ? ` = ${formatAmountPlain(round2(r.value))}` : "");
 }
 
 // ../../packages/core/src/fx.ts
@@ -1295,6 +1356,13 @@ function mergeRatesByVisible(local, fetched, visible) {
     }
   }
   return { merged, updated };
+}
+function latestRateDate(rates) {
+  let out;
+  for (const e of Object.values(rates)) {
+    if (e.asOf && (!out || e.asOf > out)) out = e.asOf;
+  }
+  return out;
 }
 function rebaseRateTable(local, oldBase, newBase, fetched, asOfFallback) {
   const ob = oldBase.trim().toUpperCase();
@@ -3169,6 +3237,9 @@ function rateBucketStats(items) {
   }
   return out;
 }
+function expectedYieldGroupDirection(g) {
+  return g.parentItem?.direction ?? g.items[0]?.direction;
+}
 function expectedYieldReport(transactions, accounts, opts) {
   const visible = accounts.filter((a) => a.active !== false);
   const native = computeBalances(transactions, visible);
@@ -3261,7 +3332,14 @@ function expectedYieldReport(transactions, accounts, opts) {
   let totalCost = 0;
   let incomePrincipal = 0;
   let costPrincipal = 0;
+  let totalIncomePrincipal = 0;
+  let totalCostPrincipal = 0;
   for (const i of ordered) {
+    if (i.direction === "income") {
+      totalIncomePrincipal += i.principal;
+    } else {
+      totalCostPrincipal += i.principal;
+    }
     if (i.annualAmount == null) continue;
     if (i.direction === "income") {
       totalIncome += i.annualAmount;
@@ -3271,15 +3349,28 @@ function expectedYieldReport(transactions, accounts, opts) {
       costPrincipal += i.principal;
     }
   }
-  const netRateDenom = incomePrincipal + costPrincipal;
+  const mkTable = (d) => {
+    const gs = groups.filter((g) => expectedYieldGroupDirection(g) === d);
+    if (gs.length === 0) return void 0;
+    return {
+      direction: d,
+      groups: gs,
+      principalTotal: round2(gs.reduce((s, g) => s + g.principalTotal, 0)),
+      weightedRate: d === "income" ? incomePrincipal > 0 ? totalIncome / incomePrincipal : void 0 : costPrincipal > 0 ? totalCost / costPrincipal : void 0,
+      annualTotal: d === "income" ? round2(totalIncome) : round2(totalCost)
+    };
+  };
   return {
     groups,
+    tables: { income: mkTable("income"), cost: mkTable("cost") },
     totalIncome: round2(totalIncome),
     totalCost: round2(totalCost),
     netExpected: round2(totalIncome - totalCost),
+    totalIncomePrincipal: round2(totalIncomePrincipal),
+    totalCostPrincipal: round2(totalCostPrincipal),
     weightedIncomeRate: incomePrincipal > 0 ? totalIncome / incomePrincipal : void 0,
     weightedCostRate: costPrincipal > 0 ? totalCost / costPrincipal : void 0,
-    weightedNetRate: netRateDenom > 0 ? (totalIncome - totalCost) / netRateDenom : void 0,
+    weightedNetRate: incomePrincipal > 0 ? (totalIncome - totalCost) / incomePrincipal : void 0,
     rateBuckets: rateBucketStats(ordered),
     riskLevelBuckets: riskLevelBucketStats(ordered),
     liquidityLevelBuckets: liquidityLevelBucketStats(ordered)
@@ -3718,7 +3809,8 @@ var zh = {
   "nav.dashboard": "\u62A5\u8868",
   "nav.settings": "\u8BBE\u7F6E",
   "nav.back": "\u2039 \u8FD4\u56DE",
-  "keypad.error": "\u26A0 \u516C\u5F0F\u6709\u8BEF",
+  "keypad.invalid": "\u26A0 \u516C\u5F0F\u6709\u8BEF",
+  "keypad.nonPositive": "\u26A0 \u91D1\u989D\u9700\u5927\u4E8E 0",
   // KR4/task4: transactionDetailModal — reused desktop-aligned keys + plugin-specific txDetail.*
   "common.delete": "\u5220\u9664",
   "common.close": "\u5173\u95ED",
@@ -3815,7 +3907,6 @@ var zh = {
   "account.selectPlaceholder": "\u8BF7\u9009\u62E9",
   "entry.amount": "\u91D1\u989D",
   "entry.amountWithCur": "\u91D1\u989D\uFF08{{cur}}\uFF09",
-  "entry.clear": "\u6E05\u9664",
   "entry.again": "\u518D\u8BB0",
   "entry.saved": "\u5DF2\u4FDD\u5B58",
   "entry.fromNote": "\u2190 \u6765\u81EA\u5907\u6CE8",
@@ -3857,7 +3948,7 @@ var zh = {
   "entry.nonePerson": "\u65E0\u5F80\u6765",
   "entry.settle": "\u7ED3\u6E05",
   "entry.currentBalanceBase": "\u5F53\u524D\u4F59\u989D {{amount}}",
-  "entry.overdraftWarn": "\u300C{{name}}\u300D\u4F59\u989D\u5C06\u53D8\u4E3A {{amount}}",
+  "entry.overdraftWarnShort": "\u5C06\u53D8\u4E3A {{amount}}",
   "entry.personCurrentBase": "\u5BF9\u65B9\u5F53\u524D {{amount}}\uFF08{{state}}\uFF09",
   "entry.outstandingBase": "\u5BF9\u65B9\u5F53\u524D\u672A\u7ED3 {{amount}}\uFF08{{state}}\uFF09",
   "entry.settleExact": "\uFF1B\u6B63\u597D\u7ED3\u6E05\uFF0C\u65E0\u5DEE\u989D",
@@ -3870,7 +3961,6 @@ var zh = {
   "entry.err.fromAccount": "\u8BF7\u9009\u62E9\u8F6C\u51FA\u8D26\u6237",
   "entry.err.toAccount": "\u8BF7\u9009\u62E9\u8F6C\u5165\u8D26\u6237",
   "entry.err.selfAccount": "\u8BF7\u9009\u62E9\u5DF1\u65B9\u8D26\u6237",
-  "entry.err.amountPositive": "\u8BF7\u8F93\u5165\u5927\u4E8E 0 \u7684\u91D1\u989D",
   "entry.err.ruleName": "\u8BF7\u586B\u5199\u89C4\u5219\u540D\u79F0",
   "entry.err.crossTransferAmount": "\u8DE8\u5E01\u79CD\u8F6C\u8D26\u9700\u586B\u5199\u8F6C\u5165\u8D26\u6237\u5E01\u79CD\u7684\u5B9E\u5230\u91D1\u989D",
   "entry.err.sameAccount": "\u8F6C\u51FA\u4E0E\u8F6C\u5165\u8D26\u6237\u4E0D\u80FD\u76F8\u540C",
@@ -4050,6 +4140,9 @@ var zh = {
   "report.expectedYield.colPrincipal": "\u672C\u91D1",
   "report.expectedYield.colRate": "\u5E74\u5316",
   "report.expectedYield.colAmount": "\u9884\u4F30\u5E74\u91D1\u989D",
+  "report.expectedYield.assetTable": "\u8D44\u4EA7\uFF08\u6536\u76CA\uFF09",
+  "report.expectedYield.costTable": "\u8D1F\u503A\uFF08\u8D39\u606F\uFF09",
+  "report.expectedYield.total": "\u5408\u8BA1",
   "report.incomeCategory": "\u6536\u5165\u5206\u7C7B",
   "report.expenseCategory": "\u652F\u51FA\u5206\u7C7B",
   "report.stat.income": "\u6536\u5165",
@@ -4222,6 +4315,7 @@ var zh = {
   "settings.currency.autoRefreshLabel": "\u81EA\u52A8\u5237\u65B0\u6C47\u7387\uFF08\u6BCF\u5929\uFF09",
   "settings.currency.refreshBtn": "\u5237\u65B0\u6C47\u7387",
   "settings.currency.refreshing": "\u5237\u65B0\u4E2D\u2026",
+  "settings.currency.rateDateAndRefreshed": "\u6C47\u7387\u65E5\u671F {{date}} \xB7 \u5237\u65B0\u4E8E {{time}}",
   "settings.currency.parseFailed": "\u54CD\u5E94\u89E3\u6790\u5931\u8D25\uFF0C\u5DF2\u4FDD\u7559\u65E2\u6709\u6C47\u7387\u8868",
   "settings.currency.noCaredCurrency": "\u54CD\u5E94\u4E2D\u6CA1\u6709\u5173\u5FC3\u7684\u5E01\u79CD\uFF0C\u5DF2\u4FDD\u7559\u65E2\u6709\u6C47\u7387\u8868",
   "settings.currency.refreshedN": "\u5DF2\u5237\u65B0 {{n}} \u4E2A\u5E01\u79CD\u6C47\u7387",
@@ -4488,7 +4582,8 @@ var en = {
   "nav.dashboard": "Reports",
   "nav.settings": "Settings",
   "nav.back": "\u2039 Back",
-  "keypad.error": "\u26A0 Invalid formula",
+  "keypad.invalid": "\u26A0 Invalid formula",
+  "keypad.nonPositive": "\u26A0 Amount must be > 0",
   // KR4/task4: transactionDetailModal — reused desktop-aligned keys + plugin-specific txDetail.*
   "common.delete": "Delete",
   "common.close": "Close",
@@ -4585,7 +4680,6 @@ var en = {
   "account.selectPlaceholder": "Select",
   "entry.amount": "Amount",
   "entry.amountWithCur": "Amount ({{cur}})",
-  "entry.clear": "Clear",
   "entry.again": "Save & new",
   "entry.saved": "Saved",
   "entry.fromNote": "\u2190 from note",
@@ -4627,7 +4721,7 @@ var en = {
   "entry.nonePerson": "no entries",
   "entry.settle": "Settle",
   "entry.currentBalanceBase": "Balance {{amount}}",
-  "entry.overdraftWarn": '"{{name}}" balance will become {{amount}}',
+  "entry.overdraftWarnShort": "will become {{amount}}",
   "entry.personCurrentBase": "Counterparty now {{amount}} ({{state}})",
   "entry.outstandingBase": "Outstanding {{amount}} ({{state}})",
   "entry.settleExact": "; settles exactly, no difference",
@@ -4640,7 +4734,6 @@ var en = {
   "entry.err.fromAccount": "Please pick a from-account",
   "entry.err.toAccount": "Please pick a to-account",
   "entry.err.selfAccount": "Please pick your account",
-  "entry.err.amountPositive": "Please enter an amount greater than 0",
   "entry.err.ruleName": "Please fill in the rule name",
   "entry.err.crossTransferAmount": "Cross-currency transfer needs the received amount in the to-account currency",
   "entry.err.sameAccount": "From and to accounts must differ",
@@ -4820,6 +4913,9 @@ var en = {
   "report.expectedYield.colPrincipal": "Principal",
   "report.expectedYield.colRate": "APR",
   "report.expectedYield.colAmount": "Expected annual amount",
+  "report.expectedYield.assetTable": "Assets (income)",
+  "report.expectedYield.costTable": "Liabilities (cost)",
+  "report.expectedYield.total": "Total",
   "report.incomeCategory": "Income by category",
   "report.expenseCategory": "Expense by category",
   "report.stat.income": "Income",
@@ -4992,6 +5088,7 @@ var en = {
   "settings.currency.autoRefreshLabel": "Auto-refresh rates (daily)",
   "settings.currency.refreshBtn": "Refresh rates",
   "settings.currency.refreshing": "Refreshing\u2026",
+  "settings.currency.rateDateAndRefreshed": "Rate date {{date}} \xB7 refreshed at {{time}}",
   "settings.currency.parseFailed": "Failed to parse response; existing rate table kept",
   "settings.currency.noCaredCurrency": "No relevant currencies in response; existing rate table kept",
   "settings.currency.refreshedN": "Refreshed {{n}} currency rates",
@@ -7987,62 +8084,38 @@ var BalanceModal = class extends import_obsidian11.Modal {
 var import_obsidian13 = require("obsidian");
 
 // src/calculatorKeypad.ts
-var KEYS = [
-  { label: "\u232B", act: "back", cls: "accounting-calc-key--util" },
-  { label: "C", act: "clear", cls: "accounting-calc-key--util" },
-  { label: "%", act: "append", ch: "%" },
-  { label: "\xF7", act: "append", ch: "\xF7", cls: "accounting-calc-key--op" },
-  { label: "7", act: "append", ch: "7" },
-  { label: "8", act: "append", ch: "8" },
-  { label: "9", act: "append", ch: "9" },
-  { label: "\xD7", act: "append", ch: "\xD7", cls: "accounting-calc-key--op" },
-  { label: "4", act: "append", ch: "4" },
-  { label: "5", act: "append", ch: "5" },
-  { label: "6", act: "append", ch: "6" },
-  { label: "\u2212", act: "append", ch: "\u2212", cls: "accounting-calc-key--op" },
-  { label: "1", act: "append", ch: "1" },
-  { label: "2", act: "append", ch: "2" },
-  { label: "3", act: "append", ch: "3" },
-  { label: "+", act: "append", ch: "+", cls: "accounting-calc-key--op" },
-  { label: "+/-", act: "sign", cls: "accounting-calc-key--util" },
-  { label: "0", act: "append", ch: "0" },
-  { label: ".", act: "append", ch: "." },
-  { label: "=", act: "equals", cls: "accounting-calc-key--util" }
-];
-function hasOperator(v) {
-  return /[+×÷*/%]/.test(v) || v.slice(1).includes("-") || v.slice(1).includes("\u2212");
-}
+var CLS_BY_LABEL = {
+  "\u232B": "accounting-calc-key--util",
+  C: "accounting-calc-key--util",
+  "\xF7": "accounting-calc-key--op",
+  "\xD7": "accounting-calc-key--op",
+  "\u2212": "accounting-calc-key--op",
+  "+": "accounting-calc-key--op",
+  "+/-": "accounting-calc-key--util",
+  "=": "accounting-calc-key--util"
+};
+var KEYS = CALC_KEYS.map((k) => ({ ...k, cls: CLS_BY_LABEL[k.label] }));
 function mountCalculatorKeypad(host, h) {
   host.empty();
   host.addClass("accounting-calc-host");
   const preview = host.createDiv({ cls: "accounting-calc-preview" });
-  const grid = host.createDiv({ cls: "accounting-calc-grid" });
+  const body = host.createDiv({ cls: "accounting-calc-body" });
+  const grid = body.createDiv({ cls: "accounting-calc-grid" });
+  const actionsHost = body.createDiv({ cls: "accounting-calc-actions" });
   function renderPreview() {
-    const v = h.getValue();
-    const r = evaluateAmount(v);
-    preview.setText(r.ok && v.trim() !== "" && hasOperator(v) ? "= " + String(round2(r.value)) : "");
+    preview.setText(formatCalcPreview(h.getValue()));
   }
   function press(k) {
     const v = h.getValue();
-    let next = v;
-    if (k.act === "clear") next = "";
-    else if (k.act === "back") next = v.slice(0, -1);
-    else if (k.act === "append") next = v + (k.ch ?? "");
-    else if (k.act === "sign") next = v.startsWith("-") ? v.slice(1) : "-" + v;
-    else if (k.act === "equals") {
-      const r = evaluateAmount(v);
-      if (r.ok && r.value > 0) {
-        next = String(round2(r.value));
-      } else {
-        preview.empty();
-        preview.createEl("span", { text: t("keypad.error"), cls: "accounting-calc-preview-error" });
-        h.onError?.();
-        return;
-      }
+    const r = applyCalcKey(v, k.act, k.ch);
+    if (r.error) {
+      preview.empty();
+      preview.createEl("span", { text: t(CALC_ERROR_KEYS[r.reason ?? "invalid"]), cls: "accounting-calc-preview-error" });
+      h.onError?.();
+      return;
     }
-    if (next !== v) {
-      h.onChange(next);
-      renderPreview();
+    if (r.next !== v) {
+      h.onChange(r.next);
     }
   }
   for (const k of KEYS) {
@@ -8052,7 +8125,7 @@ function mountCalculatorKeypad(host, h) {
     btn.addEventListener("click", () => press(k));
   }
   renderPreview();
-  return { refresh: renderPreview };
+  return { refresh: renderPreview, actionsHost };
 }
 
 // src/settlement.ts
@@ -8356,21 +8429,15 @@ var EntryModal = class extends import_obsidian13.Modal {
     const keypadHost = dock.createDiv({ cls: "accounting-calc-host" });
     this.calcKeypad = mountCalculatorKeypad(keypadHost, {
       getValue: () => this.state.amount,
-      onChange: (next) => {
-        this.state.amount = next;
-        if (this.amountInputEl) this.amountInputEl.value = next;
-        this.updateSettlePreview();
-        this.updateFromNoteHint();
-        this.updateOverdraftHints();
-      },
+      onChange: (next) => this.syncAmount(next),
       onError: () => {
         if (this.amountInputEl) flashAmountError(this.amountInputEl);
       }
     });
-    const actions = dock.createDiv({ cls: "accounting-entry-actions" });
-    const clearBtn = actions.createEl("button", { text: t("entry.clear"), cls: "accounting-entry-aux" });
+    const actions = this.calcKeypad.actionsHost;
+    const clearBtn = actions.createEl("button", { text: t("common.clear"), cls: "accounting-btn accounting-btn-secondary accounting-entry-aux" });
     clearBtn.onclick = () => this.clearForm();
-    this.againBtnEl = actions.createEl("button", { text: t("entry.again"), cls: "accounting-entry-aux" });
+    this.againBtnEl = actions.createEl("button", { text: t("entry.again"), cls: "accounting-btn accounting-btn-secondary accounting-entry-aux" });
     this.againBtnEl.onclick = () => void this.submit(true);
     this.submitBtnEl = actions.createEl("button", { text: t("common.save"), cls: "accounting-entry-submit" });
     this.submitBtnEl.onclick = () => void this.submit(false);
@@ -8442,6 +8509,16 @@ var EntryModal = class extends import_obsidian13.Modal {
   rerender() {
     this.fieldContainer.empty();
     this.renderFields();
+  }
+  /** 外部改写金额（键盘 onChange / 备注提取 / 清空-再记）的统一联动：写回 state 与 input 框，
+   *  刷新结清预览 / 备注金额提示 / 透支软警告 / 计算器预览行（键盘自身路径重复刷新无副作用）。 */
+  syncAmount(next) {
+    this.state.amount = next;
+    if (this.amountInputEl) this.amountInputEl.value = amountDisplayString(next);
+    this.updateSettlePreview();
+    this.updateFromNoteHint();
+    this.updateOverdraftHints();
+    this.calcKeypad?.refresh();
   }
   /** 「清除」：恢复 onOpen 时（推断后）的默认态快照；编辑/复制/周期账模式 = 回到载入值。
    *  touched 一并复位（默认值推断可重新生效）；重复开关 / schedule 不动。 */
@@ -8549,7 +8626,7 @@ var EntryModal = class extends import_obsidian13.Modal {
     amountInput.type = "text";
     amountInput.readOnly = true;
     amountInput.inputMode = "decimal";
-    amountInput.value = s.amount;
+    amountInput.value = amountDisplayString(s.amount);
     amountInput.placeholder = "0.00";
     this.amountInputEl = amountInput;
     this.fromNoteHintEl = amountStack.createDiv({ cls: "accounting-entry-from-note", text: t("entry.fromNote") });
@@ -8636,12 +8713,7 @@ var EntryModal = class extends import_obsidian13.Modal {
       fitNoteTextareaHeight(noteTextarea);
       if (s.amount.trim() === "") {
         const ex = extractAmountFromNote(s.note);
-        if (ex) {
-          s.amount = ex;
-          amountInput.value = ex;
-          this.updateSettlePreview();
-          this.calcKeypad?.refresh();
-        }
+        if (ex) this.syncAmount(ex);
       }
       if (!this.accountTouched && !this.originalTxId && this.recurringMode === "none" && s.type !== "transfer" && !ev.isComposing) {
         const id = matchAccountFromNote(s.note, this.accounts.filter((a) => a.active));
@@ -8777,9 +8849,9 @@ var EntryModal = class extends import_obsidian13.Modal {
       const acc = this.accounts.find((a) => a.id === value);
       if (acc) {
         const bal = this.balancesMap().get(value) ?? 0;
-        const after = parent.createDiv();
-        after.createEl("div", { text: t("entry.currentBalanceBase", { amount: formatMoney(bal, acc.currency) }), cls: "accounting-entry-balance-hint" });
-        const odEl = after.createEl("div", { cls: "accounting-entry-balance-hint accounting-error", attr: { "data-overdraft-account": value } });
+        const after = parent.createDiv({ cls: "accounting-entry-balance-hint" });
+        after.appendText(t("entry.currentBalanceBase", { amount: formatMoney(bal, acc.currency) }));
+        const odEl = after.createEl("span", { cls: "accounting-entry-overdraft", attr: { "data-overdraft-account": value } });
         this.applyOverdraftToEl(odEl, value, overdraftWouldBe);
         row.after(after);
       }
@@ -8910,7 +8982,7 @@ var EntryModal = class extends import_obsidian13.Modal {
       return;
     }
     const acc = this.accounts.find((a) => a.id === accountId);
-    el.setText("\u26A0\uFE0F " + t("entry.overdraftWarn", { name: acc?.name ?? "", amount: formatMoney(wouldBe, acc?.currency ?? this.baseCurrency) }));
+    el.setText("\u26A0\uFE0F " + t("entry.overdraftWarnShort", { amount: formatMoney(wouldBe, acc?.currency ?? this.baseCurrency) }));
     el.show();
   }
   /** 金额变化时局部刷新所有 overdraft 提示（不触发全量 rerender，避免干扰正在使用的计算器键盘）。 */
@@ -9042,7 +9114,7 @@ var EntryModal = class extends import_obsidian13.Modal {
     const s = this.state;
     const amtRes = evaluateAmount(s.amount);
     if (!amtRes.ok || amtRes.value <= 0) {
-      this.showError(t("entry.err.amountPositive"));
+      if (this.amountInputEl) flashAmountError(this.amountInputEl);
       return;
     }
     const amount = round2(amtRes.value);
@@ -9109,7 +9181,7 @@ var EntryModal = class extends import_obsidian13.Modal {
     const s = this.state;
     const amtRes = evaluateAmount(s.amount);
     if (!amtRes.ok || amtRes.value <= 0) {
-      this.showError(t("entry.err.amountPositive"));
+      if (this.amountInputEl) flashAmountError(this.amountInputEl);
       return;
     }
     const amount = round2(amtRes.value);
@@ -9172,13 +9244,8 @@ var EntryModal = class extends import_obsidian13.Modal {
       this.onSubmitted(ev.id, ev.account ?? ev.fromAccount);
       return this.close();
     }
-    s.amount = "";
-    if (this.amountInputEl) this.amountInputEl.value = "";
-    this.updateSettlePreview();
-    this.updateFromNoteHint();
-    this.updateOverdraftHints();
+    this.syncAmount("");
     this.errorEl.empty();
-    this.calcKeypad?.refresh();
     new import_obsidian13.Notice(t("entry.saved"));
   }
   /** 走 Obsidian 原生关闭：pop 全局 keymap scope（Modal.open 时 push 的 Escape/Tab 捕获）并恢复焦点，
@@ -9383,14 +9450,17 @@ var ReportModal = class extends import_obsidian14.Modal {
   }
   /**
    * 预估收益视图（时点口径，无区间选择器）：core `expectedYieldReport` 单一真源，与桌面 Reports
-   * 预估视图同数据。合计卡（收益/费息/净预估/两向加权年化）+ **表格化**列表（表头行「账户 | 本金 |
-   * 年化 | 预估年金额」，`display:table` 共享列宽、跨行/跨组纵向对齐，与桌面表同列）——有子产品的组
-   * 渲染组头行（父账户名 +「（合并）」标注 + 净方向 badge，本金合计/加权年化/净年金额各入本列），主账户行排第一（◆ 图标），子产品行
-   * 随后（↳ 图标）；无子产品的组主账户以组行样式直出（无「（合并）」标注、方向取条目自身、无明细行）
-   * ——即使只有主账户也以「合并账户」形态展示，与桌面端一致。窄屏放不下四列时折叠本金列（账户列占满），
+   * 预估视图同数据。合计卡（收益/费息/净预估/两向加权年化）+ **表格化**列表拆**两表**（资产（收益）/
+   * 负债（费息）——分区/合计行三元组/空向 undefined 均由 core `report.tables` 产出，两端只渲染），
+   * 表头行「账户 | 本金 | 年化 | 预估年金额」（`display:table` 共享列宽、跨行/跨组纵向对齐，与桌面表同列）
+   * ——有子产品的组渲染组头行（父账户名 +「（合并）」标注 + 净方向 badge，本金合计/加权年化/净年金额各入本列），
+   * 主账户行排第一（◆ 图标），子产品行随后（↳ 图标）；无子产品的组主账户以组行样式直出（无「（合并）」标注、
+   * 方向取条目自身、无明细行）——即使只有主账户也以「合并账户」形态展示，与桌面端一致。
+   * 每表底部**合计行**（`.accounting-yield-total`）：本金合计（core `totalIncomePrincipal`/`totalCostPrincipal`，
+   * 含未设利率条目，与列求和同口径）/ 对应方向加权年化 / 年金额合计。窄屏放不下四列时折叠本金列（账户列占满），
    * 收益率与预估年金额恒完整显示。到期 badge 按本地时钟算剩余天数（core 不持时钟）；本金本位币折算 +
    * 原币种括注；列表金额整数显示（`formatMoneyInt`，去小数位；合计卡仍两位小数）。无利率/到期账户时空态。
-   * 列表排序：排序栏 + 浮层菜单（组为单位），默认收益金额（组净年金额）高→低。
+   * 列表排序：排序栏 + 浮层菜单（组为单位），默认收益金额（组净年金额）高→低，两表共享同一排序。
    * 表头吸顶：滚动到顶后固定在二级视图 tab 栏正下方（offset 由 renderViewSwitch 量 tab 栏高度写入
    * `--accounting-report-tabs-h`，样式见 styles.css `.accounting-yield-head .accounting-yield-cell`）。
    */
@@ -9431,7 +9501,7 @@ var ReportModal = class extends import_obsidian14.Modal {
     const sortOpt = YIELD_SORT_OPTIONS.find((o) => o.key === this.yieldSortKey);
     const sortKey = sortOpt?.key ?? "amount";
     const dir = sortOpt?.dir ?? -1;
-    const sortedGroups = [...report.groups].sort((a, b) => {
+    const sortGroups = (gs) => [...gs].sort((a, b) => {
       if (sortKey === "name") return dir * a.name.localeCompare(b.name, "zh");
       const va = sortKey === "principal" ? a.principalTotal : sortKey === "rate" ? a.weightedRate ?? Number.NEGATIVE_INFINITY : a.subtotal;
       const vb = sortKey === "principal" ? b.principalTotal : sortKey === "rate" ? b.weightedRate ?? Number.NEGATIVE_INFINITY : b.subtotal;
@@ -9452,20 +9522,14 @@ var ReportModal = class extends import_obsidian14.Modal {
       return s;
     };
     this.renderYieldSortBar(container);
-    const table = container.createDiv({ cls: "accounting-yield-table" });
-    const thead = table.createDiv({ cls: "accounting-yield-head" });
-    thead.createEl("span", { text: t("report.expectedYield.colAccount"), cls: "accounting-yield-cell accounting-yield-cell-account" });
-    thead.createEl("span", { text: t("report.expectedYield.colPrincipal"), cls: "accounting-yield-cell accounting-yield-cell-principal" });
-    thead.createEl("span", { text: t("report.expectedYield.colRate"), cls: "accounting-yield-cell accounting-yield-cell-rate" });
-    thead.createEl("span", { text: t("report.expectedYield.colAmount"), cls: "accounting-yield-cell accounting-yield-cell-amount" });
-    for (const g of sortedGroups) {
+    const renderYieldRows = (tbl, g) => {
       const onGroupClick = () => {
         const acct = this.accounts.find((a) => a.id === g.accountId);
         if (!acct) return;
         new AccountActionModal(this.app, this.adapter, acct, this.accounts, this.categories, this.accountTypeSettings, this.navCtx, () => this.reloadData()).open();
       };
       if (g.items.length > 0) {
-        const row = table.createDiv({ cls: "accounting-yield-group" });
+        const row = tbl.createDiv({ cls: "accounting-yield-group" });
         const nameEl = row.createDiv({ cls: "accounting-yield-cell accounting-yield-cell-account" });
         const nm = nameEl.createDiv({ cls: "accounting-yield-name" });
         nm.createEl("span", { text: g.name });
@@ -9478,13 +9542,13 @@ var ReportModal = class extends import_obsidian14.Modal {
           text: formatMoneyInt(g.subtotal, this.baseCurrency),
           cls: `accounting-yield-cell accounting-yield-cell-amount${g.subtotal < 0 ? " accounting-yield-cell-amount-cost" : ""}`
         });
-        if (g.parentItem) this.renderYieldItem(table, g.parentItem, todayMs, "main");
-        for (const item of g.items) this.renderYieldItem(table, item, todayMs, "child");
+        if (g.parentItem) this.renderYieldItem(tbl, g.parentItem, todayMs, "main");
+        for (const item of g.items) this.renderYieldItem(tbl, item, todayMs, "child");
         nm.style.cursor = "pointer";
         nm.onclick = onGroupClick;
       } else if (g.parentItem) {
         const pi = g.parentItem;
-        const row = table.createDiv({ cls: "accounting-yield-group" });
+        const row = tbl.createDiv({ cls: "accounting-yield-group" });
         const nameEl = row.createDiv({ cls: "accounting-yield-cell accounting-yield-cell-account" });
         const nm = nameEl.createDiv({ cls: "accounting-yield-name" });
         nm.createEl("span", { text: pi.name });
@@ -9498,7 +9562,27 @@ var ReportModal = class extends import_obsidian14.Modal {
         nm.style.cursor = "pointer";
         nm.onclick = onGroupClick;
       }
-    }
+    };
+    const renderYieldTable = (title, tbl) => {
+      container.createDiv({ text: title, cls: "accounting-yield-table-title" });
+      const table = container.createDiv({ cls: "accounting-yield-table" });
+      const thead = table.createDiv({ cls: "accounting-yield-head" });
+      thead.createEl("span", { text: t("report.expectedYield.colAccount"), cls: "accounting-yield-cell accounting-yield-cell-account" });
+      thead.createEl("span", { text: t("report.expectedYield.colPrincipal"), cls: "accounting-yield-cell accounting-yield-cell-principal" });
+      thead.createEl("span", { text: t("report.expectedYield.colRate"), cls: "accounting-yield-cell accounting-yield-cell-rate" });
+      thead.createEl("span", { text: t("report.expectedYield.colAmount"), cls: "accounting-yield-cell accounting-yield-cell-amount" });
+      for (const g of sortGroups(tbl.groups)) renderYieldRows(table, g);
+      const totalRow = table.createDiv({ cls: "accounting-yield-total" });
+      totalRow.createEl("span", { text: t("report.expectedYield.total"), cls: "accounting-yield-cell accounting-yield-cell-account" });
+      totalRow.createEl("span", { text: formatMoneyInt(tbl.principalTotal, this.baseCurrency), cls: "accounting-yield-cell accounting-yield-cell-principal" });
+      totalRow.createEl("span", { text: pct(tbl.weightedRate), cls: "accounting-yield-cell accounting-yield-cell-rate" });
+      totalRow.createEl("span", {
+        text: formatMoneyInt(tbl.annualTotal, this.baseCurrency),
+        cls: `accounting-yield-cell accounting-yield-cell-amount accounting-yield-cell-amount-${tbl.direction}`
+      });
+    };
+    if (report.tables.income) renderYieldTable(t("report.expectedYield.assetTable"), report.tables.income);
+    if (report.tables.cost) renderYieldTable(t("report.expectedYield.costTable"), report.tables.cost);
   }
   /**
    * 等级/收益率分布图共用 section（core buckets 单一真源，与桌面 Reports 预估视图同数据）：
@@ -12658,7 +12742,11 @@ var AccountingSettings = class {
       };
       if (cfg.lastSuccess) {
         const timeRow = onlineEl.createDiv({ cls: "accounting-currency-online-row" });
-        timeRow.createEl("span", { text: formatLocalTimestamp(cfg.lastSuccess, getLocale()), cls: "accounting-currency-online-label" });
+        const rateDate = latestRateDate(rates);
+        timeRow.createEl("span", {
+          text: rateDate ? t("settings.currency.rateDateAndRefreshed", { date: formatDateDisplay(rateDate, getLocale()), time: formatLocalTimestamp(cfg.lastSuccess, getLocale()) }) : formatLocalTimestamp(cfg.lastSuccess, getLocale()),
+          cls: "accounting-currency-online-label"
+        });
       }
     };
     void adapter.readRateConfig().then(renderOnline).catch(() => renderOnline({}));
