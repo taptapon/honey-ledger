@@ -2196,6 +2196,12 @@
   transition: none !important;
 }
 
+/* 「隐藏应用内设置页」开启时，设置页不挂底部导航条（settingsModal.mountNavBar）：
+   accounting-nonav 去掉为导航条预留的 52px 底缓冲，只留 safe-area 兜底。 */
+.modal.accounting-fullscreen.accounting-nonav {
+  padding-bottom: max(env(safe-area-inset-bottom), 10px);
+}
+
 /* 移动端全屏页：钉住 .modal 的 transform/opacity（与 .accounting-sub-modal 同手法）。
    Obsidian 移动端开/关动画是 JS 逐帧给 .modal 设 inline transform（translateY 位移）/opacity，
    普通 animation:none 压不住（inline 普通 > class），须用 !important 反压。

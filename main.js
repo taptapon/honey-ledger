@@ -3788,7 +3788,7 @@ function parseLedgerPasswordMeta(raw) {
 }
 
 // src/main.ts
-var import_obsidian21 = require("obsidian");
+var import_obsidian22 = require("obsidian");
 
 // src/i18n/zh.ts
 var zh = {
@@ -3801,6 +3801,12 @@ var zh = {
   "settings.language.label": "\u8BED\u8A00",
   "settings.language.zh": "\u4E2D\u6587",
   "settings.language.en": "English",
+  "nativeSettings.version.label": "\u5E94\u7528\u7248\u672C",
+  "nativeSettings.hideInApp.label": "\u9690\u85CF\u5E94\u7528\u5185\u8BBE\u7F6E\u9875",
+  "nativeSettings.hideInApp.desc": "\u5F00\u542F\u540E\u9690\u85CF\u8BB0\u8D26\u754C\u9762\u5E95\u90E8\u5BFC\u822A\u7684\u300C\u8BBE\u7F6E\u300D\u5165\u53E3\uFF0C\u63D2\u4EF6\u8BBE\u7F6E\u6539\u5728\u672C\u9875\u7BA1\u7406\uFF1B\u5DF2\u6253\u5F00\u7684\u9875\u9762\u91CD\u5F00\u540E\u751F\u6548\u3002",
+  "nativeSettings.openInApp.label": "\u6253\u5F00\u5E94\u7528\u5185\u8BBE\u7F6E\u9875",
+  "nativeSettings.openInApp.desc": "\u8FDB\u5165\u8BB0\u8D26\u754C\u9762\u7684\u5B8C\u6574\u8BBE\u7F6E\uFF08\u8D26\u672C / \u5907\u4EFD / \u5468\u671F\u8D26 / \u5206\u7C7B / \u5E01\u79CD / \u5173\u4E8E\uFF09\u3002",
+  "nativeSettings.openInApp.btn": "\u6253\u5F00\u8BBE\u7F6E\u9875",
   "common.confirm": "\u786E\u8BA4",
   "common.cancel": "\u53D6\u6D88",
   "nav.entry": "\u8BB0\u8D26",
@@ -4574,6 +4580,12 @@ var en = {
   "settings.language.label": "Language",
   "settings.language.zh": "Chinese",
   "settings.language.en": "English",
+  "nativeSettings.version.label": "App version",
+  "nativeSettings.hideInApp.label": "Hide in-app settings page",
+  "nativeSettings.hideInApp.desc": 'Hides the "Settings" tab in the in-app bottom nav bar; manage plugin settings here instead. Applies to newly opened pages.',
+  "nativeSettings.openInApp.label": "Open in-app settings page",
+  "nativeSettings.openInApp.desc": "Open the full in-app settings (ledgers / backups / recurring / categories / currency / about).",
+  "nativeSettings.openInApp.btn": "Open settings",
   "common.confirm": "Confirm",
   "common.cancel": "Cancel",
   "nav.entry": "Entry",
@@ -7659,6 +7671,13 @@ var AdjustBalanceModal = class extends import_obsidian9.Modal {
 
 // src/navBar.ts
 var import_obsidian10 = require("obsidian");
+var inAppSettingsHidden = false;
+function setInAppSettingsHidden(hidden) {
+  inAppSettingsHidden = hidden;
+}
+function isInAppSettingsHidden() {
+  return inAppSettingsHidden;
+}
 function navIndex(p) {
   switch (p) {
     case "entry":
@@ -7741,7 +7760,8 @@ function renderNavBar(container, current, ctx, closeSelf) {
       ctx.openSettings(s, closeSelf);
     } }
   ];
-  for (const it of items) {
+  const visibleItems = inAppSettingsHidden ? items.filter((it) => it.page !== "settings") : items;
+  for (const it of visibleItems) {
     const isCurrent = it.page !== void 0 && it.page === current;
     const btn = bar.createEl("button", {
       cls: `accounting-nav-btn${isCurrent ? " accounting-nav-current" : ""}`
@@ -10266,8 +10286,19 @@ var SettingsModal = class extends import_obsidian15.Modal {
    *  替代原先「关旧设置页 + new SettingsModal 重开」路径——仅设置页内部切账本走此就地路径。 */
   reattach(navCtx) {
     this.navCtx = navCtx;
-    renderNavBar(this.modalEl, "settings", this.navCtx, () => this.close());
+    this.mountNavBar();
     this.settingsTab.refreshAllPanels();
+  }
+  /** 挂底部导航条；「隐藏应用内设置页」开启时不挂（原生设置页按钮 / 内部流程打开的聚焦形态，
+   *  关闭走右上角默认 ✕），并打 accounting-nonav 去掉为导航条预留的 52px 底部缓冲。
+   *  onOpen 与切账本 reattach 共用；隐藏分支顺带摘掉已挂的旧导航条，保持幂等。 */
+  mountNavBar() {
+    if (isInAppSettingsHidden()) {
+      this.modalEl.querySelectorAll(".accounting-nav-bar").forEach((el) => el.remove());
+      this.modalEl.addClass("accounting-nonav");
+      return;
+    }
+    renderNavBar(this.modalEl, "settings", this.navCtx, () => this.close());
   }
   /** 在挂载到 DOM 前就预设全屏类与禁用 Obsidian 默认 modal-pop 动画，避免「先上跳再滑入」。 */
   open() {
@@ -10286,7 +10317,7 @@ var SettingsModal = class extends import_obsidian15.Modal {
     if (sc) this.contentEl.addClass(sc);
     this.contentEl.addClass("accounting-settings-modal");
     this.contentEl.addClass("accounting-has-ledger-pill");
-    renderNavBar(this.modalEl, "settings", this.navCtx, () => this.close());
+    this.mountNavBar();
     const onSwitch = this.onSwitchLedger ? (newSubdir) => {
       this.onSwitchLedger(newSubdir, () => this.close());
     } : void 0;
@@ -11763,8 +11794,36 @@ async function openEntryRecurring(app, adapter, mode, onDone) {
   ).open();
 }
 
-// src/onboardingModal.ts
+// src/nativeSettingTab.ts
 var import_obsidian19 = require("obsidian");
+var AccountingNativeSettingTab = class extends import_obsidian19.PluginSettingTab {
+  constructor(app, host) {
+    super(app, host);
+    this.host = host;
+  }
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+    new import_obsidian19.Setting(containerEl).setName(t("nativeSettings.version.label")).setDesc(`v${this.host.manifest.version}`);
+    new import_obsidian19.Setting(containerEl).setName(t("nativeSettings.hideInApp.label")).setDesc(t("nativeSettings.hideInApp.desc")).addToggle((toggle) => {
+      toggle.setValue(this.host.settings.hideInAppSettings).onChange(async (value) => {
+        this.host.settings.hideInAppSettings = value;
+        setInAppSettingsHidden(value);
+        try {
+          await this.host.saveSettings();
+        } catch (e) {
+          new import_obsidian19.Notice(t("entry.saveFailed", { msg: formatError(e) }));
+        }
+      });
+    });
+    new import_obsidian19.Setting(containerEl).setName(t("nativeSettings.openInApp.label")).setDesc(t("nativeSettings.openInApp.desc")).addButton((btn) => {
+      btn.setButtonText(t("nativeSettings.openInApp.btn")).onClick(() => this.host.openSettings());
+    });
+  }
+};
+
+// src/onboardingModal.ts
+var import_obsidian20 = require("obsidian");
 
 // src/currencyPicker.ts
 function createCurrencyPicker(parent, opts) {
@@ -11975,7 +12034,7 @@ function renderCreateLedgerForm(container, existing, handlers, opts = {}) {
 function defaultBaseCurrency() {
   return getLocale().toLowerCase().startsWith("zh") ? "CNY" : "USD";
 }
-var OnboardingModal = class extends import_obsidian19.Modal {
+var OnboardingModal = class extends import_obsidian20.Modal {
   constructor(app, adapter, onComplete, onLocaleChange) {
     super(app);
     this.adapter = adapter;
@@ -11992,7 +12051,7 @@ var OnboardingModal = class extends import_obsidian19.Modal {
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
     contentEl.addClass("accounting-modal");
-    if (!import_obsidian19.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     this.renderLangSelect(contentEl);
     this.bodyEl = contentEl.createDiv("accounting-onboarding-body");
     await this.renderMainStep();
@@ -12044,7 +12103,7 @@ var OnboardingModal = class extends import_obsidian19.Modal {
       this.result = { action: "selected", ledger: folder };
       this.close();
     } catch (e) {
-      new import_obsidian19.Notice(t("onboarding.createSampleFailed", { msg: formatError(e) }));
+      new import_obsidian20.Notice(t("onboarding.createSampleFailed", { msg: formatError(e) }));
     }
   }
   /** 无账本时：提供示例账本创建和手动创建两个选项 */
@@ -12109,12 +12168,12 @@ var OnboardingModal = class extends import_obsidian19.Modal {
         onSubmit: async (name, alias, baseCurrency) => {
           try {
             const folder = await this.adapter.createLedger(name, alias || void 0, baseCurrency);
-            new import_obsidian19.Notice(t("onboarding.createdNotif", { name: alias || ObsidianDataAdapter.formatLedgerName(folder) }));
+            new import_obsidian20.Notice(t("onboarding.createdNotif", { name: alias || ObsidianDataAdapter.formatLedgerName(folder) }));
             this.result = { action: "created", ledger: folder };
             this.close();
             return true;
           } catch (e) {
-            new import_obsidian19.Notice(t("onboarding.createFailed", { msg: formatError(e) }));
+            new import_obsidian20.Notice(t("onboarding.createFailed", { msg: formatError(e) }));
             return false;
           }
         },
@@ -12131,7 +12190,7 @@ var OnboardingModal = class extends import_obsidian19.Modal {
 };
 
 // src/settings.ts
-var import_obsidian20 = require("obsidian");
+var import_obsidian21 = require("obsidian");
 var FEEDBACK_EMAIL = "honeyledger@163.com";
 function kindOfLabel(type) {
   if (type === "person") return t("accountKind.dynamic");
@@ -12267,7 +12326,7 @@ var AccountingSettings = class {
       try {
         await this.plugin.saveSettings();
       } catch (e) {
-        new import_obsidian20.Notice(t("entry.saveFailed", { msg: formatError(e) }));
+        new import_obsidian21.Notice(t("entry.saveFailed", { msg: formatError(e) }));
       }
       this.plugin.navCtx(this.currentAdapter()).openSettings();
     };
@@ -12279,9 +12338,9 @@ var AccountingSettings = class {
       this.plugin.settings.autoOpenOnStartup = cb.checked;
       try {
         await this.plugin.saveSettings();
-        new import_obsidian20.Notice(cb.checked ? t("settings.startup.on") : t("settings.startup.off"));
+        new import_obsidian21.Notice(cb.checked ? t("settings.startup.on") : t("settings.startup.off"));
       } catch (e) {
-        new import_obsidian20.Notice(t("entry.saveFailed", { msg: formatError(e) }));
+        new import_obsidian21.Notice(t("entry.saveFailed", { msg: formatError(e) }));
       }
     };
     row.createEl("span", { text: t("settings.startup.toggleLabel"), cls: "accounting-currency-online-label accounting-startup-toggle-label" });
@@ -12329,9 +12388,9 @@ var AccountingSettings = class {
     diagExportBtn.onclick = async () => {
       try {
         const path = await exportPluginLog();
-        new import_obsidian20.Notice(`${t("diaglog.exportDone")}: ${path}`);
+        new import_obsidian21.Notice(`${t("diaglog.exportDone")}: ${path}`);
       } catch {
-        new import_obsidian20.Notice(t("diaglog.exportFail"));
+        new import_obsidian21.Notice(t("diaglog.exportFail"));
       }
     };
   }
@@ -12382,11 +12441,11 @@ var AccountingSettings = class {
                 } else {
                   this.plugin.settings.dataSubdir = name;
                   await this.plugin.saveSettings();
-                  new import_obsidian20.Notice(t("settings.ledger.switchedNotice", { alias }));
+                  new import_obsidian21.Notice(t("settings.ledger.switchedNotice", { alias }));
                   void refreshLedgerList();
                 }
               } catch (error) {
-                new import_obsidian20.Notice(t("settings.ledger.switchFailed", { msg: formatError(error) }));
+                new import_obsidian21.Notice(t("settings.ledger.switchFailed", { msg: formatError(error) }));
               }
             };
           }
@@ -12423,14 +12482,14 @@ var AccountingSettings = class {
         } else {
           this.plugin.settings.dataSubdir = name;
           await this.plugin.saveSettings();
-          new import_obsidian20.Notice(t("settings.ledger.createdSwitchedNotice", { alias: alias || ObsidianDataAdapter.formatLedgerName(name) }));
+          new import_obsidian21.Notice(t("settings.ledger.createdSwitchedNotice", { alias: alias || ObsidianDataAdapter.formatLedgerName(name) }));
           await refreshLedgerList();
         }
       });
     };
     refreshLedgerBtn.onclick = async () => {
       await refreshLedgerList();
-      new import_obsidian20.Notice(t("settings.ledger.refreshedNotice"));
+      new import_obsidian21.Notice(t("settings.ledger.refreshedNotice"));
     };
     this.refreshers.push(refreshLedgerList);
     void refreshLedgerList();
@@ -12450,9 +12509,9 @@ var AccountingSettings = class {
     createBackupBtn.onclick = async () => {
       try {
         const backupPath = await this.currentAdapter().backup("manual");
-        new import_obsidian20.Notice(t("settings.backup.createdNotice", { path: backupPath }));
+        new import_obsidian21.Notice(t("settings.backup.createdNotice", { path: backupPath }));
       } catch (error) {
-        new import_obsidian20.Notice(t("settings.backup.createFailed", { msg: formatError(error) }));
+        new import_obsidian21.Notice(t("settings.backup.createFailed", { msg: formatError(error) }));
       }
     };
     listBackupBtn.onclick = () => {
@@ -12493,9 +12552,9 @@ var AccountingSettings = class {
       const persist = async (next) => {
         try {
           await adapter.writeBackupConfig(next);
-          new import_obsidian20.Notice(t("settings.backup.configSaved"));
+          new import_obsidian21.Notice(t("settings.backup.configSaved"));
         } catch (e) {
-          new import_obsidian20.Notice(t("settings.backup.configSaveFailed", { msg: formatError(e) }));
+          new import_obsidian21.Notice(t("settings.backup.configSaveFailed", { msg: formatError(e) }));
         }
       };
       enableCb.onchange = () => void persist({ ...cfg, backupEnabled: enableCb.checked });
@@ -12546,24 +12605,24 @@ var AccountingSettings = class {
           const immediate = rebaseRateTable(rates, oldBase, cur, {}, nowISO());
           await adapter.writeBaseCurrency(cur);
           await adapter.writeRates(immediate);
-          new import_obsidian20.Notice(t("settings.currency.baseSetRefreshing", { cur }));
+          new import_obsidian21.Notice(t("settings.currency.baseSetRefreshing", { cur }));
           await refresh();
           void (async () => {
             try {
               const url = `https://api.frankfurter.app/latest?from=${cur.toUpperCase()}`;
-              const resp = await (0, import_obsidian20.requestUrl)({ url, method: "GET" });
+              const resp = await (0, import_obsidian21.requestUrl)({ url, method: "GET" });
               const fetched = parseRateResponse(resp.json, cur, nowISO());
               if (!fetched) return;
               await adapter.writeRates(rebaseRateTable(rates, oldBase, cur, fetched, nowISO()));
               const cfg = await adapter.readRateConfig().catch(() => ({}));
               await adapter.writeRateConfig({ ...cfg, lastSuccess: nowISO() });
-              new import_obsidian20.Notice(t("settings.currency.baseRefreshed", { cur }));
+              new import_obsidian21.Notice(t("settings.currency.baseRefreshed", { cur }));
               await refresh();
             } catch {
             }
           })();
         } catch (error) {
-          new import_obsidian20.Notice(t("settings.currency.setFailed", { msg: formatError(error) }));
+          new import_obsidian21.Notice(t("settings.currency.setFailed", { msg: formatError(error) }));
         }
       }
     });
@@ -12666,32 +12725,32 @@ var AccountingSettings = class {
     saveBtn.onclick = async () => {
       const { invalid, duplicates, missingRate, emptyRows, baseRows } = validateRateRows(rows, baseCurrency, usedSet);
       if (emptyRows > 0) {
-        new import_obsidian20.Notice(t("settings.currency.errEmptyRows", { n: emptyRows }), 5e3);
+        new import_obsidian21.Notice(t("settings.currency.errEmptyRows", { n: emptyRows }), 5e3);
         return;
       }
       if (invalid.length > 0) {
-        new import_obsidian20.Notice(t("settings.currency.errInvalid", { list: invalid.join(", ") }), 5e3);
+        new import_obsidian21.Notice(t("settings.currency.errInvalid", { list: invalid.join(", ") }), 5e3);
         return;
       }
       if (baseRows.length > 0) {
-        new import_obsidian20.Notice(t("settings.currency.errBaseRow", { base: baseCurrency }), 5e3);
+        new import_obsidian21.Notice(t("settings.currency.errBaseRow", { base: baseCurrency }), 5e3);
         return;
       }
       if (missingRate.length > 0) {
-        new import_obsidian20.Notice(t("settings.currency.errMissingRate", { list: missingRate.join(", ") }), 5e3);
+        new import_obsidian21.Notice(t("settings.currency.errMissingRate", { list: missingRate.join(", ") }), 5e3);
         return;
       }
       if (duplicates.length > 0) {
-        new import_obsidian20.Notice(t("settings.currency.errDuplicates", { list: duplicates.join(", ") }), 5e3);
+        new import_obsidian21.Notice(t("settings.currency.errDuplicates", { list: duplicates.join(", ") }), 5e3);
         return;
       }
       try {
         await adapter.writeRates(rateRowsToTable(rows, baseCurrency));
-        new import_obsidian20.Notice(t("settings.currency.savedNotice"));
+        new import_obsidian21.Notice(t("settings.currency.savedNotice"));
         setDirty(false);
         await refresh();
       } catch (error) {
-        new import_obsidian20.Notice(t("entry.saveFailed", { msg: formatError(error) }), 5e3);
+        new import_obsidian21.Notice(t("entry.saveFailed", { msg: formatError(error) }), 5e3);
       }
     };
     const onlineEl = bodyEl.createDiv({ cls: "accounting-currency-online" });
@@ -12706,7 +12765,7 @@ var AccountingSettings = class {
         try {
           await adapter.writeRateConfig(next);
         } catch (e) {
-          new import_obsidian20.Notice(t("entry.saveFailed", { msg: formatError(e) }));
+          new import_obsidian21.Notice(t("entry.saveFailed", { msg: formatError(e) }));
         }
       };
       btnRow.createEl("span", { text: t("settings.currency.autoRefreshLabel"), cls: "accounting-currency-online-label" });
@@ -12716,25 +12775,25 @@ var AccountingSettings = class {
         btn.setText(t("settings.currency.refreshing"));
         try {
           const url = `https://api.frankfurter.app/latest?from=${baseCurrency.toUpperCase()}`;
-          const resp = await (0, import_obsidian20.requestUrl)({ url, method: "GET" });
+          const resp = await (0, import_obsidian21.requestUrl)({ url, method: "GET" });
           const fetched = parseRateResponse(resp.json, baseCurrency, nowISO());
           if (!fetched) {
-            new import_obsidian20.Notice(t("settings.currency.parseFailed"));
+            new import_obsidian21.Notice(t("settings.currency.parseFailed"));
             return;
           }
           const currentVisible = rows.map((r) => r.currency.trim().toUpperCase()).filter((c) => c && c !== baseCurrency);
           const { merged, updated } = mergeRatesByVisible(rates, fetched, currentVisible);
           if (updated === 0) {
-            new import_obsidian20.Notice(t("settings.currency.noCaredCurrency"));
+            new import_obsidian21.Notice(t("settings.currency.noCaredCurrency"));
             return;
           }
           await adapter.writeRates(merged);
           const next = { ...cfg, lastSuccess: nowISO() };
           await adapter.writeRateConfig(next);
-          new import_obsidian20.Notice(t("settings.currency.refreshedN", { n: updated }));
+          new import_obsidian21.Notice(t("settings.currency.refreshedN", { n: updated }));
           await refresh();
         } catch (e) {
-          new import_obsidian20.Notice(t("settings.currency.refreshFailed", { msg: formatError(e) }));
+          new import_obsidian21.Notice(t("settings.currency.refreshFailed", { msg: formatError(e) }));
         } finally {
           btn.disabled = false;
           btn.setText(t("settings.currency.refreshBtn"));
@@ -12761,7 +12820,7 @@ var AccountingSettings = class {
         const folder = await adapter.createLedger(name, alias || void 0, baseCurrency);
         await onDone(folder, alias);
       } catch (error) {
-        new import_obsidian20.Notice(t("settings.ledger.createFailed", { msg: formatError(error) }));
+        new import_obsidian21.Notice(t("settings.ledger.createFailed", { msg: formatError(error) }));
       }
     });
     modal.open();
@@ -12772,10 +12831,10 @@ var AccountingSettings = class {
     const modal = new RenameLedgerAliasModal(this.app, folder, currentAlias, async (alias) => {
       try {
         await adapter.writeLedgerAlias(folder, alias);
-        new import_obsidian20.Notice(t("settings.ledger.aliasUpdated", { alias: alias || ObsidianDataAdapter.formatLedgerName(folder) }));
+        new import_obsidian21.Notice(t("settings.ledger.aliasUpdated", { alias: alias || ObsidianDataAdapter.formatLedgerName(folder) }));
         await onDone();
       } catch (error) {
-        new import_obsidian20.Notice(t("settings.ledger.renameFailed", { msg: formatError(error) }));
+        new import_obsidian21.Notice(t("settings.ledger.renameFailed", { msg: formatError(error) }));
       }
     });
     modal.open();
@@ -12790,7 +12849,7 @@ var AccountingSettings = class {
         try {
           if (mode === "set") {
             await adapter.writeLedgerPasswordMetaAt(folder, await buildLedgerPasswordMeta(values.new));
-            new import_obsidian20.Notice(t("settings.password.toastSet"));
+            new import_obsidian21.Notice(t("settings.password.toastSet"));
           } else {
             const meta = await adapter.readLedgerPasswordMetaAt(folder);
             if (!meta) return t("settings.password.toastFailed", { msg: "" });
@@ -12799,10 +12858,10 @@ var AccountingSettings = class {
             }
             if (values.new.trim().length === 0) {
               await adapter.writeLedgerPasswordMetaAt(folder, null);
-              new import_obsidian20.Notice(t("settings.password.toastRemoved"));
+              new import_obsidian21.Notice(t("settings.password.toastRemoved"));
             } else {
               await adapter.writeLedgerPasswordMetaAt(folder, await buildLedgerPasswordMeta(values.new));
-              new import_obsidian20.Notice(t("settings.password.toastChanged"));
+              new import_obsidian21.Notice(t("settings.password.toastChanged"));
             }
           }
           await onDone();
@@ -12821,9 +12880,9 @@ var AccountingSettings = class {
     try {
       this.plugin.settings.onboardingCompleted = false;
       await this.plugin.saveSettings();
-      new import_obsidian20.Notice(t("settings.onboarding.resetDone"));
+      new import_obsidian21.Notice(t("settings.onboarding.resetDone"));
     } catch (error) {
-      new import_obsidian20.Notice(t("settings.onboarding.resetFailed", { msg: formatError(error) }));
+      new import_obsidian21.Notice(t("settings.onboarding.resetFailed", { msg: formatError(error) }));
     }
   }
   /** 删除账本：两步 confirm，递归删整目录 */
@@ -12833,10 +12892,10 @@ var AccountingSettings = class {
     const adapter = this.currentAdapter();
     try {
       await adapter.deleteLedger(folder);
-      new import_obsidian20.Notice(t("settings.ledger.deletedNotice", { alias }));
+      new import_obsidian21.Notice(t("settings.ledger.deletedNotice", { alias }));
       await onDone();
     } catch (error) {
-      new import_obsidian20.Notice(t("settings.ledger.deleteFailed", { msg: formatError(error) }));
+      new import_obsidian21.Notice(t("settings.ledger.deleteFailed", { msg: formatError(error) }));
     }
   }
   /** 显示备份列表弹窗 */
@@ -12855,7 +12914,7 @@ var AccountingSettings = class {
       });
       modal.open();
     } catch (error) {
-      new import_obsidian20.Notice(t("settings.backup.loadListFailed", { msg: formatError(error) }));
+      new import_obsidian21.Notice(t("settings.backup.loadListFailed", { msg: formatError(error) }));
     }
   }
   /** 处理恢复备份（两步确认；adapter.restoreBackup 内部自动创建 pre-restore 兜底） */
@@ -12864,9 +12923,9 @@ var AccountingSettings = class {
     if (!confirm(t("settings.backup.restoreConfirm2", { name: backupName }))) return;
     try {
       await adapter.restoreBackup(backupName);
-      new import_obsidian20.Notice(t("settings.backup.restoredNotice", { name: backupName }));
+      new import_obsidian21.Notice(t("settings.backup.restoredNotice", { name: backupName }));
     } catch (error) {
-      new import_obsidian20.Notice(t("settings.backup.restoreFailed", { msg: formatError(error) }));
+      new import_obsidian21.Notice(t("settings.backup.restoreFailed", { msg: formatError(error) }));
     }
   }
   /** 处理删除备份（单步确认） */
@@ -12874,10 +12933,10 @@ var AccountingSettings = class {
     if (!confirm(t("settings.backup.deleteConfirm", { name: backupName }))) return false;
     try {
       await adapter.deleteBackup(backupName);
-      new import_obsidian20.Notice(t("settings.backup.deletedNotice", { name: backupName }));
+      new import_obsidian21.Notice(t("settings.backup.deletedNotice", { name: backupName }));
       return true;
     } catch (error) {
-      new import_obsidian20.Notice(t("settings.backup.deleteFailed", { msg: formatError(error) }));
+      new import_obsidian21.Notice(t("settings.backup.deleteFailed", { msg: formatError(error) }));
       return false;
     }
   }
@@ -12934,7 +12993,7 @@ var AccountingSettings = class {
     };
     refreshBtn.onclick = async () => {
       await refreshRules();
-      new import_obsidian20.Notice(t("settings.recurring.refreshedNotice"));
+      new import_obsidian21.Notice(t("settings.recurring.refreshedNotice"));
     };
     this.refreshers.push(refreshRules);
     void refreshRules();
@@ -12971,7 +13030,7 @@ var AccountingSettings = class {
     const viewBtn = actionsEl.createEl("button", {
       cls: "accounting-ledger-switch"
     });
-    (0, import_obsidian20.setIcon)(viewBtn, "eye");
+    (0, import_obsidian21.setIcon)(viewBtn, "eye");
     viewBtn.setAttribute("aria-label", t("settings.recurring.viewTxAria"));
     viewBtn.onclick = () => {
       openList(this.app, adapter, this.plugin.navCtx(adapter), void 0, void 0, rule.id, true);
@@ -12979,22 +13038,22 @@ var AccountingSettings = class {
     const toggleBtn = actionsEl.createEl("button", {
       cls: "accounting-ledger-switch"
     });
-    (0, import_obsidian20.setIcon)(toggleBtn, rule.active ? "pause" : "play");
+    (0, import_obsidian21.setIcon)(toggleBtn, rule.active ? "pause" : "play");
     toggleBtn.onclick = async () => {
       try {
         const rules = await adapter.readRecurringRules();
         const updated = rules.map((r) => r.id === rule.id ? { ...r, active: !r.active } : r);
         await adapter.writeRecurringRules(updated);
-        new import_obsidian20.Notice(rule.active ? t("settings.recurring.paused") : t("settings.recurring.enabledNotice"));
+        new import_obsidian21.Notice(rule.active ? t("settings.recurring.paused") : t("settings.recurring.enabledNotice"));
         void refreshRules();
       } catch (error) {
-        new import_obsidian20.Notice(t("settings.recurring.toggleFailed", { msg: formatError(error) }));
+        new import_obsidian21.Notice(t("settings.recurring.toggleFailed", { msg: formatError(error) }));
       }
     };
     const editBtn = actionsEl.createEl("button", {
       cls: "accounting-ledger-rename"
     });
-    (0, import_obsidian20.setIcon)(editBtn, "pencil");
+    (0, import_obsidian21.setIcon)(editBtn, "pencil");
     editBtn.onclick = () => {
       void openEntryRecurring(this.app, this.currentAdapter(), { editing: rule }, () => {
         this.showRecurring();
@@ -13003,16 +13062,16 @@ var AccountingSettings = class {
     const deleteBtn = actionsEl.createEl("button", {
       cls: "accounting-ledger-delete"
     });
-    (0, import_obsidian20.setIcon)(deleteBtn, "trash-2");
+    (0, import_obsidian21.setIcon)(deleteBtn, "trash-2");
     deleteBtn.onclick = async () => {
       if (!confirm(t("settings.recurring.deleteConfirm", { name: rule.name }))) return;
       try {
         const rules = await adapter.readRecurringRules();
         await adapter.writeRecurringRules(rules.filter((r) => r.id !== rule.id));
-        new import_obsidian20.Notice(t("settings.recurring.deletedNotice"));
+        new import_obsidian21.Notice(t("settings.recurring.deletedNotice"));
         void refreshRules();
       } catch (error) {
-        new import_obsidian20.Notice(t("settings.recurring.deleteFailed", { msg: formatError(error) }));
+        new import_obsidian21.Notice(t("settings.recurring.deleteFailed", { msg: formatError(error) }));
       }
     };
   }
@@ -13162,16 +13221,16 @@ var AccountingSettings = class {
           new CreateCategoryModal(this.app, "accountTag", t("settings.accountTag.title"), t("settings.accountTag.placeholder"), async (name) => {
             try {
               await this.handleAddAccountTag(name);
-              new import_obsidian20.Notice(t("settings.accountTag.addedNotice", { name }));
+              new import_obsidian21.Notice(t("settings.accountTag.addedNotice", { name }));
               await refreshTags();
             } catch (error) {
-              new import_obsidian20.Notice(t("settings.category.addFailed", { msg: formatError(error) }));
+              new import_obsidian21.Notice(t("settings.category.addFailed", { msg: formatError(error) }));
             }
           }).open();
         };
         refreshBtn.onclick = async () => {
           await refreshTags();
-          new import_obsidian20.Notice(t("settings.category.refreshedNotice", { title: t("settings.accountTag.title") }));
+          new import_obsidian21.Notice(t("settings.category.refreshedNotice", { title: t("settings.accountTag.title") }));
         };
       } catch (error) {
         rootEl.empty();
@@ -13196,10 +13255,10 @@ var AccountingSettings = class {
       new RenameCategoryModal(this.app, pseudo, async (newName) => {
         try {
           const { retagged } = await this.handleRenameAccountTag(row.name, newName);
-          new import_obsidian20.Notice(retagged > 0 ? t("settings.accountTag.renamedNotice", { n: retagged }) : t("settings.category.renamedShort"));
+          new import_obsidian21.Notice(retagged > 0 ? t("settings.accountTag.renamedNotice", { n: retagged }) : t("settings.category.renamedShort"));
           await refresh();
         } catch (error) {
-          new import_obsidian20.Notice(t("settings.category.renameFailed", { msg: formatError(error) }));
+          new import_obsidian21.Notice(t("settings.category.renameFailed", { msg: formatError(error) }));
         }
       }, t("settings.accountTag.renameTitle")).open();
     };
@@ -13208,7 +13267,7 @@ var AccountingSettings = class {
     mergeBtn.setAttribute("aria-label", t("settings.accountTag.mergeAria"));
     mergeBtn.onclick = () => {
       if (targets.length === 0) {
-        new import_obsidian20.Notice(t("settings.accountTag.mergeNoTargets"));
+        new import_obsidian21.Notice(t("settings.accountTag.mergeNoTargets"));
         return;
       }
       const pseudoTargets = targets.map((r) => ({ id: r.name, name: r.name, flow: "accountTag", ...r.hidden ? { active: false } : {} }));
@@ -13216,10 +13275,10 @@ var AccountingSettings = class {
       new MergeCategoryModal(this.app, pseudo, pseudoTargets, row.usage, async (toName) => {
         try {
           const { retagged } = await this.handleMergeAccountTag(row.name, toName);
-          new import_obsidian20.Notice(retagged > 0 ? t("settings.accountTag.mergedNotice", { n: retagged }) : t("settings.category.mergedShort"));
+          new import_obsidian21.Notice(retagged > 0 ? t("settings.accountTag.mergedNotice", { n: retagged }) : t("settings.category.mergedShort"));
           await refresh();
         } catch (error) {
-          new import_obsidian20.Notice(t("settings.category.mergeFailed", { msg: formatError(error) }));
+          new import_obsidian21.Notice(t("settings.category.mergeFailed", { msg: formatError(error) }));
         }
       }, {
         title: t("settings.accountTag.mergeTitle"),
@@ -13236,7 +13295,7 @@ var AccountingSettings = class {
         await this.handleDeleteAccountTag(row);
         await refresh();
       } catch (error) {
-        new import_obsidian20.Notice(t("settings.category.deleteFailed", { msg: formatError(error) }));
+        new import_obsidian21.Notice(t("settings.category.deleteFailed", { msg: formatError(error) }));
       }
     };
   }
@@ -13252,10 +13311,10 @@ var AccountingSettings = class {
     restoreBtn.onclick = async () => {
       try {
         await this.handleRestoreAccountTag(row);
-        new import_obsidian20.Notice(t("settings.category.restoredNotice", { name: row.name }));
+        new import_obsidian21.Notice(t("settings.category.restoredNotice", { name: row.name }));
         await refresh();
       } catch (error) {
-        new import_obsidian20.Notice(t("settings.category.restoreFailed", { msg: formatError(error) }));
+        new import_obsidian21.Notice(t("settings.category.restoreFailed", { msg: formatError(error) }));
       }
     };
     if (row.usage === 0 && row.id) {
@@ -13266,7 +13325,7 @@ var AccountingSettings = class {
           await this.handleDeleteAccountTag(row);
           await refresh();
         } catch (error) {
-          new import_obsidian20.Notice(t("settings.category.deleteFailed", { msg: formatError(error) }));
+          new import_obsidian21.Notice(t("settings.category.deleteFailed", { msg: formatError(error) }));
         }
       };
     }
@@ -13311,16 +13370,16 @@ var AccountingSettings = class {
       new CreateCategoryModal(this.app, flow, title, placeholder, async (name) => {
         try {
           await this.handleAddCategory(name, flow);
-          new import_obsidian20.Notice(t("settings.category.addedNotice", { name }));
+          new import_obsidian21.Notice(t("settings.category.addedNotice", { name }));
           await refreshCategories();
         } catch (error) {
-          new import_obsidian20.Notice(t("settings.category.addFailed", { msg: formatError(error) }));
+          new import_obsidian21.Notice(t("settings.category.addFailed", { msg: formatError(error) }));
         }
       }).open();
     };
     refreshBtn.onclick = async () => {
       await refreshCategories();
-      new import_obsidian20.Notice(t("settings.category.refreshedNotice", { title }));
+      new import_obsidian21.Notice(t("settings.category.refreshedNotice", { title }));
     };
   }
   /** 可见分类行：重命名 / 合并 / 删除（删除双态：被引用→隐藏，未引用→物理删） */
@@ -13335,10 +13394,10 @@ var AccountingSettings = class {
       new RenameCategoryModal(this.app, cat, async (newName) => {
         try {
           const { rewritten } = await this.handleRenameCategory(cat.id, newName);
-          new import_obsidian20.Notice(rewritten > 0 ? t("settings.category.renamedNotice", { n: rewritten }) : t("settings.category.renamedShort"));
+          new import_obsidian21.Notice(rewritten > 0 ? t("settings.category.renamedNotice", { n: rewritten }) : t("settings.category.renamedShort"));
           await refresh();
         } catch (error) {
-          new import_obsidian20.Notice(t("settings.category.renameFailed", { msg: formatError(error) }));
+          new import_obsidian21.Notice(t("settings.category.renameFailed", { msg: formatError(error) }));
         }
       }).open();
     };
@@ -13347,16 +13406,16 @@ var AccountingSettings = class {
     mergeBtn.setAttribute("aria-label", t("settings.category.mergeAria"));
     mergeBtn.onclick = () => {
       if (targets.length === 0) {
-        new import_obsidian20.Notice(t("settings.category.mergeNoTargets"));
+        new import_obsidian21.Notice(t("settings.category.mergeNoTargets"));
         return;
       }
       new MergeCategoryModal(this.app, cat, targets, refCount, async (toId) => {
         try {
           const { rewritten } = await this.handleMergeCategory(cat.id, toId);
-          new import_obsidian20.Notice(rewritten > 0 ? t("settings.category.mergedNotice", { n: rewritten }) : t("settings.category.mergedShort"));
+          new import_obsidian21.Notice(rewritten > 0 ? t("settings.category.mergedNotice", { n: rewritten }) : t("settings.category.mergedShort"));
           await refresh();
         } catch (error) {
-          new import_obsidian20.Notice(t("settings.category.mergeFailed", { msg: formatError(error) }));
+          new import_obsidian21.Notice(t("settings.category.mergeFailed", { msg: formatError(error) }));
         }
       }).open();
     };
@@ -13367,7 +13426,7 @@ var AccountingSettings = class {
         await this.handleDeleteCategory(cat, refCount);
         await refresh();
       } catch (error) {
-        new import_obsidian20.Notice(t("settings.category.deleteFailed", { msg: formatError(error) }));
+        new import_obsidian21.Notice(t("settings.category.deleteFailed", { msg: formatError(error) }));
       }
     };
   }
@@ -13381,10 +13440,10 @@ var AccountingSettings = class {
     restoreBtn.onclick = async () => {
       try {
         await this.handleRestoreCategory(cat);
-        new import_obsidian20.Notice(t("settings.category.restoredNotice", { name: cat.name }));
+        new import_obsidian21.Notice(t("settings.category.restoredNotice", { name: cat.name }));
         await refresh();
       } catch (error) {
-        new import_obsidian20.Notice(t("settings.category.restoreFailed", { msg: formatError(error) }));
+        new import_obsidian21.Notice(t("settings.category.restoreFailed", { msg: formatError(error) }));
       }
     };
     if (refCount === 0) {
@@ -13395,7 +13454,7 @@ var AccountingSettings = class {
           await this.handleDeleteCategory(cat, 0);
           await refresh();
         } catch (error) {
-          new import_obsidian20.Notice(t("settings.category.deleteFailed", { msg: formatError(error) }));
+          new import_obsidian21.Notice(t("settings.category.deleteFailed", { msg: formatError(error) }));
         }
       };
     }
@@ -13439,12 +13498,12 @@ var AccountingSettings = class {
       if (!confirm(t("settings.category.deleteConfirmUsed", { name: cat.name, n: refCount }))) return;
       const next = categories.map((c) => c.id === cat.id ? { ...c, active: false } : c);
       await adapter.writeMeta({ accounts, categories: next });
-      new import_obsidian20.Notice(t("settings.category.hiddenNotice", { name: cat.name }));
+      new import_obsidian21.Notice(t("settings.category.hiddenNotice", { name: cat.name }));
     } else {
       if (!confirm(t("settings.category.purgeConfirm", { name: cat.name }))) return;
       const next = categories.filter((c) => c.id !== cat.id);
       await adapter.writeMeta({ accounts, categories: next });
-      new import_obsidian20.Notice(t("settings.category.deletedNotice", { name: cat.name }));
+      new import_obsidian21.Notice(t("settings.category.deletedNotice", { name: cat.name }));
     }
   }
   /** 恢复隐藏分类：active 置为可见。 */
@@ -13486,7 +13545,7 @@ var AccountingSettings = class {
     if (!confirm(message)) return;
     const plan = planDeleteAccountTag({ accounts, categories, from: row.name, now: nowISO() });
     await adapter.writeMeta({ accounts: plan.accounts, categories: plan.categories });
-    new import_obsidian20.Notice(row.usage > 0 ? t("settings.accountTag.deletedUsedNotice", { name: row.name, n: plan.retagged }) : t("settings.category.deletedNotice", { name: row.name }));
+    new import_obsidian21.Notice(row.usage > 0 ? t("settings.accountTag.deletedUsedNotice", { name: row.name, n: plan.retagged }) : t("settings.category.deletedNotice", { name: row.name }));
   }
   /** 恢复隐藏标签：active 置为可见（隐藏行必有托管条目）。 */
   async handleRestoreAccountTag(row) {
@@ -13561,7 +13620,7 @@ var AccountingSettings = class {
         if (withBackup) await this.saveAccountTypeDraft(next);
         else await this.currentAdapter().writeAccountTypeSettings(next);
       } catch (error) {
-        new import_obsidian20.Notice(t("entry.saveFailed", { msg: formatError(error) }));
+        new import_obsidian21.Notice(t("entry.saveFailed", { msg: formatError(error) }));
       }
     };
     const renderTypesBody = () => {
@@ -13800,7 +13859,7 @@ var AccountingSettings = class {
     });
   }
 };
-var CreateLedgerModal = class extends import_obsidian20.Modal {
+var CreateLedgerModal = class extends import_obsidian21.Modal {
   constructor(app, existing, onSubmit) {
     super(app);
     this.existing = existing;
@@ -13808,7 +13867,7 @@ var CreateLedgerModal = class extends import_obsidian20.Modal {
   }
   onOpen() {
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian21.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     renderCreateLedgerForm(this.contentEl, this.existing, {
       onSubmit: async (name, alias, baseCurrency) => {
         try {
@@ -13825,7 +13884,7 @@ var CreateLedgerModal = class extends import_obsidian20.Modal {
     this.contentEl.empty();
   }
 };
-var RenameLedgerAliasModal = class extends import_obsidian20.Modal {
+var RenameLedgerAliasModal = class extends import_obsidian21.Modal {
   constructor(app, folder, currentAlias, onSubmit) {
     super(app);
     this.folder = folder;
@@ -13837,7 +13896,7 @@ var RenameLedgerAliasModal = class extends import_obsidian20.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian21.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     bindEnterToBlur(contentEl);
     contentEl.createEl("h2", { text: t("settings.ledger.renameAliasTitle") });
     this.input = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
@@ -13858,7 +13917,7 @@ var RenameLedgerAliasModal = class extends import_obsidian20.Modal {
     this.contentEl.empty();
   }
 };
-var BackupModal = class extends import_obsidian20.Modal {
+var BackupModal = class extends import_obsidian21.Modal {
   constructor(app, backups, onAction) {
     super(app);
     this.backups = backups;
@@ -13866,7 +13925,7 @@ var BackupModal = class extends import_obsidian20.Modal {
   }
   onOpen() {
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian21.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     this.render();
   }
   onClose() {
@@ -13911,7 +13970,7 @@ var BackupModal = class extends import_obsidian20.Modal {
     closeBtn.onclick = () => this.close();
   }
 };
-var CreateCategoryModal = class extends import_obsidian20.Modal {
+var CreateCategoryModal = class extends import_obsidian21.Modal {
   constructor(app, flow, flowTitle, placeholder, onSubmit) {
     super(app);
     this.flow = flow;
@@ -13925,7 +13984,7 @@ var CreateCategoryModal = class extends import_obsidian20.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian21.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     bindEnterToBlur(contentEl);
     contentEl.createEl("h2", { text: t("settings.category.createTitle", { title: this.flowTitle }) });
     this.nameInput = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
@@ -13950,7 +14009,7 @@ var CreateCategoryModal = class extends import_obsidian20.Modal {
     this.contentEl.empty();
   }
 };
-var RenameCategoryModal = class extends import_obsidian20.Modal {
+var RenameCategoryModal = class extends import_obsidian21.Modal {
   constructor(app, cat, onSubmit, title) {
     super(app);
     this.cat = cat;
@@ -13962,7 +14021,7 @@ var RenameCategoryModal = class extends import_obsidian20.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian21.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     bindEnterToBlur(contentEl);
     contentEl.createEl("h2", { text: this.title ?? t("settings.category.renameTitle") });
     this.input = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
@@ -13989,7 +14048,7 @@ var RenameCategoryModal = class extends import_obsidian20.Modal {
     this.contentEl.empty();
   }
 };
-var MergeCategoryModal = class extends import_obsidian20.Modal {
+var MergeCategoryModal = class extends import_obsidian21.Modal {
   constructor(app, from, targets, refCount, onSubmit, opts) {
     super(app);
     this.from = from;
@@ -14004,7 +14063,7 @@ var MergeCategoryModal = class extends import_obsidian20.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian21.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.createEl("h2", { text: this.opts?.title ?? t("settings.category.mergeTitle") });
     contentEl.createEl("div", {
       text: this.opts?.intro ?? t("settings.category.mergeIntro", { name: this.from.name }),
@@ -14041,7 +14100,7 @@ var MergeCategoryModal = class extends import_obsidian20.Modal {
     this.contentEl.empty();
   }
 };
-var RegroupTypeModal = class extends import_obsidian20.Modal {
+var RegroupTypeModal = class extends import_obsidian21.Modal {
   constructor(app, typeLabel, currentGroupId, groups, onSubmit) {
     super(app);
     this.typeLabel = typeLabel;
@@ -14053,7 +14112,7 @@ var RegroupTypeModal = class extends import_obsidian20.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian21.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.createEl("h2", { text: t("settings.accountType.regroupTitle") });
     contentEl.createEl("div", { text: t("settings.accountType.regroupIntro", { label: this.typeLabel }), cls: "accounting-ledger-folder" });
     const list = contentEl.createDiv("accounting-backup-list");
@@ -14080,7 +14139,7 @@ var RegroupTypeModal = class extends import_obsidian20.Modal {
     this.contentEl.empty();
   }
 };
-var CreateAccountTypeModal = class extends import_obsidian20.Modal {
+var CreateAccountTypeModal = class extends import_obsidian21.Modal {
   constructor(app, groups, onSubmit) {
     super(app);
     this.groups = groups;
@@ -14094,7 +14153,7 @@ var CreateAccountTypeModal = class extends import_obsidian20.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian21.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     bindEnterToBlur(contentEl);
     contentEl.createEl("h2", { text: t("settings.accountTypes.createTitle") });
     this.labelInput = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
@@ -14125,7 +14184,7 @@ var CreateAccountTypeModal = class extends import_obsidian20.Modal {
     this.contentEl.empty();
   }
 };
-var CreateAccountTypeGroupModal = class extends import_obsidian20.Modal {
+var CreateAccountTypeGroupModal = class extends import_obsidian21.Modal {
   constructor(app, onSubmit) {
     super(app);
     this.onSubmit = onSubmit;
@@ -14136,7 +14195,7 @@ var CreateAccountTypeGroupModal = class extends import_obsidian20.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian20.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian21.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     bindEnterToBlur(contentEl);
     contentEl.createEl("h2", { text: t("settings.accountType.createTitle") });
     this.nameInput = contentEl.createEl("input", { type: "text", cls: "accounting-ledger-input" });
@@ -14168,9 +14227,10 @@ var DEFAULT_SETTINGS = {
   autoOpenOnStartup: true,
   onboardingCompleted: false,
   locale: defaultLocale,
-  accountGroupingMode: DEFAULT_ACCOUNT_GROUPING_MODE
+  accountGroupingMode: DEFAULT_ACCOUNT_GROUPING_MODE,
+  hideInAppSettings: false
 };
-var AccountingPlugin = class extends import_obsidian21.Plugin {
+var AccountingPlugin = class extends import_obsidian22.Plugin {
   settingsTab;
   /** 引导期间的背景设置页（应用主界面）；引导完成后按需刷新/关闭，避免双 Modal 堆叠。 */
   onboardingBackdrop = null;
@@ -14183,6 +14243,7 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
   async onload() {
     await this.loadSettings();
     initLogger(this.app.vault);
+    this.addSettingTab(new AccountingNativeSettingTab(this.app, this));
     this.addCommand({ id: "open-diaglog", name: t("cmd.diaglog"), callback: () => new DiagLogModal(this.app).open() });
     this.addCommand({
       id: "open",
@@ -14286,10 +14347,10 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
         await this.saveSettings();
       }
       if (migrated.length > 0) {
-        new import_obsidian21.Notice(t("notice.migratedN", { n: migrated.length }));
+        new import_obsidian22.Notice(t("notice.migratedN", { n: migrated.length }));
       }
       if (failed.length > 0) {
-        new import_obsidian21.Notice(t("notice.migrateFailed", { n: failed.length, list: failed.join(", ") }));
+        new import_obsidian22.Notice(t("notice.migrateFailed", { n: failed.length, list: failed.join(", ") }));
       }
     } catch (error) {
       console.error("\u81EA\u52A8\u8FC1\u79FB\u8D26\u672C\u5931\u8D25:", error);
@@ -14309,7 +14370,7 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
     this.settings.dataSubdir = target;
     await this.saveSettings();
     this.settingsTab = new AccountingSettings(this.app, this, new ObsidianDataAdapter(this.app.vault, this.settings.dataSubdir, this));
-    new import_obsidian21.Notice(t("notice.selfHealed", { alias }));
+    new import_obsidian22.Notice(t("notice.selfHealed", { alias }));
   }
   /** 导航上下文：三个目标的打开回调，注入到各 Modal 使其底部导航条可用。public 供设置页「查看」跳转复用。 */
   navCtx(adapter) {
@@ -14375,7 +14436,7 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
       if (cfg.lastSuccess?.slice(0, 10) === today) return;
       const baseCurrency = await adapter.readBaseCurrency();
       const url = `https://api.frankfurter.app/latest?from=${baseCurrency.toUpperCase()}`;
-      const resp = await (0, import_obsidian21.requestUrl)({ url, method: "GET" });
+      const resp = await (0, import_obsidian22.requestUrl)({ url, method: "GET" });
       const fetched = parseRateResponse(resp.json, baseCurrency, nowISO());
       if (!fetched) return;
       const rates = await adapter.readRates();
@@ -14529,7 +14590,8 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
     this.openSettings(onOpened);
   };
   /** 打开设置页（全屏 Modal）：每次用最新 dataSubdir 重建 adapter，导航条与切换账本回调均绑定到该新 adapter。
-   *  返回实例，供引导背景页按需 close。 */
+   *  返回实例，供引导背景页按需 close。public 供原生设置页「打开应用内设置页」按钮复用
+   *  （隐藏应用内设置页入口后，这是唯一显式入口）。 */
   openSettings(onOpened) {
     const adapter = this.adapter();
     const modal = openSettings(this.app, this.settingsTab, this.navCtx(adapter), void 0, this.switchLedgerAndReopenSettings, onOpened);
@@ -14545,6 +14607,7 @@ var AccountingPlugin = class extends import_obsidian21.Plugin {
       this.settings.accountGroupingMode = m;
       await this.saveSettings();
     });
+    setInAppSettingsHidden(this.settings.hideInAppSettings);
     const adapter = new ObsidianDataAdapter(this.app.vault, this.settings.dataSubdir, this);
     this.settingsTab = new AccountingSettings(this.app, this, adapter);
   }
