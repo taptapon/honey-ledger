@@ -304,18 +304,13 @@
   line-height: 1.4;
 }
 
-/* 账户选择下方的「当前余额」提示：左缩进对齐 select（label 64px + gap 8px = 72px），小字次要色。 */
-.accounting-entry-balance-hint {
-  margin: 2px 0 10px 72px;
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
-  line-height: 1.4;
-}
-
-/* 负余额软警告：与余额提示同行，inline 红字。 */
+/* 负余额软警告：账户行尾 inline 红字（余额已并入选中项文本）。 */
 .accounting-entry-overdraft {
+  flex: 0 0 auto;
+  font-size: var(--font-ui-smaller);
   margin-left: 4px;
   color: var(--text-error);
+  white-space: nowrap;
 }
 
 /* 「?」渐进式帮助：summary 常驻 + 点击 ? 展开 detail（详见 openspec ui-help-disclosure）。 */
@@ -799,6 +794,7 @@
 
 .accounting-group-head {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   font-size: var(--font-ui-small);
@@ -1596,6 +1592,19 @@
   justify-content: flex-start;
 }
 
+/* 流水页时间行（label 一行、快捷按钮+日期区间一行，栈式由上方规则承担）：
+   快捷键已缩到 2 个（近12月/全部），控件行让日期框弹性收缩充满剩余宽度（不再定宽 120px）。 */
+.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-filter-controls .accounting-date-range-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.modal.accounting-fullscreen:not(.accounting-desktop) .accounting-filter-controls .accounting-date-range-wrap .accounting-datefield {
+  width: 100%;
+  max-width: 120px;
+  flex: 1 1 60px;
+}
+
 .modal.accounting-fullscreen:not(.accounting-desktop) .accounting-filter-type-btn {
   flex: 1;
 }
@@ -2215,12 +2224,37 @@
      此处仅保留移动端专属的 transform/opacity 钉住（反压 Obsidian JS 逐帧开/关动画）。 */
 }
 
+/* 全屏页 flex 布局基座：.modal 纵向 flex，二级 tab 栏（.accounting-settings-tabs）作为流内固定行
+   常驻顶部（不再 sticky 吸顶），.modal-content 是唯一滚动区占剩余高度。
+   Why：iOS WKWebView 的 sticky 在滚动进行中跟随内容合成漂移、松手/回弹才吸附（「上滑吸顶、下滑跟走」），
+   结构性挪出滚动流才能完全固定。tab 栏由各页 renderViewSwitch/renderInto 挂到 modalEl（在 .modal-content 之前）。
+   流水页（.accounting-transaction-modal）无二级 tab，无 tab 行、布局不变。
+   记账页 .accounting-entry-modal 不走全屏 flex 基座（自身有 max-height 弹窗语义，类型 tab 不吸顶），排除。 */
+.modal.accounting-fullscreen:has(> .accounting-settings-tabs) {
+  display: flex;
+  flex-direction: column;
+}
+
+/* tab 行固定不滚：无 sticky、无 z-index 需求（不与滚动内容重叠）；底部分隔线保留 */
+.modal.accounting-fullscreen > .accounting-settings-tabs {
+  position: static;
+  flex-shrink: 0;
+}
+
+/* tab 行下方的滚动区：占剩余高度、内部滚动。Obsidian 默认 .modal-content 已是 flex column +
+   overflow auto（.accounting-settings-modal 另有 overflow-y:auto 兜底），此处显式锁 min-height:0
+   保证在 flex 父容器内可收缩出滚动（缺 min-height:0 时 flex item 会被内容撑破不滚）。 */
+.modal.accounting-fullscreen:has(> .accounting-settings-tabs) .modal-content {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 /* 移动端全屏页 contentEl 顶部 padding：流水/账户/报表/设置四页清零——内容紧贴滚动区顶部（.modal 避让带
    safe-area+52 已统一提供 .modal-content 上边缘与右上 ✕ 的间距，见上方 .accounting-fullscreen 规则），
-   各页内部元素自行设计离顶距离。设置页 sticky tab 栏（.accounting-settings-tabs）吸顶在滚动区顶，靠自身不透明
-   底色遮住上划的正文（不穿帮）；默认 .modal-content 的 padding:5px 会在 tab 栏上方留一条隙，故一并清零。
+   各页内部元素自行设计离顶距离。tab 栏已挪出滚动区挂 modalEl（见上方 flex 基座），滚动正文不再需要
+   tab 栏遮蔽，top:0 清零仅保流水页等无 tab 页与原行为一致。
    记账页另给 10px（见 .accounting-entry-modal）。
-   桌面端同理：设置页 sticky tab 栏上方若留 padding 缝，滚动正文同样从缝漏出；四页一并清零。
+   桌面端同理清零。
    特异性 (0,3,0) 覆盖 .modal.accounting-fullscreen .modal-content 的 padding:5px (0,2,0)。 */
 .modal.accounting-fullscreen .modal-content:is(.accounting-transaction-modal, .accounting-balance-modal, .accounting-report-modal, .accounting-settings-modal) {
   padding-top: 0;
@@ -2344,14 +2378,12 @@
   background-repeat: no-repeat;
 }
 
-/* === 设置页 Tab 栏（sticky 吸顶下划线式）===
-   4 个 panel 一次性渲染，靠 active 类切显隐；tab 栏 sticky 固定在滚动容器（.accounting-settings-modal）
-   顶部。tab 栏 + panels 容器都是 contentEl（flex column）的直接子项，给 flex-shrink:0 保证不被压。
+/* === 设置页 Tab 栏（下划线式）===
+   4 个 panel 一次性渲染，靠 active 类切显隐；tab 栏挂 modalEl 作为流内固定行（.modal flex column，
+   见 .accounting-fullscreen:has(> .accounting-settings-tabs) 基座），不随正文滚动——替代旧 sticky 方案
+   （iOS WKWebView sticky 滚动中漂移、松手才吸附）。
    触屏 hover 守卫避开 iOS WKWebView 粘性 hover（见 CLAUDE.md 环境陷阱）。 */
 .accounting-settings-tabs {
-  position: sticky;
-  top: 0;
-  z-index: 5;
   display: flex;
   background: var(--background-primary);
   border-bottom: 1px solid var(--background-modifier-border);
@@ -4580,4 +4612,221 @@ details[open]>.accounting-collapsible-head::before {
   .accounting-yield-cell-principal {
     display: none;
   }
+}
+
+/* ── 账户规划（余额页二级视图「规划」）── */
+/* 汇总卡配色与概况页净资产 hero（.accounting-nw-hero）同源：翡翠→青绿渐变，随明/暗主题自适应；
+   color-mix 不可用时降级为次级背景（与 hero 同款渐进增强写法）。 */
+.accounting-plan-summary {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  background: var(--background-secondary);
+  background: linear-gradient(135deg,
+      color-mix(in srgb, var(--color-green) 32%, var(--background-secondary)),
+      color-mix(in srgb, var(--color-cyan) 24%, var(--background-secondary)));
+}
+.accounting-plan-summary-title {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+/* 标题行：标题居左、「?」帮助按钮贴右上角 */
+.accounting-plan-summary-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.accounting-plan-summary-line {
+  margin-top: 6px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+.accounting-plan-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.accounting-plan-nums {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+.accounting-plan-num-label {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+.accounting-plan-num-value {
+  margin-top: 2px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.accounting-plan-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--background-modifier-border);
+  overflow: hidden;
+}
+.accounting-plan-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-orange);
+}
+.accounting-plan-progress-fill--done {
+  background: var(--color-green);
+}
+.accounting-plan-progress-fill--excess {
+  background: var(--color-red);
+}
+.accounting-plan-group-sub {
+  padding: 6px 14px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  border-top: 1px solid var(--background-modifier-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.accounting-plan-row {
+  /* 上下 padding 10→6：与规划分组头（.accounting-plan-group-head 6px）一致，账户行不再比组头高 */
+  padding: 6px 14px;
+  border-top: 1px solid var(--background-modifier-border);
+  font-size: var(--font-ui-small);
+}
+/* 规划页分组头：比概况页更紧凑（上下 padding 10→6），给目标数字簇/胶囊留行内空间；
+   gap 7px 提供胶囊前间隔（账户行由 .accounting-plan-row-right 的 10px gap 提供） */
+.accounting-plan-group-head {
+  padding: 6px 8px;
+  gap: 7px;
+}
+
+.accounting-group > .accounting-plan-row:first-of-type {
+  border-top: 0;
+}
+.accounting-plan-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.accounting-plan-row-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* 规划行交互热区（复用概况页语义）：名称→账户操作菜单 */
+  cursor: pointer;
+}
+.accounting-plan-row-name .accounting-muted {
+  font-weight: 400;
+}
+.accounting-plan-row-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+.accounting-plan-cluster {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+/* 分组头右侧数字簇不继承组名的 600 加粗：只有组名保持加粗；
+   右对齐双类提权 + text-align 兜底（防主题高优先级选择器压制 flex-end，见主题压制处理口径） */
+.accounting-group-head .accounting-plan-cluster {
+  font-weight: 400;
+  align-items: flex-end;
+  text-align: right;
+}
+.accounting-plan-actual {
+  font-variant-numeric: tabular-nums;
+  /* 统一实际金额与差额项同字号（差额为 ui-smaller；此前实际金额继承行字号偏大参差） */
+  font-size: var(--font-ui-smaller);
+}
+.accounting-plan-amount-link {
+  cursor: pointer;
+}
+/* 规划页 hover 全部包 hover 守卫：iOS 触屏 :hover 粘住（金额下划线/胶囊底色变化点过不消失） */
+@media (hover: hover) {
+  .accounting-plan-amount-link:hover {
+    text-decoration: underline;
+  }
+  .accounting-plan-target-chip:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
+  .accounting-plan-target-chip--derived:hover {
+    color: var(--text-normal) !important;
+    background: var(--background-modifier-hover) !important;
+  }
+}
+/* 规划页紧凑「设目标/设组目标」按钮：字号对齐账户名（ui-small 降一档）、胶囊形，弱于标准控件 */
+.accounting-plan-set-btn {
+  height: auto;
+  padding: 2px 10px;
+  font-size: var(--font-ui-smaller);
+  font-weight: 400;
+  border-radius: 999px;
+}
+.accounting-plan-target-chip {
+  cursor: pointer;
+  /* 宽度随金额内容自适应（不设 min-width），行尾右缘天然对齐；
+     与左侧间隔由容器 gap 统一提供（账户行 .accounting-plan-row-right / 组头 .accounting-plan-group-head 均 10px） */
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center !important;
+  white-space: nowrap;
+  box-sizing: border-box;
+  text-align: center;
+  /* 目标金额比实际/差额（ui-smaller）大一号 */
+  font-size: var(--font-ui-small);
+  padding: 2px 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  /* 贴近卡片右缘：抵消容器行内边距（组头 8px、账户行 14px），统一收到 4px + 2px 间隔 */
+  margin-right: -8px;
+}
+/* 目标占总余额百分比：灰色弱化（跟随 muted，比目标金额更淡一档）；margin-left 拉开与目标金额的间距 */
+.accounting-plan-target-chip .accounting-plan-target-pct {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  margin-left: 5px;
+}
+/* 账户行目标胶囊弱化：小一号字号（ui-smaller，与实际/差额同档），弱于分组头的整组目标胶囊 */
+.accounting-plan-target-chip--sm {
+  font-size: var(--font-ui-smaller);
+}
+/* 汇总型目标（由组内账户目标合计而来，非自己设的整组目标）：透明底 + 虚线边框 + faint 文字，
+   对齐桌面端 AccountPlanBoard 的 border-dashed 处理。!important 钉死三属性，排除主题对
+   button 底色/边框的高优先级覆盖；若仍无差异则说明运行时未加载新文件（需重启 Obsidian）。 */
+.accounting-plan-target-chip--derived {
+  border-style: dashed !important;
+  color: var(--text-faint) !important;
+  background: transparent !important;
+}
+.accounting-plan-diff {
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+}
+.accounting-plan-diff-short {
+  color: var(--color-orange);
+}
+/* 差额/进度分档：90%–110% 绿（邻近达标）/ >110% 红（大幅超出）；<90% 走 -short 橘 */
+.accounting-plan-diff-near {
+  color: var(--color-green);
+}
+.accounting-plan-diff-excess {
+  color: var(--color-red);
+}
+/* 分组头进度偏离达标带（<90% 或 >110%）时比例/差额文字加粗（与桌面端 PlanFigure emphasize 同步） */
+.accounting-plan-diff--strong {
+  font-weight: 600;
 }
