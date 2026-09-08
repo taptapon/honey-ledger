@@ -4146,9 +4146,13 @@ details[open]>.accounting-collapsible-head::before {
 
 /* 在用币种禁删标注：替代删除按钮，中性灰小字。
    与删除按钮同固定宽并居中——两者宽度若不同，会经 rate/date 的 flex-grow 传导，
-   导致各行金额/日期列横向错位。 */
+   导致各行金额/日期列横向错位。width/min/max 三声明锁死，防主题/内容顶开。 */
 .accounting-currency-rate-row .accounting-currency-inuse {
   flex: 0 0 4em;
+  width: 4em;
+  min-width: 4em;
+  max-width: 4em;
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4220,10 +4224,21 @@ details[open]>.accounting-collapsible-head::before {
   appearance: none;
 }
 
-/* 删除按钮与「使用中」标注同宽居中，保证各行金额/日期列对齐（见 .accounting-currency-inuse 注） */
+/* 删除按钮与「使用中」标注同宽居中，保证各行金额/日期列对齐（见 .accounting-currency-inuse 注）。
+   仅声明 flex-basis 不够：主题常给 button 注入 min-width/padding，flex 项目 min-width:auto
+   会把按钮顶宽于标注、列随之错位——width/min/max 三声明 + box-sizing 锁死，
+   并用 flex 居中（text-align 对 inline-block 的兜底不可靠）。 */
 .accounting-settings-modal .accounting-currency-rate-row .accounting-ledger-delete {
   flex: 0 0 4em;
-  text-align: center;
+  width: 4em;
+  min-width: 4em;
+  max-width: 4em;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 2px;
+  overflow: hidden;
 }
 
 /* 取消按钮：中性色（与桌面端 btn-sm-secondary 一致） */

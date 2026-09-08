@@ -3184,6 +3184,21 @@ function inferTransferAccounts(transactions, accounts) {
   if (!latest) return {};
   return { fromAccount: latest.from, toAccount: latest.to };
 }
+function inferCounterpartyAccount(transactions, accounts, accountId, input = {}) {
+  const candidates = candidateIds(accounts);
+  if (!accountId || !candidates.has(accountId)) return void 0;
+  const nowMs = Date.parse(input.now ?? nowISO());
+  const map = /* @__PURE__ */ new Map();
+  for (const tx of transactions) {
+    if (tx.type !== "transfer") continue;
+    const counterparty = tx.fromAccount === accountId ? tx.toAccount : tx.toAccount === accountId ? tx.fromAccount : void 0;
+    if (!counterparty || !candidates.has(counterparty)) continue;
+    const r = weightOf(tx.ts, nowMs);
+    if (!r) continue;
+    accumulate(map, counterparty, r.w, r.ms);
+  }
+  return pickWinner(map);
+}
 
 // ../../packages/core/src/accountOps.ts
 function numOr(s) {
@@ -3588,8 +3603,16 @@ function retagAccounts(accounts, from, to, now) {
   });
   return { accounts: nextAccounts, retagged };
 }
+function retagGroupTargets(targets, from, to) {
+  const isFromTag = (t2) => t2.kind === "group" && t2.mode === "tag" && t2.key === from;
+  const isToTag = (t2) => t2.kind === "group" && t2.mode === "tag" && t2.key === to;
+  const carried = targets.find(isFromTag);
+  const migrated = targets.filter((t2) => !isFromTag(t2));
+  if (!carried || to === "") return migrated;
+  return [...migrated.filter((t2) => !isToTag(t2)), { ...carried, key: to }];
+}
 function planRenameAccountTag(input) {
-  const { accounts, categories, from, to, now } = input;
+  const { accounts, categories, targets, from, to, now } = input;
   const fromTrimmed = from.trim();
   const toTrimmed = to.trim();
   if (toTrimmed === "") throw new AppError("err.category.nameEmpty", "\u6807\u7B7E\u540D\u4E0D\u80FD\u4E3A\u7A7A");
@@ -3601,19 +3624,29 @@ function planRenameAccountTag(input) {
   }
   const { accounts: nextAccounts, retagged } = retagAccounts(accounts, fromTrimmed, toTrimmed, now);
   const nextCategories = row.id ? categories.map((c) => c.id === row.id ? { ...c, name: toTrimmed } : c) : [...categories];
-  return { accounts: nextAccounts, categories: nextCategories, retagged };
+  return {
+    accounts: nextAccounts,
+    categories: nextCategories,
+    ...targets ? { targets: retagGroupTargets(targets, fromTrimmed, toTrimmed) } : {},
+    retagged
+  };
 }
 function planDeleteAccountTag(input) {
-  const { accounts, categories, from, now } = input;
+  const { accounts, categories, targets, from, now } = input;
   const fromTrimmed = from.trim();
   const row = accountTagList(categories, accounts).find((r) => r.name === fromTrimmed);
   if (!row) throw new AppError("err.category.notFound", "\u6807\u7B7E\u4E0D\u5B58\u5728");
   const { accounts: nextAccounts, retagged } = retagAccounts(accounts, fromTrimmed, "", now);
   const nextCategories = row.id ? categories.filter((c) => c.id !== row.id) : [...categories];
-  return { accounts: nextAccounts, categories: nextCategories, retagged };
+  return {
+    accounts: nextAccounts,
+    categories: nextCategories,
+    ...targets ? { targets: retagGroupTargets(targets, fromTrimmed, "") } : {},
+    retagged
+  };
 }
 function planMergeAccountTag(input) {
-  const { accounts, categories, from, to, now } = input;
+  const { accounts, categories, targets, from, to, now } = input;
   const fromTrimmed = from.trim();
   const toTrimmed = to.trim();
   if (fromTrimmed === toTrimmed) return { accounts: [...accounts], categories: [...categories], retagged: 0 };
@@ -3623,7 +3656,12 @@ function planMergeAccountTag(input) {
   if (!fromRow || !toRow) throw new AppError("err.category.notFound", "\u6807\u7B7E\u4E0D\u5B58\u5728");
   const { accounts: nextAccounts, retagged } = retagAccounts(accounts, fromTrimmed, toTrimmed, now);
   const nextCategories = fromRow.id ? categories.filter((c) => c.id !== fromRow.id) : [...categories];
-  return { accounts: nextAccounts, categories: nextCategories, retagged };
+  return {
+    accounts: nextAccounts,
+    categories: nextCategories,
+    ...targets ? { targets: retagGroupTargets(targets, fromTrimmed, toTrimmed) } : {},
+    retagged
+  };
 }
 
 // ../../packages/core/src/accountTypeOps.ts
@@ -9243,21 +9281,35 @@ var EntryModal = class extends import_obsidian14.Modal {
   /**
    * 账户/分类默认值推断（仅纯新建）：编辑/复制（originalTxId 必赋值）与周期账聚焦模式跳过。
    * 单向联动贴合表单填写顺序「先账户后分类」：账户按该类型历史最常用推断；分类默认值跟随当前
-   * 账户，按「类型×账户」历史推断（账户变更时端侧重新推断）。transfer 按 history 常见有序对
-   * 推断双侧（一侧被手动改过则整组跳过，v1 无单侧补全）。外币账户推断后必须走 rate 预填，
-   * 与手动选账户路径对齐。调用时机：onOpen 日志加载后（首帧渲染前）、切类型后。
+   * 账户，按「类型×账户」历史推断（账户变更时端侧重新推断）。transfer 时若用户在收支/借贷侧
+   * 手选过账户则锚定为转出侧，转入侧按历史对推断、与转出撞车时用对手推断单侧补全（core
+   * inferCounterpartyAccount）。外币账户推断后必须走 rate 预填，与手动选账户路径对齐。
+   * 调用时机：onOpen 日志加载后（首帧渲染前）、切类型后。
    */
   maybeInferDefaults() {
     if (this.originalTxId || this.recurringMode !== "none") return;
     if (this.state.type === "transfer") {
       if (this.fromTouched || this.toTouched) return;
+      const valid = (id) => id && this.accounts.some((a) => a.id === id && a.active) ? id : void 0;
+      const carried = valid(this.state.account);
+      const from = this.accountTouched && carried ? carried : void 0;
+      if (from) {
+        this.state.fromAccount = from;
+        const pairTo = inferTransferAccounts(this.transactions, this.accounts).toAccount;
+        let to2 = pairTo !== from ? pairTo : void 0;
+        if (!to2) {
+          const counter = inferCounterpartyAccount(this.transactions, this.accounts, from);
+          to2 = counter !== from ? counter : void 0;
+        }
+        if (to2) this.state.toAccount = to2;
+        return;
+      }
       const pair = inferTransferAccounts(this.transactions, this.accounts);
       const last = readLastTransferPair();
-      const valid = (id) => id && this.accounts.some((a) => a.id === id && a.active) ? id : void 0;
-      const from = pair.fromAccount ?? valid(last?.fromAccount);
+      const f = pair.fromAccount ?? valid(last?.fromAccount);
       const to = pair.toAccount ?? valid(last?.toAccount);
-      if (from && to && from !== to) {
-        this.state.fromAccount = from;
+      if (f && to && f !== to) {
+        this.state.fromAccount = f;
         this.state.toAccount = to;
       }
       return;
@@ -9429,6 +9481,10 @@ var EntryModal = class extends import_obsidian14.Modal {
       this.accountSelectRow(wrap, t("entry.field.fromAccount"), s.fromAccount, includeHidden, (v) => {
         this.fromTouched = true;
         s.fromAccount = v;
+        if (!this.toTouched) {
+          const counter = inferCounterpartyAccount(this.transactions, this.accounts, v);
+          if (counter && counter !== v) s.toAccount = counter;
+        }
         this.rerender();
       }, void 0, odFor(s.fromAccount));
       this.accountSelectRow(wrap, t("entry.field.toAccount"), s.toAccount, includeHidden, (v) => {
@@ -14277,30 +14333,36 @@ var AccountingSettings = class {
     const entry = newAccountTagCategory(categories, accounts, name);
     await adapter.writeMeta({ accounts, categories: [...categories, entry] });
   }
-  /** 重命名标签：core planRenameAccountTag（retag + 托管条目改名），一次 writeMeta，无事件无备份。 */
+  /** 重命名标签：core planRenameAccountTag（retag + 托管条目改名 + 迁移 tag 组目标），一次 writeMeta，无事件无备份。 */
   async handleRenameAccountTag(from, to) {
     const adapter = this.currentAdapter();
     const { accounts, categories } = await adapter.readMeta();
-    const plan = planRenameAccountTag({ accounts, categories, from, to, now: nowISO() });
+    const targets = await adapter.readAccountTargets();
+    const plan = planRenameAccountTag({ accounts, categories, targets, from, to, now: nowISO() });
     await adapter.writeMeta({ accounts: plan.accounts, categories: plan.categories });
+    if (plan.targets) await adapter.writeAccountTargets(plan.targets);
     return { retagged: plan.retagged };
   }
-  /** 合并标签：core planMergeAccountTag（retag 并入目标 + 删源条目），一次 writeMeta。 */
+  /** 合并标签：core planMergeAccountTag（retag 并入目标 + 删源条目 + 迁移 tag 组目标），一次 writeMeta。 */
   async handleMergeAccountTag(from, to) {
     const adapter = this.currentAdapter();
     const { accounts, categories } = await adapter.readMeta();
-    const plan = planMergeAccountTag({ accounts, categories, from, to, now: nowISO() });
+    const targets = await adapter.readAccountTargets();
+    const plan = planMergeAccountTag({ accounts, categories, targets, from, to, now: nowISO() });
     await adapter.writeMeta({ accounts: plan.accounts, categories: plan.categories });
+    if (plan.targets) await adapter.writeAccountTargets(plan.targets);
     return { retagged: plan.retagged };
   }
-  /** 删除标签（真删除）：清空全部账户的该标签并删托管条目（若有），无事件无备份。confirm 明示受影响账户数。 */
+  /** 删除标签（真删除）：清空全部账户的该标签并删托管条目（若有）+ 移除该标签组目标，无事件无备份。confirm 明示受影响账户数。 */
   async handleDeleteAccountTag(row) {
     const adapter = this.currentAdapter();
     const { accounts, categories } = await adapter.readMeta();
     const message = row.usage > 0 ? t("settings.accountTag.deleteConfirmUsed", { name: row.name, n: row.usage }) : t("settings.accountTag.purgeConfirm", { name: row.name });
     if (!confirm(message)) return;
-    const plan = planDeleteAccountTag({ accounts, categories, from: row.name, now: nowISO() });
+    const targets = await adapter.readAccountTargets();
+    const plan = planDeleteAccountTag({ accounts, categories, targets, from: row.name, now: nowISO() });
     await adapter.writeMeta({ accounts: plan.accounts, categories: plan.categories });
+    if (plan.targets) await adapter.writeAccountTargets(plan.targets);
     new import_obsidian22.Notice(row.usage > 0 ? t("settings.accountTag.deletedUsedNotice", { name: row.name, n: plan.retagged }) : t("settings.category.deletedNotice", { name: row.name }));
   }
   /** 恢复隐藏标签：active 置为可见（隐藏行必有托管条目）。 */
