@@ -1057,7 +1057,6 @@
 /* 控件基线：用直接子选择器（> button）排除清除按钮，统一高度/边框/圆角/字号。 */
 .accounting-filter-controls>button,
 .accounting-filter-quick-btn,
-.accounting-filter-row select.accounting-filter-account-select,
 .accounting-search-input {
   height: var(--ac-control-h-compact);
   box-sizing: border-box;
@@ -1131,11 +1130,27 @@
   border-color: var(--interactive-accent) !important;
 }
 
-.accounting-filter-row select.accounting-filter-account-select {
+/* 账户多选触发按钮（原单选 <select> 改为多选选择器入口）：宽度对齐原 select（省宽、不挤备注框），
+   长账户名省略；右侧 ▾ 绝对定位（不参与省略计算，避免被 text-overflow 裁掉）。
+   选择器带 .accounting-filter-row 前缀抬到 (0,2,0)——压过控件基线 `.accounting-filter-controls>button`
+   的 padding (0,1,1)（同款前缀提权手法见 docs/mobile-ui-style.md「特异性」）。 */
+.accounting-filter-row .accounting-filter-account-btn {
+  position: relative;
   flex: 1;
   min-width: 110px;
   max-width: 160px;
-  padding: 0 6px;
+  padding: 0 20px 0 6px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accounting-filter-row .accounting-filter-account-btn::after {
+  content: '▾';
+  position: absolute;
+  right: 8px;
+  color: var(--text-muted);
 }
 
 .accounting-search-wrap {
@@ -2120,8 +2135,7 @@
 /* select 触发器统一自定义外观；弹出的 option 列表仍由系统渲染（不可定制）。 */
 .accounting-adjust-modal select.accounting-adjust-input,
 .accounting-entry-modal select.accounting-entry-input,
-.accounting-settings-modal select.accounting-ledger-input,
-.accounting-filter-row select.accounting-filter-account-select {
+.accounting-settings-modal select.accounting-ledger-input {
   padding-right: 26px;
   background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
   background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
@@ -2179,6 +2193,95 @@
 .accounting-action-item-text {
   font-size: var(--font-ui-small);
   font-weight: 500;
+}
+
+/* ===== 账户多选选择器（accountMultiPicker.ts，流水页「账户」筛选的子弹窗）=====
+   标题行（左标题 + 右已选计数）+ 搜索框 + 分组勾选列表（限高滚动，避免弹窗被长列表撑高、footer 被顶下去）
+   + 底部「全部 / 清除 / 完成」。行用 label 包 checkbox：点行任意处即切换（移动端整行热区）。 */
+.accounting-picker-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.accounting-picker-title-row .accounting-action-title {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accounting-picker-count {
+  flex: 0 0 auto;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.accounting-picker-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+}
+
+.accounting-picker-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.accounting-picker-group {
+  padding: 8px 2px 4px;
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.accounting-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+}
+
+/* 组内末行去底线（组标题自带分隔感）；覆盖不到时由组的 padding 兜底，视觉无害 */
+.accounting-picker-row:last-child {
+  border-bottom: none;
+}
+
+.accounting-picker-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-ui-small);
+}
+
+@media (hover: hover) {
+  .accounting-picker-row:hover {
+    background: var(--background-modifier-hover);
+  }
+}
+
+.accounting-picker-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.accounting-picker-footer-left {
+  display: flex;
+  gap: 8px;
 }
 
 /* 全屏布局（Obsidian 以移动端为主线，不区分平台）：记一笔 / 流水 / 流水详情 / 余额 Modal 铺满视口。
@@ -3514,7 +3617,7 @@ details[open]>.accounting-collapsible-head::before {
 }
 
 /* 报表页二级视图 tab 栏（复用设置页 .accounting-settings-tabs，sticky 吸顶）下方首个内容块统一 8px 间距：
-   flow=时间段 filter-box（绿卡）/ yield=stat-cards / 无流水空态，与设置页各 panel 首卡 8px 离顶同值，
+   时间段 filter-box（绿卡，两 tab 共享）/ 无流水空态，与设置页各 panel 首卡 8px 离顶同值，
    否则绿卡/说明行紧贴 tab 栏下划线（0px）。 */
 .accounting-report-modal .accounting-filter-box,
 .accounting-report-modal .accounting-stat-cards,
@@ -4433,7 +4536,13 @@ details[open]>.accounting-collapsible-head::before {
   text-align: center;
 }
 
-/* ===== 预估收益视图（reportModal 二级切换 yield 视图；product-accounts 规格）===== */
+/* ===== 预估收益视图（账户页第三 tab；product-accounts 规格。自报表页 yield 视图迁入，样式未改）===== */
+
+/* 视图容器：二级 tab 栏正下方首个内容块留 8px（与原报表页 .accounting-stat-cards 的离顶口径一致），
+   且不影响同页其它视图。 */
+.accounting-yield-view {
+  padding-top: 8px;
+}
 
 .accounting-yield-note {
   font-size: var(--font-ui-smaller);
@@ -4499,8 +4608,8 @@ details[open]>.accounting-collapsible-head::before {
 /* 表头行：小号 muted 标签 + 底分隔线；**吸顶**——滚动到顶后固定在二级视图 tab 栏
    （.accounting-settings-tabs，sticky top:0 + 不透明底 + z-index 5）正下方。
    sticky 打在单元格上（display:table-cell，等价 th 吸顶的跨浏览器手法；打在 table-row 上
-   WebKit 支持不稳），四格同 top 即成整行；top 取 reportModal 渲染后量得的 tab 栏实际高度
-   （--accounting-report-tabs-h，主题字号浮动无法静态写死）。吸顶期间底色必须不透明，
+   WebKit 支持不稳），四格同 top 即成整行；top 走 `--accounting-report-tabs-h`（当前无 JS 赋值、
+   兜底 0px 即正确：tab 栏挂在滚动容器之外，0 就是紧贴它的下沿）。吸顶期间底色必须不透明，
    遮住滚过的组头/明细行；z-index 低于 tab 栏，自身高于普通行（sticky 属定位元素本就在上，
    显式给值与月份头 .accounting-month-head 同约定）。sticky 约束矩形是整个表格——表格滚出
    视口时表头随之释放（与 HTML 表 th 吸顶同语义）。 */
@@ -4573,22 +4682,6 @@ details[open]>.accounting-collapsible-head::before {
 
 .accounting-yield-indent {
   color: var(--text-faint);
-}
-
-.accounting-yield-dir {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: var(--radius-pill, 999px);
-}
-
-.accounting-yield-dir-income {
-  background: rgba(16, 185, 129, 0.12);
-  color: #059669;
-}
-
-.accounting-yield-dir-cost {
-  background: rgba(239, 68, 68, 0.1);
-  color: #dc2626;
 }
 
 .accounting-yield-maturity {
