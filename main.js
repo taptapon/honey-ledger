@@ -4053,6 +4053,7 @@ var zh = {
   "entry.field.category": "\u5206\u7C7B",
   "entry.field.fromAccount": "\u8F6C\u51FA\u8D26\u6237",
   "entry.field.toAccount": "\u8F6C\u5165\u8D26\u6237",
+  "entry.swapAccounts": "\u4EA4\u6362",
   "entry.field.direction": "\u65B9\u5411",
   "entry.field.selfAccount": "\u5DF1\u65B9\u8D26\u6237",
   "entry.field.note": "\u5907\u6CE8",
@@ -4204,6 +4205,8 @@ var zh = {
   "entry.switchLedgerCurrent": "\u5F53\u524D",
   // KR5/task1: accountActionModal + accountGrouping
   "account.hiddenGroup": "\u9690\u85CF\u8D26\u6237",
+  "account.action.entry": "\u8BB0\u4E00\u7B14",
+  "account.action.entryHint": "\u8DF3\u8F6C\u8BB0\u8D26\u9875\u5E76\u9884\u7F6E\u8BE5\u8D26\u6237",
   "account.action.viewTx": "\u67E5\u770B\u6D41\u6C34\u660E\u7EC6",
   "account.action.viewTxHint": "\u67E5\u770B\u8BE5\u8D26\u6237\u6D41\u6C34",
   "account.action.viewProps": "\u67E5\u770B\u5C5E\u6027",
@@ -4864,6 +4867,7 @@ var en = {
   "entry.field.category": "Category",
   "entry.field.fromAccount": "From",
   "entry.field.toAccount": "To",
+  "entry.swapAccounts": "Swap",
   "entry.field.direction": "Direction",
   "entry.field.selfAccount": "Mine",
   "entry.field.note": "Note",
@@ -5015,6 +5019,8 @@ var en = {
   "entry.switchLedgerCurrent": "Current",
   // KR5/task1: accountActionModal + accountGrouping
   "account.hiddenGroup": "Hidden accounts",
+  "account.action.entry": "New entry",
+  "account.action.entryHint": "Open the entry page with this account preselected",
   "account.action.viewTx": "View transactions",
   "account.action.viewTxHint": "View this account's transactions",
   "account.action.viewProps": "View properties",
@@ -7008,11 +7014,129 @@ var LedgerPasswordModal = class extends import_obsidian4.Modal {
 var import_obsidian13 = require("obsidian");
 
 // src/accountActionModal.ts
-var import_obsidian7 = require("obsidian");
+var import_obsidian8 = require("obsidian");
+
+// src/navBar.ts
+var import_obsidian5 = require("obsidian");
+var inAppSettingsHidden = false;
+function setInAppSettingsHidden(hidden) {
+  inAppSettingsHidden = hidden;
+}
+function isInAppSettingsHidden() {
+  return inAppSettingsHidden;
+}
+function navIndex(p) {
+  switch (p) {
+    case "entry":
+      return 0;
+    case "list":
+    case "detail":
+      return 1;
+    case "balance":
+      return 2;
+    case "report":
+      return 3;
+    case "settings":
+      return 4;
+  }
+}
+function slideDirection(from, to) {
+  return navIndex(to) >= navIndex(from) ? "right" : "left";
+}
+function prepareModalContainer(container) {
+  container.addClass("accounting-app");
+  container.style.transition = "none";
+  container.style.animation = "none";
+  container.style.transform = "none";
+  container.style.position = "fixed";
+  container.style.inset = "0";
+  container.style.width = "100vw";
+  container.style.height = "100vh";
+  container.style.maxWidth = "100vw";
+  container.style.maxHeight = "100vh";
+  container.style.overflow = "hidden";
+  const modalEl = container.querySelector(".modal");
+  if (modalEl) {
+    const m = modalEl;
+    m.style.transition = "none";
+    m.style.animation = "none";
+    m.style.transform = "none";
+    m.style.width = "100vw";
+    m.style.height = "100vh";
+    m.style.maxWidth = "100vw";
+    m.style.maxHeight = "100vh";
+    m.style.borderRadius = "0";
+    m.style.margin = "0";
+    m.style.overflow = "hidden";
+  }
+}
+function slideClass(slide) {
+  if (!slide) return void 0;
+  return slide === "right" ? "accounting-slide-right" : "accounting-slide-left";
+}
+function presetModalChrome(modalEl, containerEl) {
+  modalEl.addClass("accounting-fullscreen");
+  if (!import_obsidian5.Platform.isMobile) modalEl.addClass("accounting-desktop");
+  containerEl.addClass("accounting-app");
+  const m = modalEl;
+  const c = containerEl;
+  m.style.animation = "none";
+  m.style.transition = "none";
+  c.style.animation = "none";
+  c.style.transition = "none";
+}
+function renderNavBar(container, current2, ctx, closeSelf) {
+  container.querySelectorAll(".accounting-nav-bar").forEach((el) => el.remove());
+  const bar = container.createDiv({ cls: "accounting-nav-bar" });
+  const items = [
+    // 切换一律「先开新页、后关旧页」：关旧页统一推迟到新页 onOpen（onOpened 回调），此时新容器已全屏化（遮罩铺满），
+    // 旧页在下层 detach 不露底层。移动端 Modal.open 非同步挂载，若 open 后立即 closeSelf 会在新页挂载前露底。
+    { label: t("nav.entry"), icon: "pencil", page: "entry", run: (s) => {
+      ctx.openEntry(s, void 0, closeSelf);
+    } },
+    { label: t("nav.list"), icon: "list", page: "list", run: (s) => {
+      ctx.openList(void 0, s, void 0, void 0, void 0, closeSelf);
+    } },
+    { label: t("nav.accounts"), icon: "wallet", page: "balance", run: (s) => {
+      ctx.openBalance(s, closeSelf);
+    } },
+    { label: t("nav.dashboard"), icon: "bar-chart-2", page: "report", run: (s) => {
+      ctx.openReport(s, closeSelf);
+    } },
+    { label: t("nav.settings"), icon: "settings", page: "settings", run: (s) => {
+      ctx.openSettings(s, closeSelf);
+    } }
+  ];
+  const visibleItems = inAppSettingsHidden ? items.filter((it) => it.page !== "settings") : items;
+  for (const it of visibleItems) {
+    const isCurrent = it.page !== void 0 && it.page === current2;
+    const btn = bar.createEl("button", {
+      cls: `accounting-nav-btn${isCurrent ? " accounting-nav-current" : ""}`
+    });
+    (0, import_obsidian5.setIcon)(btn, it.icon);
+    btn.createSpan({ text: it.label });
+    if (isCurrent) {
+      btn.disabled = true;
+    } else {
+      btn.onclick = () => it.run(it.page ? slideDirection(current2, it.page) : void 0);
+    }
+  }
+  return bar;
+}
+function renderBackBtn(container, onClose) {
+  container.querySelectorAll(".accounting-back-btn").forEach((el) => el.remove());
+  const btn = container.createEl("button", { text: t("nav.back"), cls: "accounting-back-btn" });
+  btn.onclick = () => onClose();
+  return btn;
+}
+function renderNavOrBack(container, page, navCtx, closeSelf, drillDown) {
+  if (drillDown) renderBackBtn(container, closeSelf);
+  else if (navCtx) renderNavBar(container, page, navCtx, closeSelf);
+}
 
 // src/accountPropertiesModal.ts
-var import_obsidian5 = require("obsidian");
-var AccountPropertiesModal = class extends import_obsidian5.Modal {
+var import_obsidian6 = require("obsidian");
+var AccountPropertiesModal = class extends import_obsidian6.Modal {
   constructor(app, adapter, account, accounts, categories, accountTypeSettings, onSaved) {
     super(app);
     this.adapter = adapter;
@@ -7052,7 +7176,7 @@ var AccountPropertiesModal = class extends import_obsidian5.Modal {
     } catch {
     }
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian5.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian6.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.addClass("accounting-adjust-modal");
     contentEl.createEl("div", { text: t("account.properties.title", { name: this.account.name }), cls: "accounting-adjust-title" });
     const nameRow = this.row(t("account.field.name"));
@@ -7244,12 +7368,12 @@ var AccountPropertiesModal = class extends import_obsidian5.Modal {
     const rateRaw = this.rateEl.value.trim();
     const rateNum = rateRaw ? Number(rateRaw) : Number.NaN;
     if (rateRaw && (!Number.isFinite(rateNum) || rateNum < 0 || rateNum > 100)) {
-      new import_obsidian5.Notice(t("account.err.rateRange"));
+      new import_obsidian6.Notice(t("account.err.rateRange"));
       return;
     }
     const effectiveName = this.nameEl.value.trim() || this.account.name;
     if (accountNameExists(this.accounts, effectiveName, this.account.id)) {
-      new import_obsidian5.Notice(t("account.err.nameExists"));
+      new import_obsidian6.Notice(t("account.err.nameExists"));
       return;
     }
     const edits = {
@@ -7274,7 +7398,7 @@ var AccountPropertiesModal = class extends import_obsidian5.Modal {
         accounts: this.accounts.map((a) => a.id === this.account.id ? updated : a),
         categories: this.categories
       });
-      new import_obsidian5.Notice(t("account.properties.savedNotif"));
+      new import_obsidian6.Notice(t("account.properties.savedNotif"));
       this.account = updated;
       this.onSaved();
       this.refillFrom(this.account);
@@ -7282,7 +7406,7 @@ var AccountPropertiesModal = class extends import_obsidian5.Modal {
       this.renderFooter();
       this.keyboardAvoidance?.reset();
     } catch (err) {
-      new import_obsidian5.Notice(t("entry.saveFailed", { msg: formatError(err) }));
+      new import_obsidian6.Notice(t("entry.saveFailed", { msg: formatError(err) }));
     }
   }
   onClose() {
@@ -7300,8 +7424,8 @@ function fmtTime(iso) {
 }
 
 // src/accountMergeModal.ts
-var import_obsidian6 = require("obsidian");
-var AccountMergeModal = class extends import_obsidian6.Modal {
+var import_obsidian7 = require("obsidian");
+var AccountMergeModal = class extends import_obsidian7.Modal {
   constructor(app, adapter, source, allAccounts, onDone) {
     super(app);
     this.adapter = adapter;
@@ -7316,7 +7440,7 @@ var AccountMergeModal = class extends import_obsidian6.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian6.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian7.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.createEl("h2", { text: t("account.merge.title") });
     contentEl.createEl("div", {
       text: t("account.merge.intro", { name: this.source.name }),
@@ -7376,7 +7500,7 @@ var AccountMergeModal = class extends import_obsidian6.Modal {
       const parts = [t("account.merge.resultRewritten", { n: plan.rewritten })];
       if (plan.deleted > 0) parts.push(t("account.merge.resultDeleted", { n: plan.deleted }));
       parts.push(t("account.merge.resultMerged", { source: this.source.name, target: targetName }));
-      new import_obsidian6.Notice(parts.join(t("account.merge.resultSep")));
+      new import_obsidian7.Notice(parts.join(t("account.merge.resultSep")));
       this.close();
       this.onDone();
     } catch (err) {
@@ -7391,8 +7515,8 @@ var AccountMergeModal = class extends import_obsidian6.Modal {
 };
 
 // src/accountActionModal.ts
-var AccountActionModal = class extends import_obsidian7.Modal {
-  constructor(app, adapter, account, accounts, categories, accountTypeSettings, navCtx, onSaved) {
+var AccountActionModal = class extends import_obsidian8.Modal {
+  constructor(app, adapter, account, accounts, categories, accountTypeSettings, navCtx, onSaved, closeSelf) {
     super(app);
     this.adapter = adapter;
     this.account = account;
@@ -7401,14 +7525,22 @@ var AccountActionModal = class extends import_obsidian7.Modal {
     this.accountTypeSettings = accountTypeSettings;
     this.navCtx = navCtx;
     this.onSaved = onSaved;
+    this.closeSelf = closeSelf;
   }
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian7.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian8.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.createEl("div", { text: this.account.name, cls: "accounting-action-title" });
     const list = contentEl.createDiv({ cls: "accounting-action-list" });
+    const entryItem = list.createEl("button", { cls: "accounting-action-item" });
+    entryItem.createEl("span", { text: t("account.action.entry"), cls: "accounting-action-item-text" });
+    entryItem.title = t("account.action.entryHint");
+    entryItem.onclick = () => {
+      this.close();
+      this.navCtx.openEntry(slideDirection("balance", "entry"), this.account.id, this.closeSelf);
+    };
     const txItem = list.createEl("button", { cls: "accounting-action-item" });
     txItem.createEl("span", { text: t("account.action.viewTx"), cls: "accounting-action-item-text" });
     txItem.title = t("account.action.viewTxHint");
@@ -7456,7 +7588,7 @@ var AccountActionModal = class extends import_obsidian7.Modal {
       const meta = await this.adapter.readMeta();
       const target = meta.accounts.find((a) => a.id === this.account.id);
       if (!target) {
-        new import_obsidian7.Notice(t("account.action.notFound"));
+        new import_obsidian8.Notice(t("account.action.notFound"));
         this.close();
         this.onSaved();
         return;
@@ -7465,11 +7597,11 @@ var AccountActionModal = class extends import_obsidian7.Modal {
         accounts: meta.accounts.map((a) => a.id === this.account.id ? { ...a, active } : a),
         categories: meta.categories
       });
-      new import_obsidian7.Notice(active ? t("account.action.enabledNotif", { name: target.name }) : t("account.action.hiddenNotif", { name: target.name }));
+      new import_obsidian8.Notice(active ? t("account.action.enabledNotif", { name: target.name }) : t("account.action.hiddenNotif", { name: target.name }));
       this.close();
       this.onSaved();
     } catch (err) {
-      new import_obsidian7.Notice(t("account.action.updateFailed", { msg: formatError(err) }));
+      new import_obsidian8.Notice(t("account.action.updateFailed", { msg: formatError(err) }));
     }
   }
   onClose() {
@@ -7478,8 +7610,8 @@ var AccountActionModal = class extends import_obsidian7.Modal {
 };
 
 // src/accountCreateModal.ts
-var import_obsidian8 = require("obsidian");
-var AccountCreateModal = class extends import_obsidian8.Modal {
+var import_obsidian9 = require("obsidian");
+var AccountCreateModal = class extends import_obsidian9.Modal {
   constructor(app, adapter, accounts, categories, accountTypeSettings, onSaved) {
     super(app);
     this.adapter = adapter;
@@ -7516,7 +7648,7 @@ var AccountCreateModal = class extends import_obsidian8.Modal {
     } catch {
     }
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian8.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian9.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.addClass("accounting-adjust-modal");
     bindEnterToBlur(contentEl);
     contentEl.createEl("div", { text: t("account.create.title"), cls: "accounting-adjust-title" });
@@ -7658,7 +7790,7 @@ var AccountCreateModal = class extends import_obsidian8.Modal {
   async submit() {
     const name = this.nameEl.value.trim();
     if (accountNameExists(this.accounts, name)) {
-      new import_obsidian8.Notice(t("account.err.nameExists"));
+      new import_obsidian9.Notice(t("account.err.nameExists"));
       return;
     }
     const type = this.typeEl.value;
@@ -7670,17 +7802,17 @@ var AccountCreateModal = class extends import_obsidian8.Modal {
     const billingDay = this.billingDayEl.value;
     const repaymentDay = this.repaymentEl.value;
     if (billingDay && (parseInt(billingDay) < 1 || parseInt(billingDay) > 31)) {
-      new import_obsidian8.Notice(t("account.err.billingDayRange"));
+      new import_obsidian9.Notice(t("account.err.billingDayRange"));
       return;
     }
     if (repaymentDay && (parseInt(repaymentDay) < 1 || parseInt(repaymentDay) > 31)) {
-      new import_obsidian8.Notice(t("account.err.repaymentDayRange"));
+      new import_obsidian9.Notice(t("account.err.repaymentDayRange"));
       return;
     }
     const rateRaw = this.rateEl.value.trim();
     const rateNum = rateRaw ? Number(rateRaw) : Number.NaN;
     if (rateRaw && (!Number.isFinite(rateNum) || rateNum < 0 || rateNum > 100)) {
-      new import_obsidian8.Notice(t("account.err.rateRange"));
+      new import_obsidian9.Notice(t("account.err.rateRange"));
       return;
     }
     const id = crypto.randomUUID();
@@ -7710,11 +7842,11 @@ var AccountCreateModal = class extends import_obsidian8.Modal {
         accounts: [...this.accounts, newAccount],
         categories: this.categories
       });
-      new import_obsidian8.Notice(t("account.createdNotif", { name }));
+      new import_obsidian9.Notice(t("account.createdNotif", { name }));
       this.onSaved();
       this.close();
     } catch (err) {
-      new import_obsidian8.Notice(t("account.createFailed", { msg: formatError(err) }));
+      new import_obsidian9.Notice(t("account.createFailed", { msg: formatError(err) }));
     }
   }
   onClose() {
@@ -7725,8 +7857,8 @@ var AccountCreateModal = class extends import_obsidian8.Modal {
 };
 
 // src/accountTargetModal.ts
-var import_obsidian9 = require("obsidian");
-var AccountTargetModal = class extends import_obsidian9.Modal {
+var import_obsidian10 = require("obsidian");
+var AccountTargetModal = class extends import_obsidian10.Modal {
   constructor(app, adapter, spec, existingTarget, allTargets, onSaved) {
     super(app);
     this.adapter = adapter;
@@ -7742,7 +7874,7 @@ var AccountTargetModal = class extends import_obsidian9.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian9.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian10.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.addClass("accounting-adjust-modal");
     contentEl.createDiv({ text: t("accountsPlan.editTitle", { name: this.spec.name }), cls: "accounting-adjust-title" });
     const current2 = contentEl.createDiv({ cls: "accounting-adjust-current" });
@@ -7857,7 +7989,7 @@ var AccountTargetModal = class extends import_obsidian9.Modal {
 };
 
 // src/adjustBalanceModal.ts
-var import_obsidian10 = require("obsidian");
+var import_obsidian11 = require("obsidian");
 
 // src/helpDisclosure.ts
 var activeHeaderHelp = null;
@@ -7941,7 +8073,7 @@ function createDateField(opts) {
 }
 
 // src/adjustBalanceModal.ts
-var AdjustBalanceModal = class extends import_obsidian10.Modal {
+var AdjustBalanceModal = class extends import_obsidian11.Modal {
   constructor(app, adapter, account, currentBalance, accounts, categories, onSubmitted) {
     super(app);
     this.adapter = adapter;
@@ -7965,7 +8097,7 @@ var AdjustBalanceModal = class extends import_obsidian10.Modal {
     const { contentEl } = this;
     contentEl.empty();
     this.modalEl.addClass("accounting-sub-modal");
-    if (!import_obsidian10.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
+    if (!import_obsidian11.Platform.isMobile) this.modalEl.addClass("accounting-desktop");
     contentEl.addClass("accounting-adjust-modal");
     const titleRow = contentEl.createDiv({ cls: "accounting-adjust-title-row" });
     titleRow.createEl("div", {
@@ -8230,7 +8362,7 @@ var ExpectedYieldRenderer = class {
       const onGroupClick = () => {
         const acct = this.ctx.accounts.find((a) => a.id === g.accountId);
         if (!acct) return;
-        new AccountActionModal(this.ctx.app, this.ctx.adapter, acct, this.ctx.accounts, this.ctx.categories, this.ctx.accountTypeSettings, this.ctx.navCtx, this.ctx.onDataChanged).open();
+        new AccountActionModal(this.ctx.app, this.ctx.adapter, acct, this.ctx.accounts, this.ctx.categories, this.ctx.accountTypeSettings, this.ctx.navCtx, this.ctx.onDataChanged, this.ctx.closeParent).open();
       };
       if (g.items.length > 0) {
         const row = tbl.createDiv({ cls: "accounting-yield-group" });
@@ -8464,7 +8596,7 @@ var ExpectedYieldRenderer = class {
     nameRow.onclick = () => {
       const acct = this.ctx.accounts.find((a) => a.id === item.accountId);
       if (!acct) return;
-      new AccountActionModal(this.ctx.app, this.ctx.adapter, acct, this.ctx.accounts, this.ctx.categories, this.ctx.accountTypeSettings, this.ctx.navCtx, this.ctx.onDataChanged).open();
+      new AccountActionModal(this.ctx.app, this.ctx.adapter, acct, this.ctx.accounts, this.ctx.categories, this.ctx.accountTypeSettings, this.ctx.navCtx, this.ctx.onDataChanged, this.ctx.closeParent).open();
     };
     const principal = item.currency !== this.ctx.baseCurrency ? `${formatMoneyInt(item.principal, this.ctx.baseCurrency)} (${formatMoneyInt(item.principalNative, item.currency)})` : formatMoneyInt(item.principal, this.ctx.baseCurrency);
     row.createEl("span", { text: principal, cls: "accounting-yield-cell accounting-yield-cell-principal" });
@@ -8499,124 +8631,6 @@ var ExpectedYieldRenderer = class {
     return null;
   }
 };
-
-// src/navBar.ts
-var import_obsidian11 = require("obsidian");
-var inAppSettingsHidden = false;
-function setInAppSettingsHidden(hidden) {
-  inAppSettingsHidden = hidden;
-}
-function isInAppSettingsHidden() {
-  return inAppSettingsHidden;
-}
-function navIndex(p) {
-  switch (p) {
-    case "entry":
-      return 0;
-    case "list":
-    case "detail":
-      return 1;
-    case "balance":
-      return 2;
-    case "report":
-      return 3;
-    case "settings":
-      return 4;
-  }
-}
-function slideDirection(from, to) {
-  return navIndex(to) >= navIndex(from) ? "right" : "left";
-}
-function prepareModalContainer(container) {
-  container.addClass("accounting-app");
-  container.style.transition = "none";
-  container.style.animation = "none";
-  container.style.transform = "none";
-  container.style.position = "fixed";
-  container.style.inset = "0";
-  container.style.width = "100vw";
-  container.style.height = "100vh";
-  container.style.maxWidth = "100vw";
-  container.style.maxHeight = "100vh";
-  container.style.overflow = "hidden";
-  const modalEl = container.querySelector(".modal");
-  if (modalEl) {
-    const m = modalEl;
-    m.style.transition = "none";
-    m.style.animation = "none";
-    m.style.transform = "none";
-    m.style.width = "100vw";
-    m.style.height = "100vh";
-    m.style.maxWidth = "100vw";
-    m.style.maxHeight = "100vh";
-    m.style.borderRadius = "0";
-    m.style.margin = "0";
-    m.style.overflow = "hidden";
-  }
-}
-function slideClass(slide) {
-  if (!slide) return void 0;
-  return slide === "right" ? "accounting-slide-right" : "accounting-slide-left";
-}
-function presetModalChrome(modalEl, containerEl) {
-  modalEl.addClass("accounting-fullscreen");
-  if (!import_obsidian11.Platform.isMobile) modalEl.addClass("accounting-desktop");
-  containerEl.addClass("accounting-app");
-  const m = modalEl;
-  const c = containerEl;
-  m.style.animation = "none";
-  m.style.transition = "none";
-  c.style.animation = "none";
-  c.style.transition = "none";
-}
-function renderNavBar(container, current2, ctx, closeSelf) {
-  container.querySelectorAll(".accounting-nav-bar").forEach((el) => el.remove());
-  const bar = container.createDiv({ cls: "accounting-nav-bar" });
-  const items = [
-    // 切换一律「先开新页、后关旧页」：关旧页统一推迟到新页 onOpen（onOpened 回调），此时新容器已全屏化（遮罩铺满），
-    // 旧页在下层 detach 不露底层。移动端 Modal.open 非同步挂载，若 open 后立即 closeSelf 会在新页挂载前露底。
-    { label: t("nav.entry"), icon: "pencil", page: "entry", run: (s) => {
-      ctx.openEntry(s, closeSelf);
-    } },
-    { label: t("nav.list"), icon: "list", page: "list", run: (s) => {
-      ctx.openList(void 0, s, void 0, void 0, void 0, closeSelf);
-    } },
-    { label: t("nav.accounts"), icon: "wallet", page: "balance", run: (s) => {
-      ctx.openBalance(s, closeSelf);
-    } },
-    { label: t("nav.dashboard"), icon: "bar-chart-2", page: "report", run: (s) => {
-      ctx.openReport(s, closeSelf);
-    } },
-    { label: t("nav.settings"), icon: "settings", page: "settings", run: (s) => {
-      ctx.openSettings(s, closeSelf);
-    } }
-  ];
-  const visibleItems = inAppSettingsHidden ? items.filter((it) => it.page !== "settings") : items;
-  for (const it of visibleItems) {
-    const isCurrent = it.page !== void 0 && it.page === current2;
-    const btn = bar.createEl("button", {
-      cls: `accounting-nav-btn${isCurrent ? " accounting-nav-current" : ""}`
-    });
-    (0, import_obsidian11.setIcon)(btn, it.icon);
-    btn.createSpan({ text: it.label });
-    if (isCurrent) {
-      btn.disabled = true;
-    } else {
-      btn.onclick = () => it.run(it.page ? slideDirection(current2, it.page) : void 0);
-    }
-  }
-  return bar;
-}
-function renderBackBtn(container, onClose) {
-  container.querySelectorAll(".accounting-back-btn").forEach((el) => el.remove());
-  const btn = container.createEl("button", { text: t("nav.back"), cls: "accounting-back-btn" });
-  btn.onclick = () => onClose();
-  return btn;
-}
-function renderNavOrBack(container, page, navCtx, closeSelf, drillDown) {
-  if (drillDown) renderBackBtn(container, closeSelf);
-  else if (navCtx) renderNavBar(container, page, navCtx, closeSelf);
-}
 
 // src/swipeTabs.ts
 var import_obsidian12 = require("obsidian");
@@ -8832,7 +8846,9 @@ var BalanceModal = class extends import_obsidian13.Modal {
         navCtx: this.navCtx,
         // 账户操作弹窗改动数据（接余额/改属性/隐藏）→ 重读盘；排序等纯视图变更 → 用缓存重绘
         onDataChanged: () => void this.refresh(),
-        rerender: () => this.renderView()
+        rerender: () => this.renderView(),
+        // 账户菜单「记一笔」跳到记账页时关闭本页（顶层页导航）
+        closeParent: () => this.close()
       }, this.yieldState);
       return;
     }
@@ -9337,7 +9353,9 @@ var BalanceModal = class extends import_obsidian13.Modal {
       snap.categories,
       this.accountTypeSettings,
       this.navCtx,
-      () => this.refresh()
+      () => this.refresh(),
+      // 「记一笔」跳记账页（顶层页导航）：父页余额页不预关，由新页 onOpen 回调关闭
+      () => this.close()
     ).open();
   }
   /** 单个账户行。parentIds 由 renderGroups 组级构建传入（◆ 标记用）。 */
@@ -9514,7 +9532,7 @@ function fitNoteTextareaHeight(ta) {
   ta.style.height = `${Math.min(ta.scrollHeight, cap)}px`;
 }
 var EntryModal = class extends import_obsidian14.Modal {
-  constructor(app, adapter, accounts, categories, onSubmitted, initialTx, isCopy = true, navCtx, slide, onSwitchLedger, recurring, onRecurringSaved, onOpened) {
+  constructor(app, adapter, accounts, categories, onSubmitted, initialTx, isCopy = true, navCtx, slide, onSwitchLedger, recurring, onRecurringSaved, onOpened, presetAccountId) {
     super(app);
     this.adapter = adapter;
     this.accounts = accounts;
@@ -9526,6 +9544,7 @@ var EntryModal = class extends import_obsidian14.Modal {
     this.recurring = recurring;
     this.onRecurringSaved = onRecurringSaved;
     this.onOpened = onOpened;
+    this.presetAccountId = presetAccountId;
     this.isCopy = isCopy;
     this.originalTxId = initialTx?.id;
     this.state = initialTx ? this.txToState(initialTx) : {
@@ -9754,10 +9773,17 @@ var EntryModal = class extends import_obsidian14.Modal {
       return;
     }
     if (!this.accountTouched) {
-      const id = inferDefaultAccount(this.transactions, this.accounts, { type: this.state.type });
-      if (id) {
-        this.state.account = id;
+      const preset = this.presetAccountId && this.accounts.some((a) => a.id === this.presetAccountId) ? this.presetAccountId : void 0;
+      if (preset) {
+        this.state.account = preset;
+        this.accountTouched = true;
         this.applyRatePrefill();
+      } else {
+        const id = inferDefaultAccount(this.transactions, this.accounts, { type: this.state.type });
+        if (id) {
+          this.state.account = id;
+          this.applyRatePrefill();
+        }
       }
     }
     const tp = this.state.type;
@@ -9845,6 +9871,32 @@ var EntryModal = class extends import_obsidian14.Modal {
     input.addEventListener("input", () => this.state.rate = input.value);
     row.createEl("div", { text: t("entry.rateHint"), cls: "accounting-entry-hint" });
   }
+  /** 转账「⇅ 交换」按钮：夹在转出/转入两行之间。行高 0 不占布局，按钮绝对定位浮在两行
+   *  既有 12px 间隙上（中心对准间隙中点），水平对齐左侧 64px 标题文字列，纯符号无底色。
+   *  交换即用户明确指定：touched 置位，后续切类型/推断不再覆盖。
+   *  跨币种时 amount 记的是转出侧币种，需与 toAmount 对调——否则同一数值会被按新账户币种重新解释。 */
+  renderSwapRow(wrap) {
+    const row = wrap.createDiv({ cls: "accounting-entry-row accounting-entry-swap-row" });
+    const btn = row.createEl("button", { text: "\u21C5", cls: "accounting-entry-swap-btn" });
+    btn.title = t("entry.swapAccounts");
+    btn.setAttribute("aria-label", t("entry.swapAccounts"));
+    btn.onclick = () => {
+      const s = this.state;
+      const cross = !!s.fromAccount && !!s.toAccount && this.fromCurrency() !== this.toCurrency();
+      const from = s.fromAccount;
+      s.fromAccount = s.toAccount;
+      s.toAccount = from;
+      this.fromTouched = true;
+      this.toTouched = true;
+      if (cross) {
+        const amt = s.amount;
+        s.amount = s.toAmount;
+        s.toAmount = amt;
+        this.syncAmount(s.amount);
+      }
+      this.rerender();
+    };
+  }
   /** transfer 跨币种时渲染转入金额输入行 + 只读隐含汇率 */
   renderToAmountRow(wrap) {
     if (!this.state.fromAccount || !this.state.toAccount) return;
@@ -9926,6 +9978,7 @@ var EntryModal = class extends import_obsidian14.Modal {
         }
         this.rerender();
       }, void 0, odFor(s.fromAccount));
+      this.renderSwapRow(wrap);
       this.accountSelectRow(wrap, t("entry.field.toAccount"), s.toAccount, includeHidden, (v) => {
         this.toTouched = true;
         s.toAccount = v;
@@ -12724,16 +12777,16 @@ var TransactionListModal = class extends import_obsidian20.Modal {
 function openList(app, adapter, navCtx, presetAccountId, slide, presetRecurringRuleId, drillDown, drill, onDataChanged, onSwitchLedger, onOpened) {
   new TransactionListModal(app, adapter, presetAccountId, navCtx, slide, presetRecurringRuleId, drillDown, drill, onDataChanged, onSwitchLedger, onOpened).open();
 }
-async function openEntry(app, adapter, afterSubmit, navCtx, slide, onSwitchLedger, onRecurringSaved, onOpened) {
+async function openEntry(app, adapter, afterSubmit, navCtx, slide, onSwitchLedger, onRecurringSaved, onOpened, presetAccountId) {
   const meta = await adapter.readMeta();
   new EntryModal(
     app,
     adapter,
     meta.accounts,
     meta.categories,
-    (_newTxId, presetAccountId) => {
+    (_newTxId, savedAccountId) => {
       afterSubmit?.();
-      openList(app, adapter, navCtx, presetAccountId, void 0);
+      openList(app, adapter, navCtx, savedAccountId, void 0);
     },
     void 0,
     true,
@@ -12742,7 +12795,8 @@ async function openEntry(app, adapter, afterSubmit, navCtx, slide, onSwitchLedge
     onSwitchLedger,
     void 0,
     onRecurringSaved,
-    onOpened
+    onOpened,
+    presetAccountId
   ).open();
 }
 function openBalance(app, adapter, navCtx, slide, onSwitchLedger, onOpened) {
@@ -15364,8 +15418,8 @@ var AccountingPlugin = class extends import_obsidian24.Plugin {
   navCtx(adapter) {
     return {
       openList: (accountId, slide, drillDown, drill, onDataChanged, onOpened) => openList(this.app, adapter, this.navCtx(adapter), accountId, slide, void 0, drillDown, drill, onDataChanged, this.switchLedgerAndReopenList, onOpened),
-      openEntry: (slide, onOpened) => {
-        void openEntry(this.app, adapter, void 0, this.navCtx(adapter), slide, this.switchLedgerAndReopen, () => this.settingsTab.showRecurring(), onOpened);
+      openEntry: (slide, presetAccountId, onOpened) => {
+        void openEntry(this.app, adapter, void 0, this.navCtx(adapter), slide, this.switchLedgerAndReopen, () => this.settingsTab.showRecurring(), onOpened, presetAccountId);
       },
       openBalance: (slide, onOpened) => openBalance(this.app, adapter, this.navCtx(adapter), slide, this.switchLedgerAndReopenBalance, onOpened),
       openReport: (slide, onOpened) => openReport(this.app, adapter, this.navCtx(adapter), slide, this.switchLedgerAndReopenReport, onOpened),

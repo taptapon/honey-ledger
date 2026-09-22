@@ -240,6 +240,39 @@
   margin-bottom: 0;
 }
 
+/* 转账「⇅ 交换」按钮：夹在转出/转入两行之间。行高 0 不占布局，按钮绝对定位浮在两行
+   既有 12px 间隙上，水平对齐左侧 64px 标题文字列（即两个标题文字之间），纯符号无胶囊。
+   两行间隙整体在行界上方，间隙中点 = 行界上方 6px：按钮高 18px → top = -6 - 9 = -15px。 */
+.accounting-entry-swap-row {
+  position: relative;
+  height: 0;
+  margin-bottom: 0;
+}
+
+.accounting-entry-swap-row .accounting-entry-swap-btn {
+  position: absolute;
+  top: -15px;
+  left: 0;
+  width: 64px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 18px;
+  text-align: center;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .accounting-entry-swap-row .accounting-entry-swap-btn:hover {
+    background: none;
+    color: var(--text-normal);
+  }
+}
+
 .accounting-entry-label {
   flex: 0 0 64px;
   font-size: var(--font-ui-smaller);
