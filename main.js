@@ -11198,8 +11198,11 @@ var SettingsModal = class extends import_obsidian16.Modal {
   closing = false;
   /** 移动端左右轻扫切顶部设置 tab；onOpen 绑定、onClose 解绑。 */
   swipeTabs;
-  /** 是否处于打开态（main.ts 切账本就地 reattach 前判定：关闭后回退到重开）。 */
-  get isOpen() {
+  /** 是否处于打开态（main.ts 切账本就地 reattach 前判定：关闭后回退到重开）。
+   *  ⚠️ 不可叫 isOpen：Obsidian 新版把基类 Modal.isOpen 改为只读访问器，构造函数会赋值
+   *  this.isOpen，子类同名 getter-only 访问器会让该赋值抛 TypeError（Modal 挂载前即炸、
+   *  表现为「点设置无反应」）；自定义访问器必须避开基类属性名。 */
+  get settingsOpen() {
     return this.opened;
   }
   /** 切账本就地刷新：重绑 navCtx（底部导航条用新 adapter）+ 各 panel refreshAllPanels 就地刷新数据。
@@ -15625,7 +15628,7 @@ var AccountingPlugin = class extends import_obsidian24.Plugin {
   switchLedgerAndReopenSettings = async (newSubdir, onOpened) => {
     if (!await this.gateAndSwitch(newSubdir)) return;
     const modal = this.currentSettingsModal;
-    if (modal?.isOpen) {
+    if (modal?.settingsOpen) {
       modal.reattach(this.navCtx(this.adapter()));
       return;
     }
